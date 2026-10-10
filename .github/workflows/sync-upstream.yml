@@ -1,0 +1,102 @@
+name: Sync upstream
+
+# Keeps this fork aligned with lladlam/MeloX-Android.
+#
+# Each run: fetch upstream main -> merge into this repository's main ->
+# build (unit tests + debug APK) -> push only after the build passed ->
+# publish the APK to the `dev-latest` prerelease.
+#
+# A merge conflict fails the job before anything is pushed, so local
+# patches are never overwritten: resolve the conflict locally and push.
+#
+# Pushing with the default GITHUB_TOKEN does not trigger other workflows
+# (GitHub blocks recursive triggers), which is why this workflow runs the
+# build and the release upload itself instead of relying on build.yml.
+# A human push to main still triggers build.yml as usual.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # daily 03:00 UTC (11:00 Beijing time)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the merge sees both sides.
+          fetch-depth: 0
+          ref: main
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          git remote add upstream https://github.com/lladlam/MeloX-Android.git
+          git fetch --no-tags upstream main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          before=$(git rev-parse HEAD)
+          git merge upstream/main --no-edit \
+            -m "chore: sync upstream main @ $(git rev-parse --short upstream/main)"
+          after=$(git rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "Already up to date with upstream."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 17
+        if: steps.merge.outputs.changed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        if: steps.merge.outputs.changed == 'true'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+
+      - name: Build and test
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2
+
+      - name: Push merged main
+        if: steps.merge.outputs.changed == 'true'
+        # Fails safely on a non-fast-forward push (someone pushed while
+        # this job was running) instead of overwriting their commits.
+        run: git push origin HEAD:main
+
+      - name: Publish rolling debug release
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/MeloX-Android-debug.apk
+          gh release view dev-latest --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
+            || gh release create dev-latest --repo "${GITHUB_REPOSITORY}" \
+              --prerelease --title "Development build" \
+              --notes "Rolling debug build synced from upstream, overwritten on every sync."
+          gh release upload dev-latest /tmp/MeloX-Android-debug.apk --repo "${GITHUB_REPOSITORY}" --clobber

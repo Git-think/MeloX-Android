@@ -319,9 +319,9 @@
     <string name="provider_third_party_consent_hint">先にサードパーティのソース利用条件に同意する必要があります。クラウド管理の対象ではありません。</string>
     <string name="provider_membership_fallback">会員限定の曲にのみ使用</string>
     <string name="provider_membership_fallback_subtitle">公式ソースを優先し、会員資格や権利で再生できないときだけサードパーティの解決を試します</string>
-    <string name="provider_chksz">CHKSZ リゾルバー</string>
+    <string name="provider_chksz">Fuck Netease リゾルバー</string>
     <string name="provider_chksz_missing">APIキーなし · タップして設定</string>
-    <string name="provider_chksz_configured">CHKSZ の APIキーを設定済み</string>
+    <string name="provider_chksz_configured">Fuck Netease の APIキーを設定済み</string>
     <string name="provider_view_third_party_terms">サードパーティのソース利用条件を見る</string>
     <string name="provider_third_party_terms_subtitle">責任、コンテンツのルール、利用可否</string>
     <string name="provider_added_sources">追加済みのソース</string>
@@ -352,8 +352,9 @@
     <string name="provider_connecting">接続しています…</string>
     <string name="provider_connect">接続</string>
     <string name="provider_chksz_title">NetEase SVIP 音源リゾルバー</string>
-    <string name="provider_chksz_body">api.chksz.com の NetEase、QQ Music、Kugou リゾルバーを使います。api.chksz.com で登録し、ログイン後に個人 API キーをコピーしてください。現在、登録は LinuxDo ユーザーに限られています。API キーはこのデバイスに保存され、MeloX のクラウド制御には含まれません。</string>
+    <string name="provider_chksz_body">api.chksz.com の NetEase、QQ Music、Kugou リゾルバーを使います。api.chksz.com で登録し、ログイン後に個人 API キーをコピーしてください。現在、登録は LinuxDo ユーザーに限られています。API Base URL も互換のある任意のエンドポイントに変更できます。API キーはこのデバイスに保存され、MeloX のクラウド制御には含まれません。</string>
     <string name="provider_api_key_placeholder">個人 API キーを入力</string>
+    <string name="provider_chksz_base_url">API Base URL</string>
     <string name="provider_clear">消去</string>
     <string name="provider_save">保存</string>
     <string name="provider_scanned_count">ローカルの曲を %1$d 件スキャンしました</string>

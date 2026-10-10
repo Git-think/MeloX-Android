@@ -48,7 +48,7 @@ import com.lladlam.melox.core.music.provider.MusicProviderSelectionStore
 import com.lladlam.melox.core.music.provider.ProviderAccountManager
 import com.lladlam.melox.core.music.provider.ThirdPartyMusicSourceConsentStore
 import com.lladlam.melox.core.provider.lxuser.LxUserSourceStore
-import com.lladlam.melox.core.provider.lxuser.ChkszApiKeyStore
+import com.lladlam.melox.core.provider.lxuser.ChkszConfigStore
 import com.lladlam.melox.core.provider.jellyfin.JellyfinApiClient
 import com.lladlam.melox.core.provider.jellyfin.JellyfinSessionStore
 import com.lladlam.melox.core.provider.local.LocalMediaScanner
@@ -113,7 +113,9 @@ fun ProviderServicesScreen(
     var showLxImportDialog by remember { mutableStateOf(false) }
     var lxImportUrl by remember { mutableStateOf("") }
     var lxImportError by remember { mutableStateOf<String?>(null) }
-    var chkszApiKey by remember { mutableStateOf(ChkszApiKeyStore.read(context)) }
+    var chkszApiKey by remember { mutableStateOf(ChkszConfigStore.readApiKey(context)) }
+    var chkszBaseUrl by remember { mutableStateOf(ChkszConfigStore.readBaseUrl(context)) }
+    var chkszError by remember { mutableStateOf<String?>(null) }
     var showChkszKeyDialog by remember { mutableStateOf(false) }
     var showJellyfinDialog by remember { mutableStateOf(false) }
     var jellyfinServerUrl by remember { mutableStateOf(JellyfinSessionStore.read(context).serverUrl) }
@@ -432,9 +434,13 @@ fun ProviderServicesScreen(
                 )
                 MeloXIosListRow(
                     title = stringResource(R.string.provider_chksz),
-                    subtitle = if (chkszApiKey.isBlank()) stringResource(R.string.provider_chksz_missing) else stringResource(R.string.provider_chksz_configured),
+                    subtitle = when {
+                        chkszApiKey.isBlank() -> stringResource(R.string.provider_chksz_missing)
+                        chkszBaseUrl != ChkszConfigStore.DefaultBaseUrl -> chkszBaseUrl
+                        else -> stringResource(R.string.provider_chksz_configured)
+                    },
                     leading = { Spacer(Modifier.width(25.dp)) },
-                    onClick = { showChkszKeyDialog = true },
+                    onClick = { chkszError = null; showChkszKeyDialog = true },
                 )
                 MeloXIosListRow(
                     title = stringResource(R.string.provider_view_third_party_terms),
@@ -671,7 +677,7 @@ fun ProviderServicesScreen(
         }
     }
     if (showChkszKeyDialog) {
-        MeloXGlassDialog(visible = true, onDismiss = { showChkszKeyDialog = false }) {
+        MeloXGlassDialog(visible = true, onDismiss = { chkszError = null; showChkszKeyDialog = false }) {
             Text(stringResource(R.string.provider_chksz_title), style = MaterialTheme.typography.titleLarge)
             Text(
                 stringResource(R.string.provider_chksz_body),
@@ -686,11 +692,28 @@ fun ProviderServicesScreen(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 placeholder = { Text(stringResource(R.string.provider_api_key_placeholder)) },
             )
+            Text(
+                stringResource(R.string.provider_chksz_base_url),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+            )
+            MeloXGlassTextField(
+                value = chkszBaseUrl,
+                onValueChange = { chkszBaseUrl = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                placeholder = { Text(ChkszConfigStore.DefaultBaseUrl) },
+            )
+            chkszError?.let {
+                Text(it, Modifier.padding(top = 7.dp), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MeloXGlassButton(
                     onClick = {
-                        ChkszApiKeyStore.clear(context)
+                        ChkszConfigStore.clear(context)
                         chkszApiKey = ""
+                        chkszBaseUrl = ChkszConfigStore.DefaultBaseUrl
+                        chkszError = null
                         showChkszKeyDialog = false
                     },
                     modifier = Modifier.weight(1f),
@@ -698,9 +721,17 @@ fun ProviderServicesScreen(
                 ) { Text(stringResource(R.string.provider_clear)) }
                 MeloXGlassButton(
                     onClick = {
-                        ChkszApiKeyStore.write(context, chkszApiKey)
-                        chkszApiKey = ChkszApiKeyStore.read(context)
-                        showChkszKeyDialog = false
+                        val baseUrl = chkszBaseUrl.trim()
+                        if (baseUrl.isNotEmpty() && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                            chkszError = context.getString(R.string.provider_invalid_http)
+                        } else {
+                            ChkszConfigStore.writeApiKey(context, chkszApiKey)
+                            ChkszConfigStore.writeBaseUrl(context, baseUrl)
+                            chkszApiKey = ChkszConfigStore.readApiKey(context)
+                            chkszBaseUrl = ChkszConfigStore.readBaseUrl(context)
+                            chkszError = null
+                            showChkszKeyDialog = false
+                        }
                     },
                     modifier = Modifier.weight(1f),
                     style = MeloXGlassButtonStyle.BorderedProminent,

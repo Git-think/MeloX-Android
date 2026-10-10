@@ -319,9 +319,9 @@
     <string name="provider_third_party_consent_hint">You need to accept the third-party source terms first. This is not managed by cloud control.</string>
     <string name="provider_membership_fallback">Use only for membership tracks</string>
     <string name="provider_membership_fallback_subtitle">Prefer the official source, and try a third-party resolver only when membership or rights block playback</string>
-    <string name="provider_chksz">CHKSZ resolver</string>
+    <string name="provider_chksz">Fuck Netease resolver</string>
     <string name="provider_chksz_missing">No API key · tap to set one</string>
-    <string name="provider_chksz_configured">CHKSZ API key is set</string>
+    <string name="provider_chksz_configured">Fuck Netease API key is set</string>
     <string name="provider_view_third_party_terms">View third-party source terms</string>
     <string name="provider_third_party_terms_subtitle">Responsibility, content rules, and availability</string>
     <string name="provider_added_sources">Added sources</string>
@@ -352,8 +352,9 @@
     <string name="provider_connecting">Connecting…</string>
     <string name="provider_connect">Connect</string>
     <string name="provider_chksz_title">NetEase SVIP audio resolver</string>
-    <string name="provider_chksz_body">Uses the NetEase, QQ Music, and Kugou resolvers at api.chksz.com. Register at api.chksz.com and copy your personal API key after signing in. Registration is currently limited to LinuxDo users. The API key stays on this device and is not part of MeloX cloud control.</string>
+    <string name="provider_chksz_body">Uses the NetEase, QQ Music, and Kugou resolvers at api.chksz.com. Register at api.chksz.com and copy your personal API key after signing in. Registration is currently limited to LinuxDo users. The API base URL can also point to any compatible endpoint. The API key stays on this device and is not part of MeloX cloud control.</string>
     <string name="provider_api_key_placeholder">Enter your personal API key</string>
+    <string name="provider_chksz_base_url">API base URL</string>
     <string name="provider_clear">Clear</string>
     <string name="provider_save">Save</string>
     <string name="provider_scanned_count">Scanned %1$d local songs</string>
