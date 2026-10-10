@@ -1,0 +1,131 @@
+name: Mirror upstream releases
+
+# Mirrors lladlam's versioned releases (e.g. 0.6.2) onto this fork: checks out
+# the upstream tag, builds it with :app:assembleRelease, and publishes it with
+# the same tag, title, notes and prerelease flag, asset named
+# MeloX-Android-<tag>.apk just like upstream. Only the newest upstream release
+# that is missing on this fork is processed per run. The rolling `dev-latest`
+# debug build is handled by build.yml / sync-upstream.yml instead.
+#
+# Release signing comes from repository secrets and maps onto the gradle
+# properties meloxReleaseStoreFile/StorePassword/KeyAlias/KeyPassword declared
+# in android/app/build.gradle.kts. Without the secrets the job fails with
+# instructions instead of publishing an unsigned APK. A signed build produces
+# app-release.apk while an unsigned one is app-release-unsigned.apk, so the
+# publish step checks the signed file name as proof signing was applied.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *" # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-releases
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Find latest upstream release missing here
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          upstream_json=$(gh api "repos/lladlam/MeloX-Android/releases?per_page=30")
+          tag=$(jq -r '[.[] | select(.draft == false) | select(.tag_name != "dev-latest")][0].tag_name // empty' <<<"$upstream_json")
+          if [ -z "$tag" ]; then
+            echo "No upstream versioned release found."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" >/dev/null 2>&1; then
+            echo "Upstream ${tag} is already mirrored on this fork."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          title=$(jq -r --arg t "$tag" '[.[] | select(.tag_name == $t)][0].name // empty' <<<"$upstream_json")
+          prerelease=$(jq -r --arg t "$tag" '[.[] | select(.tag_name == $t)][0].prerelease' <<<"$upstream_json")
+          jq -r --arg t "$tag" '[.[] | select(.tag_name == $t)][0].body // ""' <<<"$upstream_json" > "$RUNNER_TEMP/release-notes.md"
+          {
+            echo "tag=${tag}"
+            echo "title=${title}"
+            echo "prerelease=${prerelease}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Will mirror upstream ${tag} (prerelease=${prerelease})."
+
+      - name: Check out upstream tag
+        if: steps.find.outputs.tag != ''
+        run: |
+          git remote add upstream https://github.com/lladlam/MeloX-Android.git
+          git fetch --no-tags upstream tag "${{ steps.find.outputs.tag }}"
+          git checkout --detach "${{ steps.find.outputs.tag }}"
+
+      - name: Set up JDK 17
+        if: steps.find.outputs.tag != ''
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        if: steps.find.outputs.tag != ''
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        if: steps.find.outputs.tag != ''
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+
+      - name: Build signed release APK
+        if: steps.find.outputs.tag != ''
+        env:
+          MELOX_RELEASE_KEYSTORE_B64: ${{ secrets.MELOX_RELEASE_KEYSTORE_B64 }}
+          ORG_GRADLE_PROJECT_meloxReleaseStorePassword: ${{ secrets.MELOX_RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_meloxReleaseKeyAlias: ${{ secrets.MELOX_RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_meloxReleaseKeyPassword: ${{ secrets.MELOX_RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$MELOX_RELEASE_KEYSTORE_B64" ] || [ -z "$ORG_GRADLE_PROJECT_meloxReleaseStorePassword" ] \
+            || [ -z "$ORG_GRADLE_PROJECT_meloxReleaseKeyAlias" ] || [ -z "$ORG_GRADLE_PROJECT_meloxReleaseKeyPassword" ]; then
+            echo "::error::Signing secrets are missing. Add MELOX_RELEASE_KEYSTORE_B64, MELOX_RELEASE_STORE_PASSWORD, MELOX_RELEASE_KEY_ALIAS and MELOX_RELEASE_KEY_PASSWORD under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/melox-release.jks"
+          echo "$MELOX_RELEASE_KEYSTORE_B64" | base64 -d > "$keystore"
+          export ORG_GRADLE_PROJECT_meloxReleaseStoreFile="$keystore"
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=2
+
+      - name: Publish mirrored release
+        if: steps.find.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.find.outputs.tag }}
+          TITLE: ${{ steps.find.outputs.title }}
+          PRERELEASE: ${{ steps.find.outputs.prerelease }}
+        run: |
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$apk" ]; then
+            echo "::error::Signed app-release.apk not found; the signing config was not applied."
+            ls -l android/app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          cp "$apk" "/tmp/MeloX-Android-${TAG}.apk"
+          args=(--repo "${GITHUB_REPOSITORY}" --title "${TITLE}" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "/tmp/MeloX-Android-${TAG}.apk" "${args[@]}"
