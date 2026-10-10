@@ -5,7 +5,9 @@ name: Mirror upstream releases
 # stay on top and a conflict fails the job instead of overwriting anything),
 # builds :app:assembleRelease from that result, and publishes it with the same
 # tag, title, notes and prerelease flag, asset named MeloX-Android-<tag>.apk
-# just like upstream. Only the newest upstream release that is missing on this
+# just like upstream. The APK SHA-256 and signing certificate fingerprint in
+# the copied release notes are rewritten to this fork's actual values.
+# Only the newest upstream release that is missing on this
 # fork is processed per run. The merged main is intentionally not pushed here;
 # pushing stays with sync-upstream.yml. The rolling `dev-latest` debug build is
 # handled by build.yml / sync-upstream.yml instead.
@@ -132,6 +134,27 @@ jobs:
             exit 1
           fi
           cp "$apk" "/tmp/MeloX-Android-${TAG}.apk"
+          # The notes copied from upstream carry the upstream APK's SHA-256 and
+          # release certificate fingerprint; replace both with this fork's build
+          # so the published artifact section stays truthful.
+          new_sha=$(sha256sum "$apk" | awk '{print $1}')
+          bt="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/37.0.0"
+          new_cert=$("$bt/apksigner" verify --print-certs "$apk" \
+            | sed -n 's/.*SHA-256 digest: \([0-9A-Fa-f:]*\).*/\1/p' | head -1 | tr 'a-f' 'A-F')
+          if [ -z "$new_cert" ]; then
+            echo "::error::Could not read the signing certificate fingerprint from $bt/apksigner."
+            exit 1
+          fi
+          if grep -qE '[0-9a-fA-F]{64}' "$RUNNER_TEMP/release-notes.md"; then
+            sed -E -i "s/[0-9a-fA-F]{64}/${new_sha}/g" "$RUNNER_TEMP/release-notes.md"
+          fi
+          if grep -qE '([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}' "$RUNNER_TEMP/release-notes.md"; then
+            sed -E -i "s/([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}/${new_cert}/g" "$RUNNER_TEMP/release-notes.md"
+          fi
+          grep -q "$new_sha" "$RUNNER_TEMP/release-notes.md" \
+            || echo "::warning::Release notes contain no SHA-256 placeholder; left untouched."
+          echo "APK sha256=${new_sha}"
+          echo "APK cert SHA-256=${new_cert}"
           args=(--repo "${GITHUB_REPOSITORY}" --title "${TITLE}" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
           gh release create "$TAG" "/tmp/MeloX-Android-${TAG}.apk" "${args[@]}"
