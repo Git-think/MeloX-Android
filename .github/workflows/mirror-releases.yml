@@ -1,11 +1,14 @@
 name: Mirror upstream releases
 
-# Mirrors lladlam's versioned releases (e.g. 0.6.2) onto this fork: checks out
-# the upstream tag, builds it with :app:assembleRelease, and publishes it with
-# the same tag, title, notes and prerelease flag, asset named
-# MeloX-Android-<tag>.apk just like upstream. Only the newest upstream release
-# that is missing on this fork is processed per run. The rolling `dev-latest`
-# debug build is handled by build.yml / sync-upstream.yml instead.
+# Mirrors lladlam's versioned releases (e.g. 0.6.2) onto this fork: merges
+# upstream main into this fork's main (merge, never reset, so local patches
+# stay on top and a conflict fails the job instead of overwriting anything),
+# builds :app:assembleRelease from that result, and publishes it with the same
+# tag, title, notes and prerelease flag, asset named MeloX-Android-<tag>.apk
+# just like upstream. Only the newest upstream release that is missing on this
+# fork is processed per run. The merged main is intentionally not pushed here;
+# pushing stays with sync-upstream.yml. The rolling `dev-latest` debug build is
+# handled by build.yml / sync-upstream.yml instead.
 #
 # Release signing comes from repository secrets and maps onto the gradle
 # properties meloxReleaseStoreFile/StorePassword/KeyAlias/KeyPassword declared
@@ -64,12 +67,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Will mirror upstream ${tag} (prerelease=${prerelease})."
 
-      - name: Check out upstream tag
+      - name: Merge upstream main into this fork
         if: steps.find.outputs.tag != ''
         run: |
           git remote add upstream https://github.com/lladlam/MeloX-Android.git
-          git fetch --no-tags upstream tag "${{ steps.find.outputs.tag }}"
-          git checkout --detach "${{ steps.find.outputs.tag }}"
+          git fetch --no-tags upstream main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge upstream/main --no-edit \
+            -m "chore: sync upstream main before mirroring ${{ steps.find.outputs.tag }}"
 
       - name: Set up JDK 17
         if: steps.find.outputs.tag != ''
