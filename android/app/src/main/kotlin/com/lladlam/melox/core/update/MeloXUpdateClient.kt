@@ -96,11 +96,11 @@ class MeloXUpdateClient(
         val value = JSONObject(body)
         val version = value.getString("version").trim()
         val pageUrl = value.getString("pageUrl").trim()
-        require(version.isNotBlank() && pageUrl.startsWith("https://github.com/lladlam/MeloX-Android/releases/")) {
+        require(version.isNotBlank() && pageUrl.startsWith(ReleasePagePrefix)) {
             "更新清单格式错误"
         }
         val apkUrl = value.optString("apkUrl").trim().takeIf(String::isNotBlank)
-        require(apkUrl == null || apkUrl.startsWith("https://github.com/lladlam/MeloX-Android/releases/download/")) {
+        require(apkUrl == null || apkUrl.startsWith(ReleaseDownloadPrefix)) {
             "更新下载地址不受信任"
         }
         return MeloXRelease(
@@ -204,12 +204,14 @@ class MeloXUpdateClient(
     }
 
     private companion object {
-        const val GitHubReleasesUrl = "https://api.github.com/repos/lladlam/MeloX-Android/releases?per_page=100"
-        const val GitHubBranchUrl = "https://api.github.com/repos/lladlam/MeloX-Android/branches/main"
+        // Update endpoints point at this fork: its APKs are signed with the
+        // fork release key and cannot install upstream-signed downloads.
+        const val GitHubReleasesUrl = "https://api.github.com/repos/Git-think/MeloX-Android/releases?per_page=100"
+        const val GitHubBranchUrl = "https://api.github.com/repos/Git-think/MeloX-Android/branches/main"
         const val DevBuildPageUrl =
-            "https://github.com/lladlam/MeloX-Android/releases/download/dev-latest/MeloX-Android-debug.apk"
-        const val ReleasePagePrefix = "https://github.com/lladlam/MeloX-Android/releases/"
-        const val ReleaseDownloadPrefix = "https://github.com/lladlam/MeloX-Android/releases/download/"
+            "https://github.com/Git-think/MeloX-Android/releases/download/dev-latest/MeloX-Android-debug.apk"
+        const val ReleasePagePrefix = "https://github.com/Git-think/MeloX-Android/releases/"
+        const val ReleaseDownloadPrefix = "https://github.com/Git-think/MeloX-Android/releases/download/"
         val VERSION_PATTERN = Regex(
             pattern = "^(?:android-)?v?(\\d+)\\.(\\d+)\\.(\\d+)(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?$",
             option = RegexOption.IGNORE_CASE,
