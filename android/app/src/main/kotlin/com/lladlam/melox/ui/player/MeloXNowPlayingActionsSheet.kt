@@ -32,6 +32,8 @@ fun MeloXNowPlayingActionsSheet(
     visible: Boolean,
     onDismiss: () -> Unit,
     onNavigateSearch: ((String, MeloXSearchKind) -> Unit)? = null,
+    onNavigateAlbum: ((Long) -> Unit)? = null,
+    onNavigateArtist: ((Long) -> Unit)? = null,
     onLocalMetadataChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current.applicationContext
@@ -81,6 +83,8 @@ fun MeloXNowPlayingActionsSheet(
                 name = state.title.ifBlank { "正在播放" },
                 artists = state.artist,
                 album = state.album,
+                albumId = state.albumId,
+                artistId = state.artistId,
                 artworkUrl = state.artworkUrl,
                 durationMs = state.durationMs,
             )
@@ -93,6 +97,8 @@ fun MeloXNowPlayingActionsSheet(
                     name = entry.title.ifBlank { "未知歌曲" },
                     artists = entry.artist.ifBlank { "未知歌手" },
                     album = if (entryId == neteaseId) state.album else "",
+                    albumId = if (entryId == neteaseId) state.albumId else null,
+                    artistId = if (entryId == neteaseId) state.artistId else null,
                     artworkUrl = entry.artworkUrl,
                     durationMs = if (entryId == neteaseId) state.durationMs else 0L,
                 )
@@ -108,6 +114,8 @@ fun MeloXNowPlayingActionsSheet(
                 },
                 playbackState = state,
                 onNavigateSearch = onNavigateSearch,
+                onNavigateAlbum = onNavigateAlbum,
+                onNavigateArtist = onNavigateArtist,
             )
         } else if (identity != null) {
             MeloXProviderSongActionsOverlay(

@@ -354,6 +354,10 @@ object MeloXSettingsRuntime {
         internal set
     var transitionUiEnabled by mutableStateOf(false)
         internal set
+    var playlistSearchBarHidden by mutableStateOf(false)
+        internal set
+    var playlistShowArtwork by mutableStateOf(false)
+        internal set
 
     private var initialized = false
 
@@ -440,6 +444,8 @@ object MeloXSettingsRuntime {
         systemFontEnabled = MeloXSettingsPreferences.boolean(app, "system_font", false)
         smartQueueEnabled = MeloXPlaybackModePreferences.smartQueue(app)
         transitionUiEnabled = MeloXSettingsPreferences.boolean(app, "transition_ui_enabled", false)
+        playlistSearchBarHidden = MeloXSettingsPreferences.boolean(app, "library_playlist_search_hidden", false)
+        playlistShowArtwork = MeloXSettingsPreferences.boolean(app, "library_playlist_show_artwork", false)
         showLyricTranslation = MeloXSettingsPreferences.boolean(app, "lyrics_translation", true)
         automaticLyricSelectionEnabled = MeloXSettingsPreferences.boolean(app, "lyrics_auto_select", true)
         lyricStrongBindingEnabled = MeloXSettingsPreferences.boolean(app, "experimental_lyric_strong_binding", false)
@@ -723,6 +729,8 @@ object MeloXSettingsPreferences {
             "general_remember_tab" -> MeloXSettingsRuntime.rememberLastTab = value
             "general_disable_auto_tabbar_shrink" -> MeloXSettingsRuntime.disableAutomaticTabBarShrink = value
             "library_remember_page" -> MeloXSettingsRuntime.rememberLibraryPage = value
+            "library_playlist_search_hidden" -> MeloXSettingsRuntime.playlistSearchBarHidden = value
+            "library_playlist_show_artwork" -> MeloXSettingsRuntime.playlistShowArtwork = value
             "download_lyrics" -> MeloXSettingsRuntime.downloadLyricsEnabled = value
             "content_playlist_play_count" -> MeloXSettingsRuntime.showPlaylistPlayCount = value
             "content_high_quality_playlist" -> MeloXSettingsRuntime.showHighQualityPlaylists = value

@@ -408,6 +408,8 @@ object PlaybackCommands {
                     putString(QUEUE_ENTRY_ID_KEY, UUID.randomUUID().toString())
                     putBoolean(HEART_MODE_KEY, heartMode)
                     putLong(PlaybackTrackIdentity.DurationMsExtra, durationMs.coerceAtLeast(0L))
+                    if (albumId != null) putLong("melox.system.original_album_id", albumId)
+                    if (artistId != null) putLong("melox.system.original_artist_id", artistId)
                 },
             )
             .apply {

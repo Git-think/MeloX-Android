@@ -51,7 +51,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -116,6 +115,8 @@ fun MeloXSongActionsOverlay(
     onDismiss: () -> Unit,
     playbackState: MeloXPlaybackUiState? = null,
     onNavigateSearch: ((String, MeloXSearchKind) -> Unit)? = null,
+    onNavigateAlbum: ((Long) -> Unit)? = null,
+    onNavigateArtist: ((Long) -> Unit)? = null,
     sourcePlaylist: MeloXDownloadPlaylistRef? = null,
     sourceOwnedPlaylistId: Long? = null,
     onSourcePlaylistChanged: (() -> Unit)? = null,
@@ -168,12 +169,12 @@ fun MeloXSongActionsOverlay(
             withContext(Dispatchers.IO) { library.userPlaylistsBlocking(profile.userId) }
                 .filter { it.creatorUserId == profile.userId }
         }.onSuccess { writablePlaylists = it }
-            .onFailure { message = it.message ?: context.getString(R.string.player_playlists_failed) }
+            .onFailure { message = it.message ?: "歌单读取失败" }
         busy = false
     }
 
-    suspend fun loadComments(append: Boolean = false) { busy = true; message = null; val current = commentsPage; val offset = if (append) current?.nextOffset ?: comments.size else 0; val before = if (append) current?.beforeTime ?: 0L else 0L; runCatching { social.songComments(song.id, offset, before) }.onSuccess { loaded -> if (append) comments = (comments + loaded.comments).distinctBy(MeloXMusicComment::id) else { hotComments = loaded.hotComments; comments = loaded.comments }; commentsPage = loaded.copy(comments = comments, nextOffset = comments.size) }.onFailure { message = it.message ?: context.getString(R.string.player_comments_failed) }; busy = false }
-    suspend fun loadShareContacts() { busy = true; message = null; runCatching { val profile = account.accountProfile(); ops.messageContacts(profile.userId) }.onSuccess { shareContacts = it }.onFailure { message = it.message ?: context.getString(R.string.player_contacts_failed) }; busy = false }
+    suspend fun loadComments(append: Boolean = false) { busy = true; message = null; val current = commentsPage; val offset = if (append) current?.nextOffset ?: comments.size else 0; val before = if (append) current?.beforeTime ?: 0L else 0L; runCatching { social.songComments(song.id, offset, before) }.onSuccess { loaded -> if (append) comments = (comments + loaded.comments).distinctBy(MeloXMusicComment::id) else { hotComments = loaded.hotComments; comments = loaded.comments }; commentsPage = loaded.copy(comments = comments, nextOffset = comments.size) }.onFailure { message = it.message ?: "评论加载失败" }; busy = false }
+    suspend fun loadShareContacts() { busy = true; message = null; runCatching { val profile = account.accountProfile(); ops.messageContacts(profile.userId) }.onSuccess { shareContacts = it }.onFailure { message = it.message ?: "联系人加载失败" }; busy = false }
 
     suspend fun loadReplies(parent: MeloXMusicComment, append: Boolean) {
         busy = true
@@ -192,7 +193,7 @@ fun MeloXSongActionsOverlay(
                     )
                 }
             }
-            .onFailure { message = it.message ?: context.getString(R.string.player_replies_failed) }
+            .onFailure { message = it.message ?: "评论回复加载失败" }
         busy = false
     }
 
@@ -204,7 +205,7 @@ fun MeloXSongActionsOverlay(
             val profile = account.accountProfile()
             social.userPlayRecords(profile.userId, period)
         }.onSuccess { playRecords = it }
-            .onFailure { message = it.message ?: context.getString(R.string.player_rank_failed) }
+            .onFailure { message = it.message ?: "听歌排行加载失败" }
         busy = false
     }
 
@@ -213,7 +214,7 @@ fun MeloXSongActionsOverlay(
         message = null
         runCatching { ops.songWiki(song.id) }
             .onSuccess { wiki = it }
-            .onFailure { message = it.message ?: context.getString(R.string.player_wiki_failed) }
+            .onFailure { message = it.message ?: "百科加载失败" }
         busy = false
     }
 
@@ -263,16 +264,16 @@ fun MeloXSongActionsOverlay(
                         ActionHeader(
                             song,
                             when (target) {
-                                SongActionPage.Main -> stringResource(R.string.player_action_title)
-                                SongActionPage.Sleep -> stringResource(R.string.player_sleep_timer)
-                                SongActionPage.AddToPlaylist -> stringResource(R.string.player_add_to_playlist)
-                                SongActionPage.CreatePlaylist -> stringResource(R.string.player_create_playlist)
-                                SongActionPage.Comments -> stringResource(R.string.player_comments)
-                                SongActionPage.CommentReplies -> stringResource(R.string.player_comment_replies)
-                                SongActionPage.ShareContacts -> stringResource(R.string.player_share_netease_friends)
-                                SongActionPage.ListeningRank -> stringResource(R.string.player_listening_rank)
-                                SongActionPage.Wiki -> stringResource(R.string.player_wiki)
-                                SongActionPage.ListenTogether -> stringResource(R.string.player_listen_together)
+                                SongActionPage.Main -> "歌曲操作"
+                                SongActionPage.Sleep -> "定时关闭"
+                                SongActionPage.AddToPlaylist -> "添加到歌单"
+                                SongActionPage.CreatePlaylist -> "创建歌单"
+                                SongActionPage.Comments -> "评论"
+                                SongActionPage.CommentReplies -> "评论回复"
+                                SongActionPage.ShareContacts -> "发送给网易云好友"
+                                SongActionPage.ListeningRank -> "我的听歌排行"
+                                SongActionPage.Wiki -> "歌曲百科"
+                                SongActionPage.ListenTogether -> "一起听"
                             },
                         )
                         message?.let {
@@ -286,25 +287,25 @@ fun MeloXSongActionsOverlay(
 
                         when (target) {
                             SongActionPage.Main -> {
-                                Text(stringResource(R.string.player_more_actions), Modifier.padding(bottom = 10.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                Text("更多操作", Modifier.padding(bottom = 10.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold)
                                 val actions = listOf(
-                                    MeloXMoreAction(stringResource(R.string.player_sleep_timer), MeloXSymbol.Moon) { page = SongActionPage.Sleep },
-                                    MeloXMoreAction(stringResource(R.string.player_play_next), MeloXSymbol.Next) {
+                                    MeloXMoreAction("定时关闭", MeloXSymbol.Moon) { page = SongActionPage.Sleep },
+                                    MeloXMoreAction("下一首播放", MeloXSymbol.Next) {
                                         if (playbackState == null) PlaybackCommands.playNext(context, song)
                                         onDismiss()
                                     },
-                                    MeloXMoreAction(stringResource(R.string.player_add_to_queue), MeloXSymbol.AddToPlaylist) {
+                                    MeloXMoreAction("添加到播放队列", MeloXSymbol.AddToPlaylist) {
                                         if (playbackState != null) playbackState.addCurrentToQueue() else PlaybackCommands.addToQueue(context, song)
                                         onDismiss()
                                     },
-                                    MeloXMoreAction(if (downloads.contains(song.id)) stringResource(R.string.player_delete_download) else stringResource(R.string.player_download_song), if (downloads.contains(song.id)) MeloXSymbol.Trash else MeloXSymbol.Download) {
+                                    MeloXMoreAction(if (downloads.contains(song.id)) "删除下载" else "下载歌曲", if (downloads.contains(song.id)) MeloXSymbol.Trash else MeloXSymbol.Download) {
                                         if (downloads.contains(song.id)) downloads.remove(song.id) else downloads.start(song, MusicQualityPreferences.read(app), sourcePlaylist)
                                     },
-                                    MeloXMoreAction(stringResource(R.string.player_add_to_playlist), MeloXSymbol.AddToPlaylist) {
+                                    MeloXMoreAction("添加到歌单", MeloXSymbol.AddToPlaylist) {
                                         page = SongActionPage.AddToPlaylist
                                         scope.launch { loadOwnedPlaylists() }
                                     },
-                                    MeloXMoreAction(if (liked == true) stringResource(R.string.player_unlike) else stringResource(R.string.player_like), MeloXSymbol.Heart) {
+                                    MeloXMoreAction(if (liked == true) "取消喜爱" else "喜爱", MeloXSymbol.Heart) {
                                         val desired = liked != true
                                         busy = true
                                         scope.launch {
@@ -314,47 +315,61 @@ fun MeloXSongActionsOverlay(
                                             busy = false
                                         }
                                     },
-                                    MeloXMoreAction(stringResource(R.string.player_system_share), MeloXSymbol.Share) { shareSong(context, song); onDismiss() },
-                                    MeloXMoreAction(stringResource(R.string.player_share_netease_friends), MeloXSymbol.Mail) { page = SongActionPage.ShareContacts; scope.launch { loadShareContacts() } },
-                                    MeloXMoreAction(stringResource(R.string.player_share_timeline), MeloXSymbol.Message) {
+                                    MeloXMoreAction("系统分享", MeloXSymbol.Share) { shareSong(context, song); onDismiss() },
+                                    MeloXMoreAction("发送给网易云好友", MeloXSymbol.Mail) { page = SongActionPage.ShareContacts; scope.launch { loadShareContacts() } },
+                                    MeloXMoreAction("分享到网易云动态", MeloXSymbol.Message) {
                                         if (!busy) {
                                             busy = true
                                             scope.launch {
                                                 runCatching { social.shareSongToTimeline(song.id) }
-                                                    .onSuccess { message = context.getString(R.string.player_shared_timeline) }
-                                                    .onFailure { message = it.message ?: context.getString(R.string.player_share_timeline_failed) }
+                                                    .onSuccess { message = "已分享到网易云动态" }
+                                                    .onFailure { message = it.message ?: "动态分享失败" }
                                                 busy = false
                                             }
                                         }
                                     },
-                                    MeloXMoreAction(stringResource(R.string.player_view_comments), MeloXSymbol.Comment) { page = SongActionPage.Comments; scope.launch { loadComments(false) } },
-                                    MeloXMoreAction(stringResource(R.string.player_listening_rank), MeloXSymbol.Clock) { page = SongActionPage.ListeningRank; scope.launch { loadPlayRecords(MeloXUserPlayRecordPeriod.Week) } },
-                                    MeloXMoreAction(stringResource(R.string.player_wiki), MeloXSymbol.Book) {
+                                    MeloXMoreAction("查看评论", MeloXSymbol.Comment) { page = SongActionPage.Comments; scope.launch { loadComments(false) } },
+                                    MeloXMoreAction("我的听歌排行", MeloXSymbol.Clock) { page = SongActionPage.ListeningRank; scope.launch { loadPlayRecords(MeloXUserPlayRecordPeriod.Week) } },
+                                    MeloXMoreAction("歌曲百科", MeloXSymbol.Book) {
                                         MeloXSongWikiActivity.launch(context, song)
                                         onDismiss()
                                     },
                                 )
                                 sourceOwnedPlaylistId?.let { playlistId ->
-                                    ActionItem(stringResource(R.string.player_remove_from_playlist), "−") {
+                                    ActionItem("从当前歌单移除", "−") {
                                         if (!busy) {
                                             busy = true
                                             scope.launch {
                                                 runCatching { ops.removeSongFromPlaylist(song.id, playlistId) }
                                                     .onSuccess { onSourcePlaylistChanged?.invoke(); onDismiss() }
-                                                    .onFailure { message = it.message ?: context.getString(R.string.player_remove_song_failed) }
+                                                    .onFailure { message = it.message ?: "移除歌曲失败" }
                                                 busy = false
                                             }
                                         }
                                     }
                                 }
                                 if (playbackState != null) {
-                                    ActionItem(stringResource(R.string.player_listen_together), "◎") { page = SongActionPage.ListenTogether }
+                                    ActionItem("一起听", "◎") { page = SongActionPage.ListenTogether }
                                 }
-                                if (song.album.isNotBlank() && onNavigateSearch != null) {
-                                    ActionItem(stringResource(R.string.player_go_album, song.album), "▣") { onDismiss(); onNavigateSearch(song.album, MeloXSearchKind.Albums) }
+                                if (song.album.isNotBlank() && (onNavigateSearch != null || onNavigateAlbum != null)) {
+                                    ActionItem("前往专辑：${song.album}", "▣") {
+                                        onDismiss()
+                                        if (song.albumId != null && song.albumId > 0 && onNavigateAlbum != null) {
+                                            onNavigateAlbum(song.albumId)
+                                        } else if (onNavigateSearch != null) {
+                                            onNavigateSearch(song.album, MeloXSearchKind.Albums)
+                                        }
+                                    }
                                 }
-                                if (song.artists.isNotBlank() && onNavigateSearch != null) {
-                                    ActionItem(stringResource(R.string.player_go_artist, song.artists), "♬") { onDismiss(); onNavigateSearch(song.artists.substringBefore(" / "), MeloXSearchKind.Artists) }
+                                if (song.artists.isNotBlank() && (onNavigateSearch != null || onNavigateArtist != null)) {
+                                    ActionItem("前往艺人：${song.artists}", "♬") {
+                                        onDismiss()
+                                        if (song.artistId != null && song.artistId > 0 && onNavigateArtist != null) {
+                                            onNavigateArtist(song.artistId)
+                                        } else if (onNavigateSearch != null) {
+                                            onNavigateSearch(song.artists.substringBefore(" / "), MeloXSearchKind.Artists)
+                                        }
+                                    }
                                 }
                                 MeloXIosGroupedList(surfaceColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
                                     actions.forEachIndexed { index, action ->
@@ -372,18 +387,18 @@ fun MeloXSongActionsOverlay(
                                 val state = playbackState
                                 if (state != null) {
                                     listOf(15, 30, 45, 60).forEach { minutes ->
-                                        ActionItem(stringResource(R.string.player_sleep_minutes, minutes), "◷") { state.setSleepTimer(minutes); onDismiss() }
+                                        ActionItem("$minutes 分钟后", "◷") { state.setSleepTimer(minutes); onDismiss() }
                                     }
                                     if (state.sleepTimerEndRealtimeMs > 0L) {
-                                        ActionItem(stringResource(R.string.player_cancel_sleep), "×") { state.cancelSleepTimer(); onDismiss() }
+                                        ActionItem("取消定时", "×") { state.cancelSleepTimer(); onDismiss() }
                                     }
                                 }
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
 
                             SongActionPage.AddToPlaylist -> {
-                                if (busy) LoadingRow(stringResource(R.string.player_loading_playlists))
-                                ActionItem(stringResource(R.string.player_new_playlist), "+") {
+                                if (busy) LoadingRow("正在读取歌单")
+                                ActionItem("新建歌单", "+") {
                                     message = null
                                     page = SongActionPage.CreatePlaylist
                                 }
@@ -409,19 +424,19 @@ fun MeloXSongActionsOverlay(
                                         Spacer(Modifier.size(10.dp))
                                         Column(Modifier.weight(1f)) {
                                             Text(playlist.name, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            Text(stringResource(R.string.player_track_count, playlist.trackCount), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), fontSize = 12.sp)
+                                            Text("${playlist.trackCount} 首歌曲", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), fontSize = 12.sp)
                                         }
                                     }
                                 }
                                 if (!busy && writablePlaylists.isEmpty() && message == null) {
-                                    Text(stringResource(R.string.player_no_writable_playlists), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f), modifier = Modifier.padding(12.dp))
+                                    Text("没有可写入的自建歌单。", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f), modifier = Modifier.padding(12.dp))
                                 }
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
 
                             SongActionPage.CreatePlaylist -> {
                                 Text(
-                                    stringResource(R.string.player_create_playlist),
+                                    "创建歌单",
                                     color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 21.sp,
                                     fontWeight = FontWeight.Bold,
@@ -436,7 +451,7 @@ fun MeloXSongActionsOverlay(
                                     contentAlignment = Alignment.CenterStart,
                                 ) {
                                     if (newPlaylistName.isBlank()) {
-                                        Text(stringResource(R.string.player_playlist_name), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .42f), fontSize = 16.sp)
+                                        Text("歌单名称", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .42f), fontSize = 16.sp)
                                     }
                                     BasicTextField(
                                         value = newPlaylistName,
@@ -448,10 +463,10 @@ fun MeloXSongActionsOverlay(
                                     )
                                 }
                                 ActionItem(
-                                    if (newPlaylistPrivate) stringResource(R.string.player_playlist_private) else stringResource(R.string.player_playlist_public),
+                                    if (newPlaylistPrivate) "私密歌单" else "公开歌单",
                                     if (newPlaylistPrivate) "▣" else "◎",
                                 ) { newPlaylistPrivate = !newPlaylistPrivate }
-                                ActionItem(stringResource(R.string.player_create_and_add), "✓") {
+                                ActionItem("创建并添加歌曲", "✓") {
                                     if (!busy && newPlaylistName.isNotBlank()) {
                                         busy = true
                                         message = null
@@ -463,75 +478,75 @@ fun MeloXSongActionsOverlay(
                                             }.onSuccess {
                                                 onSourcePlaylistChanged?.invoke()
                                                 onDismiss()
-                                            }.onFailure { message = it.message ?: context.getString(R.string.player_playlist_create_failed) }
+                                            }.onFailure { message = it.message ?: "歌单创建失败" }
                                             busy = false
                                         }
                                     }
                                 }
-                                ActionItem(stringResource(R.string.player_back_to_playlists), "‹") { page = SongActionPage.AddToPlaylist }
+                                ActionItem("返回歌单列表", "‹") { page = SongActionPage.AddToPlaylist }
                             }
 
                             SongActionPage.Comments -> {
-                                if (busy && comments.isEmpty()) LoadingRow(stringResource(R.string.player_loading_comments))
-                                if (hotComments.isNotEmpty()) Text(stringResource(R.string.player_hot_comments), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f), fontSize = 12.sp)
+                                if (busy && comments.isEmpty()) LoadingRow("正在读取评论")
+                                if (hotComments.isNotEmpty()) Text("热门评论", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f), fontSize = 12.sp)
                                 LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
                                     items(hotComments, key = { "hot-${it.id}" }) { c -> Column(Modifier.fillMaxWidth().clickable { selectedComment = c; repliesPage = null; page = SongActionPage.CommentReplies; scope.launch { loadReplies(c, false) } }.padding(vertical = 9.dp)) { CommentRow(c) } }
-                                    if (comments.isNotEmpty()) item { Text(stringResource(R.string.player_latest_comments, commentsPage?.totalCount ?: comments.size), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f), fontSize = 12.sp) }
+                                    if (comments.isNotEmpty()) item { Text("最新评论 · ${commentsPage?.totalCount ?: comments.size}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f), fontSize = 12.sp) }
                                     items(comments, key = { "latest-${it.id}" }) { c -> Column(Modifier.fillMaxWidth().clickable { selectedComment = c; repliesPage = null; page = SongActionPage.CommentReplies; scope.launch { loadReplies(c, false) } }.padding(vertical = 9.dp)) { CommentRow(c) } }
                                 }
-                                if (commentsPage?.hasMore == true) ActionItem(stringResource(R.string.player_load_more_comments), "+") { if (!busy) scope.launch { loadComments(true) } }
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                if (commentsPage?.hasMore == true) ActionItem("加载更多评论", "+") { if (!busy) scope.launch { loadComments(true) } }
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
                             SongActionPage.ShareContacts -> {
-                                if (busy && shareContacts.isEmpty()) LoadingRow(stringResource(R.string.player_loading_contacts))
-                                LazyColumn(Modifier.fillMaxWidth().height(350.dp)) { items(shareContacts, key = { "share-${it.id}" }) { contact -> Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { busy = true; scope.launch { runCatching { social.sendSongToUser(song.id, contact.id) }.onSuccess { message = context.getString(R.string.player_sent_to, contact.name); page = SongActionPage.Main }.onFailure { message = it.message ?: context.getString(R.string.player_send_failed) }; busy = false } }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(contact.avatarUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp)); Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(contact.name, color = Color.White); if (contact.signature.isNotBlank()) Text(contact.signature, color = Color.White.copy(alpha = .45f), fontSize = 11.sp, maxLines = 1) } } } }
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                if (busy && shareContacts.isEmpty()) LoadingRow("正在读取联系人")
+                                LazyColumn(Modifier.fillMaxWidth().height(350.dp)) { items(shareContacts, key = { "share-${it.id}" }) { contact -> Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { busy = true; scope.launch { runCatching { social.sendSongToUser(song.id, contact.id) }.onSuccess { message = "已发送给 ${contact.name}"; page = SongActionPage.Main }.onFailure { message = it.message ?: "发送失败" }; busy = false } }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(contact.avatarUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp)); Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(contact.name, color = Color.White); if (contact.signature.isNotBlank()) Text(contact.signature, color = Color.White.copy(alpha = .45f), fontSize = 11.sp, maxLines = 1) } } } }
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
                             SongActionPage.CommentReplies -> {
                                 val parent = selectedComment
                                 val replies = repliesPage
                                 if (parent != null) {
-                                        Text(stringResource(R.string.player_original_comment), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), fontSize = 12.sp)
+                                        Text("原评论", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), fontSize = 12.sp)
                                     CommentRow(replies?.ownerComment ?: parent)
                                 }
-                                if (busy && replies == null) LoadingRow(stringResource(R.string.player_loading_replies))
+                                if (busy && replies == null) LoadingRow("正在读取回复")
                                 LazyColumn(Modifier.fillMaxWidth().height(280.dp)) {
                                     items(replies?.replies.orEmpty(), key = { it.id }) { reply -> CommentRow(reply) }
                                 }
                                 replies?.let {
                                     Text(
-                                        if (it.totalCount > 0) stringResource(R.string.player_all_replies, it.totalCount) else stringResource(R.string.player_no_replies),
+                                        if (it.totalCount > 0) "全部回复 · ${it.totalCount}" else "暂无回复",
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f),
                                         fontSize = 12.sp,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                                     )
                                     if (it.hasMore && parent != null) {
-                                        ActionItem(stringResource(R.string.player_load_more_replies), "+") {
+                                        ActionItem("加载更多回复", "+") {
                                             if (!busy) scope.launch { loadReplies(parent, append = true) }
                                         }
                                     }
                                 }
-                                ActionItem(stringResource(R.string.player_back_to_comments), "‹") { page = SongActionPage.Comments }
+                                ActionItem("返回评论", "‹") { page = SongActionPage.Comments }
                             }
 
                             SongActionPage.ListeningRank -> {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     RankPeriodButton(
-                                        title = stringResource(R.string.player_rank_week),
+                                        title = "最近一周",
                                         selected = playRecordPeriod == MeloXUserPlayRecordPeriod.Week,
                                         modifier = Modifier.weight(1f),
                                     ) {
                                         if (!busy) scope.launch { loadPlayRecords(MeloXUserPlayRecordPeriod.Week) }
                                     }
                                     RankPeriodButton(
-                                        title = stringResource(R.string.player_rank_all_time),
+                                        title = "所有时间",
                                         selected = playRecordPeriod == MeloXUserPlayRecordPeriod.AllTime,
                                         modifier = Modifier.weight(1f),
                                     ) {
                                         if (!busy) scope.launch { loadPlayRecords(MeloXUserPlayRecordPeriod.AllTime) }
                                     }
                                 }
-                                if (busy) LoadingRow(stringResource(R.string.player_loading_rank))
+                                if (busy) LoadingRow("正在读取听歌排行")
                                 LazyColumn(Modifier.fillMaxWidth().height(330.dp)) {
                                     items(playRecords, key = { it.song.id }) { record ->
                                         Row(
@@ -553,18 +568,18 @@ fun MeloXSongActionsOverlay(
                                                 Text(record.song.name, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 Text(record.song.artists, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
-                                            Text(stringResource(R.string.player_play_count, record.playCount), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), fontSize = 12.sp)
+                                            Text("${record.playCount} 次", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), fontSize = 12.sp)
                                         }
                                     }
                                 }
                                 if (!busy && playRecords.isEmpty() && message == null) {
-                                    Text(stringResource(R.string.player_rank_empty), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), modifier = Modifier.padding(12.dp))
+                                    Text("暂无听歌排行数据", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), modifier = Modifier.padding(12.dp))
                                 }
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
 
                             SongActionPage.Wiki -> {
-                                if (busy) LoadingRow(stringResource(R.string.player_loading_wiki))
+                                if (busy) LoadingRow("正在读取百科")
                                 LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
                                     items(wiki, key = { it.title + it.lines.hashCode() }) { section ->
                                         Column(Modifier.fillMaxWidth().padding(vertical = 9.dp)) {
@@ -576,21 +591,21 @@ fun MeloXSongActionsOverlay(
                                     }
                                 }
                                 if (!busy && wiki.isEmpty() && message == null) {
-                                    Text(stringResource(R.string.player_wiki_empty), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), modifier = Modifier.padding(12.dp))
+                                    Text("暂无百科资料", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), modifier = Modifier.padding(12.dp))
                                 }
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
 
                             SongActionPage.ListenTogether -> {
                                 val room = listenRoom
                                 if (room == null) {
                                     Text(
-                                        stringResource(R.string.player_listen_together_hint),
+                                        "一起听会在后台持续同步播放/暂停、切歌、拖动进度和队列；关闭这个面板不会中断会话。",
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
                                         fontSize = 13.sp,
                                         modifier = Modifier.padding(6.dp, 6.dp, 6.dp, 12.dp),
                                     )
-                                    ActionItem(stringResource(R.string.player_listen_together_start), "◎") {
+                                    ActionItem("发起一起听", "◎") {
                                         if (!busy) {
                                             busy = true
                                             message = null
@@ -601,7 +616,7 @@ fun MeloXSongActionsOverlay(
                                                     val ids = queue.map(SearchSong::id).filter { it > 0L }.ifEmpty { listOf(song.id) }
                                                     ops.reportListenTogetherPlaylist(created.id, profile.userId, ids, 1)
                                                     created
-                                                }.onSuccess { MeloXListenTogetherCoordinator.adoptRoom(app, it) }.onFailure { message = it.message ?: context.getString(R.string.player_room_create_failed) }
+                                                }.onSuccess { MeloXListenTogetherCoordinator.adoptRoom(app, it) }.onFailure { message = it.message ?: "创建房间失败" }
                                                 busy = false
                                             }
                                         }
@@ -618,29 +633,29 @@ fun MeloXSongActionsOverlay(
                                                     .padding(horizontal = 12.dp, vertical = 11.dp),
                                             ) {
                                                 if (invitationText.isBlank()) {
-                                                    Text(stringResource(R.string.player_invite_placeholder), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), fontSize = 14.sp)
+                                                    Text("粘贴一起听邀请链接", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), fontSize = 14.sp)
                                                 }
                                                 inner()
                                             }
                                         },
                                     )
-                                    ActionItem(stringResource(R.string.player_join_room), "→") {
+                                    ActionItem("加入邀请房间", "→") {
                                         val parsed = parseListenTogetherInvitation(invitationText)
-                                        if (parsed == null) message = context.getString(R.string.player_invite_invalid)
+                                        if (parsed == null) message = "邀请链接缺少 roomId 或 inviterId/inviterUid"
                                         else if (!busy) {
                                             busy = true
                                             message = null
                                             scope.launch {
                                                 runCatching { ops.joinListenTogetherRoom(parsed.first, parsed.second) }
                                                     .onSuccess { MeloXListenTogetherCoordinator.adoptRoom(app, it) }
-                                                    .onFailure { message = it.message ?: context.getString(R.string.player_join_room_failed) }
+                                                    .onFailure { message = it.message ?: "加入房间失败" }
                                                 busy = false
                                             }
                                         }
                                     }
                                 } else {
                                     Text(
-                                        stringResource(R.string.player_room_members, room.id, room.users.size.coerceAtLeast(1)),
+                                        "房间 ${room.id} · ${room.users.size.coerceAtLeast(1)} 位成员",
                                          color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
                                         fontSize = 13.sp,
                                         modifier = Modifier.padding(6.dp),
@@ -649,26 +664,26 @@ fun MeloXSongActionsOverlay(
                                         Text("• ${member.name}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
                                     }
                                     Text(
-                                        when (togetherState.phase) { MeloXListenTogetherCoordinator.Phase.Reconnecting -> stringResource(R.string.player_reconnecting, togetherState.consecutiveFailures); MeloXListenTogetherCoordinator.Phase.Connected -> stringResource(R.string.player_sync_enabled); MeloXListenTogetherCoordinator.Phase.Idle -> stringResource(R.string.player_restoring_room) },
+                                        when (togetherState.phase) { MeloXListenTogetherCoordinator.Phase.Reconnecting -> "正在重新连接 · ${togetherState.consecutiveFailures} 次失败"; MeloXListenTogetherCoordinator.Phase.Connected -> "后台自动同步已启用 · 1 秒状态同步 · 5 秒心跳"; MeloXListenTogetherCoordinator.Phase.Idle -> "正在恢复房间状态" },
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f),
                                         fontSize = 11.sp,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                     )
-                                    ActionItem(stringResource(R.string.player_share_room), "↗") { shareListenTogether(context, song.id, room) }
-                                    ActionItem(stringResource(R.string.player_end_room), "×") {
+                                    ActionItem("分享房间邀请", "↗") { shareListenTogether(context, song.id, room) }
+                                    ActionItem("结束/退出房间", "×") {
                                         if (!busy) {
                                             busy = true
                                             scope.launch {
                                                 runCatching { ops.endListenTogetherRoom(room.id) }
                                                     .onSuccess { MeloXListenTogetherCoordinator.clearRoom(app) }
-                                                    .onFailure { message = it.message ?: context.getString(R.string.player_end_room_failed) }
+                                                    .onFailure { message = it.message ?: "结束房间失败" }
                                                 busy = false
                                             }
                                         }
                                     }
                                 }
-                                if (busy) LoadingRow(stringResource(R.string.player_connecting_together))
-                                ActionItem(stringResource(R.string.player_back), "‹") { page = SongActionPage.Main }
+                                if (busy) LoadingRow("正在连接一起听")
+                                ActionItem("返回", "‹") { page = SongActionPage.Main }
                             }
                         }
         }
@@ -762,7 +777,7 @@ private fun shareSong(context: Context, song: SearchSong) {
         context.startActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "${song.name} - ${song.artists}\n$url"),
-                context.getString(R.string.player_share_song),
+                "分享歌曲",
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
@@ -779,7 +794,7 @@ private fun shareListenTogether(context: Context, songId: Long, room: MeloXListe
         context.startActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url),
-                context.getString(R.string.player_share_together_invite),
+                "分享一起听邀请",
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }

@@ -93,10 +93,12 @@ class NeteaseSearchClient(
                             ?.let(::add)
                     }
                 }.joinToString(" / ")
+                val artistId = if (artistsArray.length() > 0) artistsArray.optJSONObject(0)?.optLong("id")?.takeIf { it > 0 } else null
 
                 val albumObject = song.optJSONObject("al")
                     ?: song.optJSONObject("album")
                 val album = albumObject?.optString("name").orEmpty()
+                val albumId = albumObject?.optLong("id")?.takeIf { it > 0 }
                 val artwork = artworkFromAlbum(albumObject)
 
                 add(
@@ -105,6 +107,8 @@ class NeteaseSearchClient(
                         name = song.optString("name", "未知歌曲"),
                         artists = artists.ifBlank { "未知歌手" },
                         album = album,
+                        albumId = albumId,
+                        artistId = artistId,
                         artworkUrl = artwork,
                         durationMs = neteaseSearchDurationMs(song),
                     ),

@@ -404,7 +404,9 @@ class NeteaseLibraryClient(
                     ?.let(::add)
             }
         }.joinToString(" / ")
+        val artistId = if (artistsArray.length() > 0) artistsArray.optJSONObject(0)?.optLong("id")?.takeIf { it > 0 } else null
         val album = value.optJSONObject("al") ?: value.optJSONObject("album")
+        val albumId = album?.optLong("id")?.takeIf { it > 0 }
         val artwork = album?.optString("picUrl")
             ?.takeIf(String::isNotBlank)
             ?.let(::secureUrl)
@@ -417,6 +419,8 @@ class NeteaseLibraryClient(
             name = value.optString("name").ifBlank { "未知歌曲" },
             artists = artists.ifBlank { "未知歌手" },
             album = album?.optString("name").orEmpty(),
+            albumId = albumId,
+            artistId = artistId,
             artworkUrl = artwork,
             durationMs = duration,
         )

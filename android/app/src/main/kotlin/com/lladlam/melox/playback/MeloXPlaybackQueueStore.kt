@@ -21,12 +21,11 @@ internal object MeloXPlaybackQueueStore {
     private const val POSITION = "position"
 
     fun save(context: Context, player: androidx.media3.common.Player) {
-        // Never erase a saved queue just because the live player is momentarily
-        // empty. The service can be observed with no items during start-up,
-        // before the restore pass runs, and wiping there loses the user's queue
-        // permanently. A stale queue is recoverable; a deleted one is not.
-        if (player.mediaItemCount == 0) return
         val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (player.mediaItemCount == 0) {
+            preferences.edit().remove(QUEUE).remove(INDEX).remove(POSITION).commit()
+            return
+        }
         val array = JSONArray()
         repeat(player.mediaItemCount) { index ->
             val item = player.getMediaItemAt(index)
@@ -49,25 +48,18 @@ internal object MeloXPlaybackQueueStore {
                 put("trackArtist", extras?.getString(PlaybackTrackIdentity.ArtistExtra))
                 put("trackAlbum", extras?.getString(PlaybackTrackIdentity.AlbumExtra))
                 put("trackArtwork", extras?.getString(PlaybackTrackIdentity.ArtworkExtra))
+                if (extras?.containsKey("melox.system.original_album_id") == true) {
+                    put("albumId", extras.getLong("melox.system.original_album_id"))
+                }
+                if (extras?.containsKey("melox.system.original_artist_id") == true) {
+                    put("artistId", extras.getLong("melox.system.original_artist_id"))
+                }
             })
         }
         preferences.edit()
             .putString(QUEUE, array.toString())
             .putInt(INDEX, player.currentMediaItemIndex.coerceAtLeast(0))
             .putLong(POSITION, player.currentPosition.coerceAtLeast(0L))
-            .commit()
-    }
-
-    /**
-     * Cheap partial write for the resume position. Re-serialising the whole
-     * queue (which can be hundreds of KB) on a timer would jank the main
-     * thread, so a crash only costs the small window since the last full save.
-     */
-    fun savePosition(context: Context, index: Int, positionMs: Long) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(INDEX, index.coerceAtLeast(0))
-            .putLong(POSITION, positionMs.coerceAtLeast(0L))
             .commit()
     }
 
@@ -109,6 +101,12 @@ internal object MeloXPlaybackQueueStore {
                     value.optString("trackArtwork").takeIf(String::isNotBlank)?.let {
                         putString(PlaybackTrackIdentity.ArtworkExtra, it)
                     }
+                    if (value.has("albumId")) {
+                        putLong("melox.system.original_album_id", value.optLong("albumId"))
+                    }
+                    if (value.has("artistId")) {
+                        putLong("melox.system.original_artist_id", value.optLong("artistId"))
+                    }
                 }
                 add(
                     MediaItem.Builder()
@@ -134,5 +132,12 @@ internal object MeloXPlaybackQueueStore {
                 positionMs = prefs.getLong(POSITION, 0L).coerceAtLeast(0L),
             )
         }
+    }
+
+    fun savePosition(context: Context, index: Int, positionMs: Long) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(INDEX, index)
+            .putLong(POSITION, positionMs)
+            .commit()
     }
 }

@@ -83,6 +83,8 @@ fun MeloXIOSNowPlayingSharedHost(
     state: MeloXPlaybackUiState,
     onDismiss: () -> Unit,
     onNavigateSearch: (String, MeloXSearchKind) -> Unit = { _, _ -> },
+    onNavigateAlbum: ((Long) -> Unit)? = null,
+    onNavigateArtist: ((Long) -> Unit)? = null,
     onOpenPlaybackSettings: () -> Unit,
     onLocalMetadataChanged: () -> Unit = {},
     onSeekCollapse: suspend (Float) -> Unit,
@@ -434,6 +436,8 @@ fun MeloXIOSNowPlayingSharedHost(
                 visible = showActions,
                 onDismiss = { showActions = false },
                 onNavigateSearch = onNavigateSearch,
+                onNavigateAlbum = onNavigateAlbum,
+                onNavigateArtist = onNavigateArtist,
                 onLocalMetadataChanged = onLocalMetadataChanged,
             )
             MeloXQualitySelectionOverlay(

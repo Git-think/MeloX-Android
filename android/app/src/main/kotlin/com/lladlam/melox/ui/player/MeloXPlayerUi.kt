@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.animation.AnimatedContent
@@ -66,7 +67,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import androidx.compose.ui.res.stringResource
 import coil3.compose.AsyncImage
 import com.lladlam.melox.R
 import com.lladlam.melox.playback.MeloXPlaybackService
@@ -139,6 +139,10 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
     var artist by mutableStateOf("")
         private set
     var album by mutableStateOf("")
+        private set
+    var albumId by mutableStateOf<Long?>(null)
+        private set
+    var artistId by mutableStateOf<Long?>(null)
         private set
     var artworkUrl by mutableStateOf<String?>(null)
         private set
@@ -262,6 +266,10 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         title = recovered.second
         album = metadata.albumTitle?.toString().orEmpty()
             .ifBlank { extras?.getString(PlaybackTrackIdentity.AlbumExtra).orEmpty() }
+
+        albumId = extras?.getLong("melox.system.original_album_id")?.takeIf { it > 0L }
+        artistId = extras?.getLong("melox.system.original_artist_id")?.takeIf { it > 0L }
+
         val currentSongId = item?.mediaId?.toLongOrNull()
         artworkUrl = currentSongId?.let(downloadStore::localArtworkUri)?.toString()
             ?: metadata.artworkUri?.toString()
@@ -346,7 +354,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         val record = com.lladlam.melox.core.provider.local.LocalMusicRepository(appContext)
             .track(identity.value) ?: return
         val title = record.recognizedTitle ?: record.title.ifBlank { record.displayName }
-        val artist = record.recognizedArtist ?: record.artist.ifBlank { appContext.getString(R.string.player_unknown_artist) }
+        val artist = record.recognizedArtist ?: record.artist.ifBlank { "未知歌手" }
         val album = record.recognizedAlbum ?: record.album
         val artwork = record.recognizedArtworkUrl ?: record.artworkUri
         val metadata = item.mediaMetadata.buildUpon()
@@ -474,6 +482,10 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
             !MeloXSettingsPreferences.boolean(appContext, "playback_remember_last_song", true)
         ) return
         val saved = MeloXLastPlaybackStore.read(appContext) ?: return
+        val extras = Bundle().apply {
+            if (saved.albumId != null) putLong("melox.system.original_album_id", saved.albumId)
+            if (saved.artistId != null) putLong("melox.system.original_artist_id", saved.artistId)
+        }
         val builder = MediaItem.Builder()
             .setMediaId(saved.mediaId)
             .setMediaMetadata(
@@ -482,6 +494,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
                     .setArtist(saved.artist)
                     .setAlbumTitle(saved.album)
                     .setArtworkUri(saved.artworkUrl?.let(Uri::parse))
+                    .setExtras(extras)
                     .build(),
             )
         saved.uri?.let { builder.setUri(Uri.parse(it)) }
@@ -623,6 +636,8 @@ private data class MeloXLastPlayback(
     val title: String,
     val artist: String,
     val album: String,
+    val albumId: Long?,
+    val artistId: Long?,
     val artworkUrl: String?,
     val uri: String?,
 )
@@ -638,6 +653,20 @@ private object MeloXLastPlaybackStore {
             .putString("album", metadata.albumTitle?.toString().orEmpty())
             .putString("artwork_url", metadata.artworkUri?.toString() ?: extras?.getString(PlaybackTrackIdentity.ArtworkExtra))
             .putString("uri", item.localConfiguration?.uri?.toString())
+            .apply {
+                if (extras != null) {
+                    if (extras.containsKey("melox.system.original_album_id")) {
+                        putLong("album_id", extras.getLong("melox.system.original_album_id"))
+                    } else {
+                        remove("album_id")
+                    }
+                    if (extras.containsKey("melox.system.original_artist_id")) {
+                        putLong("artist_id", extras.getLong("melox.system.original_artist_id"))
+                    } else {
+                        remove("artist_id")
+                    }
+                }
+            }
             .apply()
     }
 
@@ -649,6 +678,8 @@ private object MeloXLastPlaybackStore {
             title = prefs.getString("title", "").orEmpty(),
             artist = prefs.getString("artist", "").orEmpty(),
             album = prefs.getString("album", "").orEmpty(),
+            albumId = if (prefs.contains("album_id")) prefs.getLong("album_id", 0L) else null,
+            artistId = if (prefs.contains("artist_id")) prefs.getLong("artist_id", 0L) else null,
             artworkUrl = prefs.getString("artwork_url", null),
             uri = prefs.getString("uri", null),
         )
@@ -786,7 +817,7 @@ fun MeloXMiniPlayer(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = state.title.ifBlank { stringResource(R.string.player_now_playing) },
+                    text = state.title.ifBlank { "正在播放" },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleSmall,
@@ -967,7 +998,7 @@ private fun MeloXArtworkPage(state: MeloXPlaybackUiState) {
 
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = state.title.ifBlank { stringResource(R.string.player_now_playing) },
+                text = state.title.ifBlank { "正在播放" },
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1062,7 +1093,7 @@ private fun MeloXProgressControl(state: MeloXPlaybackUiState) {
                     .padding(horizontal = 9.dp, vertical = 4.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.player_quality_standard),
+                    text = "标准",
                     color = Color.White.copy(alpha = 0.86f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
@@ -1265,7 +1296,7 @@ internal fun Artwork(
         if (model != null && (model !is String || model.isNotBlank())) {
             AsyncImage(
                 model = model,
-                contentDescription = stringResource(R.string.player_artwork),
+                contentDescription = "专辑封面",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
@@ -1275,7 +1306,7 @@ internal fun Artwork(
                 modifier = Modifier.size(44.dp),
                 color = Color.White.copy(alpha = 0.24f),
                 iconSize = 42.sp,
-                contentDescription = stringResource(R.string.player_artwork_default),
+                contentDescription = "默认专辑封面",
             )
         }
     }

@@ -123,6 +123,7 @@ import com.lladlam.melox.core.music.provider.MusicProviderSelectionStore
 import com.lladlam.melox.ui.account.NeteaseLoginScreen
 import com.lladlam.melox.ui.account.MeloXAccountActivity
 import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.shapes.Capsule
 import com.lladlam.melox.ui.library.LibraryScreen
@@ -155,6 +156,8 @@ import com.lladlam.melox.ui.animation.MeloXSprings
 import com.lladlam.melox.ui.animation.NavExpandLeftShare
 import com.lladlam.melox.ui.animation.meloXContentEnter
 import com.lladlam.melox.ui.animation.meloXContentExit
+import com.lladlam.melox.ui.animation.meloXPageEnter
+import com.lladlam.melox.ui.animation.meloXPageExit
 import com.lladlam.melox.ui.animation.sprungFrac
 import com.lladlam.melox.ui.glass.bottomGlassSurfaceColor
 import com.lladlam.melox.ui.glass.bottomLiquidGlassTint
@@ -187,6 +190,8 @@ import com.lladlam.melox.core.library.NeteaseLibraryClient
 import com.lladlam.melox.core.update.MeloXRelease
 import com.lladlam.melox.core.update.MeloXUpdateClient
 import com.lladlam.melox.playback.PlaybackCommands
+import com.lladlam.melox.ui.collection.MeloXArtistDetailScreen
+import com.lladlam.melox.ui.library.MeloXUnifiedAlbumDetailScreen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -195,6 +200,9 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.ui.graphics.TransformOrigin
+import kotlinx.coroutines.CancellationException
 
 enum class AppTab(@StringRes val titleRes: Int) {
     Home(R.string.tab_home),
@@ -233,7 +241,11 @@ fun MeloXApp(
     var selectedTab by remember { mutableStateOf(initialTab) }
     var settingsRouteRequest by remember { mutableStateOf<String?>(null) }
     var messagesVisible by remember { mutableStateOf(false) }
-    BackHandler(enabled = messagesVisible) { messagesVisible = false }
+    var globalAlbumId by remember { mutableStateOf<Long?>(null) }
+    var globalArtistId by remember { mutableStateOf<Long?>(null) }
+    BackHandler(enabled = messagesVisible) {
+        messagesVisible = false
+    }
     var showNeteaseLogin by remember { mutableStateOf(false) }
     var loginReturnTab by remember { mutableStateOf(AppTab.Settings) }
     var tabBarMinimized by rememberSaveable { mutableStateOf(false) }
@@ -516,6 +528,8 @@ fun MeloXApp(
                     var searchTabAction by remember { mutableStateOf(com.lladlam.melox.ui.search.SearchBackAction.SwitchToHome) }
                     val isHomeRoot = selectedTab == AppTab.Home &&
                         !messagesVisible &&
+                        globalAlbumId == null &&
+                        globalArtistId == null &&
                         !fullPlayerVisible &&
                         onboardingPage < 0 &&
                         !showNeteaseLogin &&
@@ -525,6 +539,9 @@ fun MeloXApp(
                     val exitConfirmThresholdMs = 2_000L
                     var pendingExitAtMs by remember { mutableStateOf(0L) }
                     BackHandler {
+                        if (globalAlbumId != null || globalArtistId != null) {
+                            return@BackHandler
+                        }
                         if (selectedTab != AppTab.Home) {
                             if (selectedTab == AppTab.Search) {
                                 if (searchTabAction != com.lladlam.melox.ui.search.SearchBackAction.SwitchToHome) {
@@ -557,7 +574,7 @@ fun MeloXApp(
                             (hostContext as? Activity)?.finish()
                         } else {
                             pendingExitAtMs = now
-                            Toast.makeText(hostContext, hostContext.getString(R.string.app_exit_confirm), Toast.LENGTH_SHORT).show()
+                            Toast.makeText(hostContext, "再按一次退出 MeloX", Toast.LENGTH_SHORT).show()
                         }
                     }
                     AnimatedContent(
@@ -643,6 +660,116 @@ fun MeloXApp(
                             onInitialRouteConsumed = { settingsRouteRequest = null },
                         )
                     } }
+                    } // End AnimatedContent
+
+                    val albumBackProgress = remember { Animatable(0f) }
+                    PredictiveBackHandler(enabled = globalAlbumId != null) {
+                        try {
+                            it.collect { event -> albumBackProgress.snapTo(event.progress) }
+                            albumBackProgress.animateTo(1f, tween(160))
+                            globalAlbumId = null
+                            albumBackProgress.snapTo(0f)
+                        } catch (_: CancellationException) {
+                            albumBackProgress.animateTo(0f)
+                        }
+                    }
+                    BackHandler(enabled = globalAlbumId != null) {
+                        playerScope.launch {
+                            if (albumBackProgress.value < 1f) {
+                                albumBackProgress.animateTo(1f, tween(160))
+                            }
+                            globalAlbumId = null
+                            albumBackProgress.snapTo(0f)
+                        }
+                    }
+
+                    val displayAlbumId = remember { mutableStateOf(globalAlbumId) }
+                    if (globalAlbumId != null) displayAlbumId.value = globalAlbumId
+
+                    if (globalAlbumId != null || albumBackProgress.value > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(10f)
+                                .graphicsLayer {
+                                    translationX = size.width * albumBackProgress.value
+                                    val scale = 1f - 0.08f * albumBackProgress.value
+                                    scaleX = scale
+                                    scaleY = scale
+                                    transformOrigin = TransformOrigin(0f, 0.5f)
+                                }
+                                .background(MaterialTheme.colorScheme.background)
+                        ) {
+                            displayAlbumId.value?.let { id ->
+                                MeloXUnifiedAlbumDetailScreen(
+                                    albumId = id,
+                                    onBack = {
+                                        playerScope.launch {
+                                            if (albumBackProgress.value < 1f) {
+                                                albumBackProgress.animateTo(1f, tween(160))
+                                            }
+                                            globalAlbumId = null
+                                            albumBackProgress.snapTo(0f)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    val artistBackProgress = remember { Animatable(0f) }
+                    PredictiveBackHandler(enabled = globalArtistId != null) {
+                        try {
+                            it.collect { event -> artistBackProgress.snapTo(event.progress) }
+                            artistBackProgress.animateTo(1f, tween(160))
+                            globalArtistId = null
+                            artistBackProgress.snapTo(0f)
+                        } catch (_: CancellationException) {
+                            artistBackProgress.animateTo(0f)
+                        }
+                    }
+                    BackHandler(enabled = globalArtistId != null) {
+                        playerScope.launch {
+                            if (artistBackProgress.value < 1f) {
+                                artistBackProgress.animateTo(1f, tween(160))
+                            }
+                            globalArtistId = null
+                            artistBackProgress.snapTo(0f)
+                        }
+                    }
+
+                    val displayArtistId = remember { mutableStateOf(globalArtistId) }
+                    if (globalArtistId != null) displayArtistId.value = globalArtistId
+
+                    if (globalArtistId != null || artistBackProgress.value > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(10f)
+                                .graphicsLayer {
+                                    translationX = size.width * artistBackProgress.value
+                                    val scale = 1f - 0.08f * artistBackProgress.value
+                                    scaleX = scale
+                                    scaleY = scale
+                                    transformOrigin = TransformOrigin(0f, 0.5f)
+                                }
+                                .background(MaterialTheme.colorScheme.background)
+                        ) {
+                            displayArtistId.value?.let { id ->
+                                MeloXArtistDetailScreen(
+                                    id = id,
+                                    onBack = {
+                                        playerScope.launch {
+                                            if (artistBackProgress.value < 1f) {
+                                                artistBackProgress.animateTo(1f, tween(160))
+                                            }
+                                            globalArtistId = null
+                                            artistBackProgress.snapTo(0f)
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -753,7 +880,14 @@ fun MeloXApp(
                             if (selectedSource == MusicSource.Netease) {
                                 MeloXSearchLaunchBus.post(query, kind)
                             }
-                            selectedTab = AppTab.Search
+                            closePlayer()
+                        },
+                        onNavigateAlbum = { id ->
+                            globalAlbumId = id
+                            closePlayer()
+                        },
+                        onNavigateArtist = { id ->
+                            globalArtistId = id
                             closePlayer()
                         },
                         onOpenPlaybackSettings = {

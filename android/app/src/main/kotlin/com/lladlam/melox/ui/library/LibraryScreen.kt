@@ -145,6 +145,7 @@ import com.lladlam.melox.ui.player.MeloXFlowingLightBackdrop
 import com.lladlam.melox.ui.player.MeloXSongActionsOverlay
 import com.lladlam.melox.ui.sharing.MeloXNeteaseResourceShareActivity
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
+import com.lladlam.melox.ui.search.MeloXSearchLaunchBus
 import com.lladlam.melox.ui.settings.MeloXSwipeFullAction
 import com.lladlam.melox.ui.layout.rememberMeloXWindowInfo
 import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
@@ -157,6 +158,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
 
 private enum class MeloXLibraryPage(@androidx.annotation.StringRes val titleRes: Int) {
     Songs(R.string.library_page_songs),
@@ -506,39 +516,43 @@ fun LibraryScreen(
                         }
                     } else {
                         val data = snapshot ?: NeteaseLibrarySnapshot(emptyList(), emptyList(), emptyList())
+                        val playFailedMessage = stringResource(R.string.library_play_failed)
                         when (selectedPage) {
-                            MeloXLibraryPage.Songs -> MeloXLibrarySongsPage(
-                                songs = data.likedSongs,
-                                onPlay = { song ->
-                                    PlaybackCommands.playQueue(
-                                        context = context,
-                                        songs = data.likedSongs,
-                                        selectedSongId = song.id,
-                                        onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
-                                    )
-                                },
-                                onPlayAll = {
-                                    data.likedSongs.firstOrNull()?.let { first ->
+                            MeloXLibraryPage.Songs -> {
+                                val heartModeFailedMessage = stringResource(R.string.library_heart_failed)
+                                MeloXLibrarySongsPage(
+                                    songs = data.likedSongs,
+                                    onPlay = { song ->
                                         PlaybackCommands.playQueue(
                                             context = context,
                                             songs = data.likedSongs,
-                                            selectedSongId = first.id,
-                                            onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
+                                            selectedSongId = song.id,
+                                            onFailure = { errorMessage = it.message ?: playFailedMessage },
                                         )
-                                    }
-                                },
-                                onHeartMode = if (source == MusicSource.Netease) {
-                                    {
-                                        val seed = data.likedSongs.randomOrNull()
-                                        val playlistId = data.likedPlaylistId
-                                        if (seed != null && playlistId != null) scope.launch {
-                                            runCatching { client.intelligenceModeSongs(seed.id, playlistId) }
-                                                .onSuccess { songs -> songs.firstOrNull()?.let { PlaybackCommands.playQueue(context, songs, it.id, heartMode = true) } }
-                                                .onFailure { errorMessage = it.message ?: context.getString(R.string.library_heart_failed) }
+                                    },
+                                    onPlayAll = {
+                                        data.likedSongs.firstOrNull()?.let { first ->
+                                            PlaybackCommands.playQueue(
+                                                context = context,
+                                                songs = data.likedSongs,
+                                                selectedSongId = first.id,
+                                                onFailure = { errorMessage = it.message ?: playFailedMessage },
+                                            )
                                         }
-                                    }
-                                } else null,
-                            )
+                                    },
+                                    onHeartMode = if (source == MusicSource.Netease) {
+                                        {
+                                            val seed = data.likedSongs.randomOrNull()
+                                            val playlistId = data.likedPlaylistId
+                                            if (seed != null && playlistId != null) scope.launch {
+                                                runCatching { client.intelligenceModeSongs(seed.id, playlistId) }
+                                                    .onSuccess { songs -> songs.firstOrNull()?.let { PlaybackCommands.playQueue(context, songs, it.id, heartMode = true) } }
+                                                    .onFailure { errorMessage = it.message ?: heartModeFailedMessage }
+                                            }
+                                        }
+                                    } else null,
+                                )
+                            }
 
                             MeloXLibraryPage.Playlists -> MeloXLibraryPlaylistsPage(
                                 playlists = data.playlists,
@@ -563,14 +577,14 @@ fun LibraryScreen(
                                 onPlay = { song ->
                                     PlaybackCommands.playQueue(
                                         context = context, songs = data.recentSongs, selectedSongId = song.id,
-                                        onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
+                                        onFailure = { errorMessage = it.message ?: playFailedMessage },
                                     )
                                 },
                                 onPlayAll = {
                                     data.recentSongs.firstOrNull()?.let { first ->
                                         PlaybackCommands.playQueue(
                                             context = context, songs = data.recentSongs, selectedSongId = first.id,
-                                            onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
+                                            onFailure = { errorMessage = it.message ?: playFailedMessage },
                                         )
                                     }
                                 },
@@ -644,11 +658,13 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
     val completed = downloads.downloads.toList()
     val providerCompleted = providerDownloads.downloads.toList()
     val groups = downloads.downloadedPlaylists
-    val browseGroups = remember(completed, browseMode) {
+    val unknownArtist = stringResource(R.string.library_unknown_artist)
+    val unknownAlbum = stringResource(R.string.library_unknown_album)
+    val browseGroups = remember(completed, browseMode, unknownArtist, unknownAlbum) {
         when (browseMode) {
             MeloXLocalBrowseMode.Songs -> emptyMap()
-            MeloXLocalBrowseMode.Artists -> completed.groupBy { it.song.artists.ifBlank { context.getString(R.string.library_unknown_artist) } }
-            MeloXLocalBrowseMode.Albums -> completed.groupBy { it.song.album.ifBlank { context.getString(R.string.library_unknown_album) } }
+            MeloXLocalBrowseMode.Artists -> completed.groupBy { it.song.artists.ifBlank { unknownArtist } }
+            MeloXLocalBrowseMode.Albums -> completed.groupBy { it.song.album.ifBlank { unknownAlbum } }
             MeloXLocalBrowseMode.Folders -> mapOf("Music/MeloX" to completed)
         }.toSortedMap()
     }
@@ -657,6 +673,9 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
         else browseGroup?.let { browseGroups[it].orEmpty() }.orEmpty()
     }
 
+    val exportPermissionMessage = stringResource(R.string.library_export_permission)
+    val exportFailedMessage = stringResource(R.string.library_export_failed)
+    
     fun exportSelected() {
         if (selectedIds.isEmpty()) return
         if (
@@ -666,13 +685,13 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
             (context as? Activity)?.let {
                 ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 4104)
             }
-            exportMessage = context.getString(R.string.library_export_permission)
+            exportMessage = exportPermissionMessage
             return
         }
         downloads.exportToMusicLibrary(selectedIds) { result ->
             exportMessage = result.fold(
-                onSuccess = { context.getString(R.string.library_exported, it) },
-                onFailure = { it.message ?: context.getString(R.string.library_export_failed) },
+                onSuccess = { context.resources.getString(R.string.library_exported, it) },
+                onFailure = { it.message ?: exportFailedMessage },
             )
         }
     }
@@ -1454,11 +1473,12 @@ private fun MeloXProviderArtistDetailScreen(
     var tracks by remember(artist.id) { mutableStateOf<List<MusicTrack>>(emptyList()) }
     var loading by remember(artist.id) { mutableStateOf(true) }
     var errorMessage by remember(artist.id) { mutableStateOf<String?>(null) }
+    val missingCapabilityMessage = stringResource(R.string.library_capability_missing, artist.id.source.displayName)
     LaunchedEffect(artist.id) {
         val reader = capability
         if (reader == null) {
             loading = false
-            errorMessage = context.getString(R.string.library_capability_missing, artist.id.source.displayName)
+            errorMessage = missingCapabilityMessage
             return@LaunchedEffect
         }
         runCatching {
@@ -2101,7 +2121,102 @@ private fun MeloXPlaylistDetailScreen(
                 song.album.lowercase().contains(query)
         }
     }
+    // ==========================================
+    // 1. 下拉懸停搜索欄：核心物理阻力與動畫狀態
+    // ==========================================
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val searchBarMaxHeightPx = with(density) { 64.dp.toPx() }
+    val searchOffset = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(0f) }
 
+    val searchScrollConnection = androidx.compose.runtime.remember(searchBarMaxHeightPx) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            // 新增：追蹤手勢狀態，實現「硬停頓 (Hard Stop)」
+            private var lastEventTime = 0L
+            private var hasScrolledListInGesture = false
+
+            private fun checkResetGesture() {
+                val now = System.currentTimeMillis()
+                // 如果距離上次接收到滑動事件超過 200 毫秒 (手指鬆開重新按下)，重置手勢狀態
+                if (now - lastEventTime > 200L) {
+                    hasScrolledListInGesture = false
+                }
+                lastEventTime = now
+            }
+
+            override fun onPreScroll(
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): androidx.compose.ui.geometry.Offset {
+                checkResetGesture()
+
+                // 1. 手指上滑時：絕對優先收起搜索欄
+                if (available.y < 0 && searchOffset.value > 0f) {
+                    val currentOffset = searchOffset.value
+                    val newVal = currentOffset + available.y // available.y 是負數
+
+                    if (newVal >= 0f) {
+                        scope.launch { searchOffset.snapTo(newVal) }
+                        return androidx.compose.ui.geometry.Offset(0f, available.y)
+                    } else {
+                        scope.launch { searchOffset.snapTo(0f) }
+                        return androidx.compose.ui.geometry.Offset(0f, -currentOffset)
+                    }
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): androidx.compose.ui.geometry.Offset {
+                checkResetGesture()
+
+                // 核心攔截邏輯：只要這個手勢曾經讓列表滾動過 (consumed.y != 0)，就立刻標記
+                if (consumed.y != 0f) {
+                    hasScrolledListInGesture = true
+                }
+
+                // 2. 下拉拉出搜尋欄：必須滿足「非慣性滑動」且「本次手勢完全沒有滾動過列表」
+                if (available.y > 0 && !source.toString().contains("Fling")) {
+                    if (!hasScrolledListInGesture) {
+                        val currentOffset = searchOffset.value
+
+                        if (currentOffset < searchBarMaxHeightPx) {
+                            val effectiveDrag = available.y * 0.5f
+                            val newVal = currentOffset + effectiveDrag
+
+                            if (newVal <= searchBarMaxHeightPx) {
+                                scope.launch { searchOffset.snapTo(newVal) }
+                                return androidx.compose.ui.geometry.Offset(0f, available.y)
+                            } else {
+                                scope.launch { searchOffset.snapTo(searchBarMaxHeightPx) }
+                                val consumedActualDrag = (searchBarMaxHeightPx - currentOffset) / 0.5f
+                                return androidx.compose.ui.geometry.Offset(0f, consumedActualDrag)
+                            }
+                        }
+                    }
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                if (searchOffset.value > 0f && searchOffset.value < searchBarMaxHeightPx) {
+                    if (searchOffset.value > searchBarMaxHeightPx / 2 || available.y > 500f) {
+                        searchOffset.animateTo(searchBarMaxHeightPx, androidx.compose.animation.core.tween(250))
+                    } else {
+                        searchOffset.animateTo(0f, androidx.compose.animation.core.tween(250))
+                    }
+                    return available
+                }
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
+
+    // ==========================================
+    // 2. 佈局結構 (整合了阻尼滑動監聽器)
+    // ==========================================
     PullToRefreshBox(
         isRefreshing = loading && detail != null,
         onRefresh = { scope.launch { refreshPlaylist() } },
@@ -2130,51 +2245,130 @@ private fun MeloXPlaylistDetailScreen(
                 ),
         )
 
-        Column(
+        val playFailedMessage = stringResource(R.string.library_play_failed)
+        val albumSaveFailedMessage = stringResource(R.string.library_album_save_failed)
+        val playlistSaveFailedMessage = stringResource(R.string.library_playlist_save_failed)
+        val removeFailedMessage = stringResource(R.string.library_remove_failed)
+        val addFailedMessage = stringResource(R.string.library_add_failed)
+
+        // 【核心修改】：替換原本割裂的 Column，改用 Box 疊加佈局，實現真正的全螢幕邊緣沉浸感 (Edge-to-Edge)
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding(),
+                .statusBarsPadding()
+                // 套用剛才寫好的阻尼滑動監聽器 (絕對路徑，絕不報錯)
+                .let {
+                    if (MeloXSettingsRuntime.playlistSearchBarHidden) it.nestedScroll(searchScrollConnection)
+                    else it
+                },
         ) {
-            MeloXPlaylistToolbar(
-                foreground = foreground,
-                onBack = onBack,
-                onShare = {
-                    if (providerAlbum != null) {
-                        shareProviderAlbum(context, providerAlbum)
-                    } else if (isAlbum) {
-                        MeloXNeteaseResourceShareActivity.launch(
-                            context,
-                            "album",
-                            displayed.id,
-                            displayed.name,
-                            "https://music.163.com/album?id=${displayed.id}",
-                        )
-                    } else {
-                        sharePlaylistFromDetail(context, displayed)
-                    }
-                },
-                showMore = (!isAlbum && !isProviderCollection) || (providerSync != null && !isAlbum),
-                onMore = {
-                    if (providerSync != null) showProviderRename = true else showPlaylistActions = true
-                },
-            )
-            MeloXPlaylistSearchField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                foreground = foreground,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-            )
+            // 1. 頂部懸浮層：利用 zIndex(1f) 確保 Toolbar 和搜尋欄永遠蓋在列表最上方
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+            ) {
+                MeloXPlaylistToolbar(
+                    foreground = foreground,
+                    onBack = onBack,
+                    onShare = {
+                        if (providerAlbum != null) {
+                            shareProviderAlbum(context, providerAlbum)
+                        } else if (isAlbum) {
+                            MeloXNeteaseResourceShareActivity.launch(
+                                context,
+                                "album",
+                                displayed.id,
+                                displayed.name,
+                                "https://music.163.com/album?id=${displayed.id}",
+                            )
+                        } else {
+                            sharePlaylistFromDetail(context, displayed)
+                        }
+                    },
+                    showMore = !isProviderCollection && !isAlbum,
+                    onMore = { showPlaylistActions = true },
+                )
 
+                if (MeloXSettingsRuntime.playlistSearchBarHidden) {
+                    // 【隱藏式搜尋欄】：利用動態 Height 實現完全折疊與展開
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { searchOffset.value.toDp() })
+                            .clipToBounds(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        MeloXPlaylistSearchField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            foreground = foreground,
+                            modifier = Modifier
+                                .padding(start = 18.dp, end = 18.dp, bottom = 10.dp)
+                                .height(44.dp)
+                        )
+                    }
+                } else {
+                    MeloXPlaylistSearchField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        foreground = foreground,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                    )
+                }
+            } // 懸浮層 Column 結束
+
+            // 2. 原始的歌曲列表：利用 zIndex(0f) 放在底層，滿鋪全螢幕，滑動時內容自然穿透到懸浮層底部
             LazyVerticalGrid(
                 columns = GridCells.Fixed(if (detailWindow.supportsTwoPane) 2 else 1),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(0f)
+                    .let {
+                        if (MeloXSettingsRuntime.playlistSearchBarHidden) {
+                            it.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                              .drawWithContent {
+                                  drawContent()
+                                  val topFadePx = 58.dp.toPx() + (64.dp.toPx() - searchOffset.value)
+                                  val fadeFraction = (topFadePx / size.height).coerceIn(0f, 1f)
+                                  drawRect(
+                                      brush = Brush.verticalGradient(
+                                          0.0f to Color.Transparent,
+                                          fadeFraction to Color.Black,
+                                          1.0f to Color.Black
+                                      ),
+                                      blendMode = BlendMode.DstIn
+                                  )
+                              }
+                              .layout { measurable, constraints ->
+                                  val searchBarMaxPx = 64.dp.toPx()
+                                  val extraHeight = searchBarMaxPx.roundToInt()
+                                  val collapseAmount = (searchBarMaxPx - searchOffset.value).roundToInt()
+                                  val placeable = measurable.measure(
+                                      constraints.copy(
+                                          minHeight = constraints.minHeight + extraHeight,
+                                          maxHeight = constraints.maxHeight + extraHeight
+                                      )
+                                  )
+                                  layout(placeable.width, placeable.height - extraHeight) {
+                                      placeable.place(0, -collapseAmount)
+                                  }
+                              }
+                        } else {
+                            // Classic Mode: Restrict the drawing bounds of the list to be exactly below the header.
+                            // This matches the original Column layout clipping behavior without needing a solid background.
+                            it.padding(top = 122.dp)
+                        }
+                    },
                 state = rememberLazyGridState(),
                 contentPadding = PaddingValues(
                     start = if (detailWindow.supportsTwoPane) detailWindow.gutter else 0.dp,
                     end = if (detailWindow.supportsTwoPane) detailWindow.gutter else 0.dp,
-                    bottom = MeloXBottomContentClearance,
+                    top = if (MeloXSettingsRuntime.playlistSearchBarHidden) 122.dp else 0.dp, // Hidden mode needs contentPadding, Classic mode already has Modifier.padding
+                    bottom = MeloXBottomContentClearance + if (MeloXSettingsRuntime.playlistSearchBarHidden) 64.dp else 0.dp,
                 ),
             ) {
+
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     MeloXStandardPlaylistHero(
                         playlist = displayed,
@@ -2190,7 +2384,7 @@ private fun MeloXPlaylistDetailScreen(
                                     context = context,
                                     songs = filteredSongs,
                                     selectedSongId = first.id,
-                                    onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
+                                    onFailure = { errorMessage = it.message ?: playFailedMessage },
                                 )
                             }
                         },
@@ -2201,7 +2395,7 @@ private fun MeloXPlaylistDetailScreen(
                                     context = context,
                                     songs = shuffled,
                                     selectedSongId = first.id,
-                                    onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
+                                    onFailure = { errorMessage = it.message ?: playFailedMessage },
                                 )
                             }
                         },
@@ -2218,7 +2412,7 @@ private fun MeloXPlaylistDetailScreen(
                                     }.onSuccess {
                                         isSaved = desired
                                     }.onFailure {
-                                        errorMessage = it.message ?: if (isAlbum) context.getString(R.string.library_album_save_failed) else context.getString(R.string.library_playlist_save_failed)
+                                        errorMessage = it.message ?: if (isAlbum) albumSaveFailedMessage else playlistSaveFailedMessage
                                     }
                                     savingPlaylist = false
                                 }
@@ -2287,13 +2481,14 @@ private fun MeloXPlaylistDetailScreen(
                             song = song,
                             index = index,
                             foreground = foreground,
-                            showMore = providerSync != null || !isProviderCollection,
+                            showMore = !isProviderCollection,
+                            isAlbum = isAlbum,
                             onClick = {
                                 PlaybackCommands.playQueue(
                                     context = context,
                                     songs = filteredSongs,
                                     selectedSongId = song.id,
-                                    onFailure = { errorMessage = it.message ?: context.getString(R.string.library_play_failed) },
+                                    onFailure = { errorMessage = it.message ?: playFailedMessage },
                                 )
                             },
                             onMore = {
@@ -2306,14 +2501,15 @@ private fun MeloXPlaylistDetailScreen(
                                 val playlist = providerPlaylist
                                 val track = song.providerTrack
                                 if (sync != null && playlist != null && track != null) {
-                                    MeloXSwipeAction(context.getString(R.string.library_remove_song), MeloXSymbol.Trash, Color(0xFFFF3B30)) {
+                                    val removeSongString = stringResource(R.string.library_remove_song)
+                                    MeloXSwipeAction(removeSongString, MeloXSymbol.Trash, Color(0xFFFF3B30)) {
                                         if (!providerSyncBusy) {
                                             providerSyncBusy = true
                                             scope.launch {
                                                 runCatching {
                                                     withContext(Dispatchers.IO) { sync.removeTrackFromPlaylist(track, playlist) }
                                                 }.onSuccess { refreshPlaylist() }
-                                                    .onFailure { errorMessage = it.message ?: context.getString(R.string.library_remove_failed) }
+                                                    .onFailure { errorMessage = it.message ?: removeFailedMessage }
                                                 providerSyncBusy = false
                                             }
                                         }
@@ -2321,15 +2517,17 @@ private fun MeloXPlaylistDetailScreen(
                                 } else if (isProviderCollection) {
                                     null
                                 } else if (ownedPlaylistId != null) {
-                                    MeloXSwipeAction(context.getString(R.string.library_remove_song), MeloXSymbol.Trash, Color(0xFFFF3B30)) {
+                                    val removeSongString = stringResource(R.string.library_remove_song)
+                                    MeloXSwipeAction(removeSongString, MeloXSymbol.Trash, Color(0xFFFF3B30)) {
                                         scope.launch {
                                             runCatching { operationsClient.removeSongFromPlaylist(song.id, ownedPlaylistId) }
                                                 .onSuccess { refreshPlaylist() }
-                                                .onFailure { errorMessage = it.message ?: context.getString(R.string.library_remove_failed) }
+                                                .onFailure { errorMessage = it.message ?: removeFailedMessage }
                                         }
                                     }
                                 } else {
-                                    MeloXSwipeAction(context.getString(R.string.artist_add_library), MeloXSymbol.Heart, Color(0xFFFF3B30)) {
+                                    val addLibraryString = stringResource(R.string.artist_add_library)
+                                    MeloXSwipeAction(addLibraryString, MeloXSymbol.Heart, Color(0xFFFF3B30)) {
                                         scope.launch {
                                             runCatching { operationsClient.setSongLiked(song.id, true) }
                                                 .onSuccess {
@@ -2340,7 +2538,7 @@ private fun MeloXPlaylistDetailScreen(
                                                     }
                                                     onSongLikeChanged(song, true)
                                                 }
-                                                .onFailure { errorMessage = it.message ?: context.getString(R.string.library_add_failed) }
+                                                .onFailure { errorMessage = it.message ?: addFailedMessage }
                                         }
                                     }
                                 }
@@ -2472,6 +2670,9 @@ private fun MeloXPlaylistDetailScreen(
                     queue = songs,
                     visible = true,
                     onDismiss = { selectedTrackAction = null },
+                    onNavigateSearch = { query, kind ->
+                        MeloXSearchLaunchBus.post(query, kind)
+                    },
                     sourcePlaylist = MeloXDownloadPlaylistRef(
                         id = displayed.id,
                         name = displayed.name,
@@ -2796,6 +2997,7 @@ private fun MeloXPlaylistTrackRow(
     index: Int,
     foreground: Color,
     showMore: Boolean = true,
+    isAlbum: Boolean = false,
     onClick: () -> Unit,
     onMore: () -> Unit,
     onPlayNext: () -> Unit,
@@ -2817,13 +3019,11 @@ private fun MeloXPlaylistTrackRow(
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp, top = 11.dp, bottom = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            // 【核心逻辑分流】
+            if (isAlbum || !MeloXSettingsRuntime.playlistShowArtwork) {
+                // ➔ 分支 1：如果是专辑或用户关闭了歌单封面，完美还原以前的“大数字 + 歌曲名”排版
                 Text(
                     text = "${index + 1}",
                     modifier = Modifier.width(40.dp),
@@ -2841,6 +3041,39 @@ private fun MeloXPlaylistTrackRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+            } else {
+                // ➔ 分支 2：如果是歌单，采用“封面 + 歌名/歌手”的现代排版
+                AsyncImage(
+                    // 【性能救星】：套用 optimized160Artwork，强制要求服务器只给 5KB 的极小缩略图！
+                    // 彻底告别加载卡顿、瞬间满帧，几千首歌的歌单也耗不了多少流量！
+                    model = optimized160Artwork(song.artworkUrl),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = song.name,
+                        color = foreground,
+                        fontSize = 17.sp,
+                        lineHeight = 22.sp,
+                        maxLines = 1, // 性能优化：强制单行
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = song.artists,
+                        color = foreground.copy(alpha = 0.48f),
+                        fontSize = 13.sp,
+                        lineHeight = 16.sp,
+                        maxLines = 1, // 性能优化：强制单行
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
