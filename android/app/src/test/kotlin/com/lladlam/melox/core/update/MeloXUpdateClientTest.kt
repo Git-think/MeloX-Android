@@ -58,10 +58,10 @@ class MeloXUpdateClientTest {
     fun releasesSelectHighestSupportedAndroidVersion() {
         val release = client.parseReleases(
             """[
-                {"tag_name":"unrelated","draft":false,"html_url":"https://github.com/lladlam/MeloX-Android/releases/tag/unrelated"},
-                {"tag_name":"android-0.5.0-Beta","name":"Beta","body":"notes","draft":false,"prerelease":true,"published_at":"2026-08-26T00:00:00Z","html_url":"https://github.com/lladlam/MeloX-Android/releases/tag/android-0.5.0-Beta","assets":[{"name":"MeloX.apk","browser_download_url":"https://github.com/lladlam/MeloX-Android/releases/download/android-0.5.0-Beta/MeloX.apk"}]},
-                {"tag_name":"0.4.9","draft":false,"published_at":"2026-08-27T00:00:00Z","html_url":"https://github.com/lladlam/MeloX-Android/releases/tag/0.4.9","assets":[]},
-                {"tag_name":"android-9.0.0","draft":true,"html_url":"https://github.com/lladlam/MeloX-Android/releases/tag/android-9.0.0"}
+                {"tag_name":"unrelated","draft":false,"html_url":"https://github.com/Git-think/MeloX-Android/releases/tag/unrelated"},
+                {"tag_name":"android-0.5.0-Beta","name":"Beta","body":"notes","draft":false,"prerelease":true,"published_at":"2026-08-26T00:00:00Z","html_url":"https://github.com/Git-think/MeloX-Android/releases/tag/android-0.5.0-Beta","assets":[{"name":"MeloX.apk","browser_download_url":"https://github.com/Git-think/MeloX-Android/releases/download/android-0.5.0-Beta/MeloX.apk"}]},
+                {"tag_name":"0.4.9","draft":false,"published_at":"2026-08-27T00:00:00Z","html_url":"https://github.com/Git-think/MeloX-Android/releases/tag/0.4.9","assets":[]},
+                {"tag_name":"android-9.0.0","draft":true,"html_url":"https://github.com/Git-think/MeloX-Android/releases/tag/android-9.0.0"}
             ]""".trimIndent(),
         )
 
@@ -74,7 +74,7 @@ class MeloXUpdateClientTest {
     fun releasesAcceptEverySupportedTagShape() {
         listOf("android-0.5.0-Beta", "0.5.0-Beta", "0.5.0", "android-0.5.0").forEach { tag ->
             val release = client.parseReleases(
-                """[{"tag_name":"$tag","draft":false,"html_url":"https://github.com/lladlam/MeloX-Android/releases/tag/$tag","assets":[]}]""",
+                """[{"tag_name":"$tag","draft":false,"html_url":"https://github.com/Git-think/MeloX-Android/releases/tag/$tag","assets":[]}]""",
             )
             assertEquals(tag, release?.version)
         }
@@ -87,8 +87,8 @@ class MeloXUpdateClientTest {
                 "version":"0.5.0",
                 "name":"MeloX 0.5.0",
                 "notes":"notes",
-                "pageUrl":"https://github.com/lladlam/MeloX-Android/releases/tag/0.5.0",
-                "apkUrl":"https://github.com/lladlam/MeloX-Android/releases/download/0.5.0/MeloX.apk",
+                "pageUrl":"https://github.com/Git-think/MeloX-Android/releases/tag/0.5.0",
+                "apkUrl":"https://github.com/Git-think/MeloX-Android/releases/download/0.5.0/MeloX.apk",
                 "apkName":"MeloX.apk",
                 "publishedAt":"2026-08-25T00:00:00Z"
             }""".trimIndent(),
@@ -96,5 +96,18 @@ class MeloXUpdateClientTest {
 
         assertEquals("0.5.0", release.version)
         assertEquals("MeloX.apk", release.apkName)
+    }
+
+    @Test
+    fun manifestFromAnotherRepositoryIsRejected() {
+        val failed = runCatching {
+            client.parseManifest(
+                """{
+                    "version":"0.5.0",
+                    "pageUrl":"https://github.com/lladlam/MeloX-Android/releases/tag/0.5.0"
+                }""".trimIndent(),
+            )
+        }.isFailure
+        assertTrue("A manifest pointing at another repository must not be trusted", failed)
     }
 }

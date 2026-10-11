@@ -8,7 +8,7 @@ class MeloXGitHubRoutingTest {
 
     @Test
     fun githubApiCanUseConfiguredRoutes() {
-        val api = "https://api.github.com/repos/lladlam/MeloX-Android/releases"
+        val api = "https://api.github.com/repos/Git-think/MeloX-Android/releases"
         assertEquals(api, MeloXGitHubRouting.routedUrlFor(MeloXGitHubSource.GitHubDoh, api))
         assertEquals("https://ghfast.top/$api", MeloXGitHubRouting.routedUrlFor(MeloXGitHubSource.GhFast, api))
     }

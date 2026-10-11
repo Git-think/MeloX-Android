@@ -84,6 +84,6 @@ class LrcLibLyricsClient(
 
     private companion object {
         val LRC_LINE = Regex("\\[(\\d{1,2}):(\\d{2})[.:](\\d{2,3})](.*)")
-        const val USER_AGENT = "MeloX (https://github.com/lladlam/MeloX-Android)"
+        const val USER_AGENT = "MeloX (https://github.com/Git-think/MeloX-Android)"
     }
 }

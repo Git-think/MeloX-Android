@@ -3114,7 +3114,7 @@ private fun AboutSettings(context: android.content.Context) {
         SettingsActionButton(stringResource(R.string.settings_about_download_dev)) {
             scope.launch {
                 val target = runCatching { updateClient.devBuildUrl() }.getOrNull()
-                    ?: "https://github.com/lladlam/MeloX-Android/actions/workflows/build.yml"
+                    ?: "https://github.com/Git-think/MeloX-Android/actions/workflows/build.yml"
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target))) }
                     .onFailure { updateStatus = it.message ?: context.getString(R.string.settings_about_download_failed) }
             }
@@ -3165,7 +3165,7 @@ private fun AboutSettings(context: android.content.Context) {
     }
     Spacer(Modifier.height(14.dp))
     SettingsActionButton(stringResource(R.string.settings_about_github)) {
-        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/lladlam/MeloX-Android"))) }
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Git-think/MeloX-Android"))) }
     }
     Spacer(Modifier.height(10.dp))
     SettingsActionButton(stringResource(R.string.settings_about_ios)) {

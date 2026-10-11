@@ -969,7 +969,7 @@ fun MeloXApp(
                     onOpenProject = {
                         runCatching {
                             hostContext.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/lladlam/MeloX-Android")),
+                                Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Git-think/MeloX-Android")),
                             )
                         }
                     },
