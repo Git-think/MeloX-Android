@@ -7,6 +7,9 @@ import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.json.JSONArray
@@ -85,7 +88,10 @@ internal class AutoSyncModelRepository(
             check(actual.equals(INDEX_SHA256, ignoreCase = true)) {
                 "model index signature mismatch: $actual"
             }
-            parseIndex(bytes.decodeToString())
+            val index = parseIndex(bytes.decodeToString())
+            check(index.releaseTag == RELEASE_TAG) { "unexpected model release ${index.releaseTag}" }
+            migrateLegacyPacks(index)
+            index
         }.onFailure { Log.w(TAG, "model index unavailable", it) }
     }
 
@@ -104,7 +110,13 @@ internal class AutoSyncModelRepository(
             check(knownIndex.minBackendProtocol <= BACKEND_PROTOCOL) {
                 "model pack requires backend protocol ${knownIndex.minBackendProtocol}"
             }
-            val staging = File(root(context), "${pack.language}.staging")
+            check(knownIndex.releaseTag == RELEASE_TAG) { "refusing to install a non-pinned model release" }
+            val modelRoot = root(context)
+            modelRoot.mkdirs()
+            // beta.1 partial downloads are never resumable: remove their staging
+            // bytes before resolving only URLs from the pinned beta.2 index.
+            File(modelRoot, "${pack.language}.staging").deleteRecursively()
+            val staging = File(modelRoot, "${pack.language}.staging")
             staging.deleteRecursively()
             check(staging.mkdirs()) { "cannot create staging directory" }
             try {
@@ -113,8 +125,11 @@ internal class AutoSyncModelRepository(
                 val tokens = LinkedHashMap<String, String>()
                 val candidates = routing.candidates()
                 for (spec in pack.requiredFiles) {
+                    currentCoroutineContext().ensureActive()
                     val target = File(staging, spec.name)
-                    downloadVerified(spec, target, candidates) { written ->
+                    val reusable = existingVerifiedFile(pack.language, spec)
+                    if (reusable != null) reusable.copyTo(target, overwrite = true)
+                    else downloadVerified(spec, target, candidates) { written ->
                         onProgress?.invoke(((done + written).coerceAtMost(total)).toFloat() / total)
                     }
                     done += spec.bytes
@@ -170,7 +185,7 @@ internal class AutoSyncModelRepository(
      * Streams one file through the mirror candidates, then verifies byte length
      * and SHA-256 before the caller is allowed to see it.
      */
-    private fun downloadVerified(
+    private suspend fun downloadVerified(
         spec: FileSpec,
         target: File,
         candidates: List<com.lladlam.melox.core.network.MeloXGitHubSource>,
@@ -208,9 +223,64 @@ internal class AutoSyncModelRepository(
             }
             result.onSuccess { return }
             lastError = result.exceptionOrNull()
+            if (lastError is CancellationException) throw lastError
             Log.i(TAG, "route $source failed for ${spec.name}: ${lastError?.message}")
         }
         throw lastError ?: IllegalStateException("no GitHub route available for ${spec.name}")
+    }
+
+    private suspend fun existingVerifiedFile(language: String, spec: FileSpec): File? {
+        val roots = listOfNotNull(context.getExternalFilesDir(null)?.let { File(it, "autosync") }, root(context))
+        for (base in roots) {
+            val file = File(File(base, language), spec.name)
+            if (!file.isFile || file.length() != spec.bytes) continue
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().buffered().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (actual.equals(spec.sha256, ignoreCase = true)) return file
+        }
+        return null
+    }
+
+    /** Promote byte-identical beta.1 packs to beta.2 metadata; discard partial staging. */
+    private suspend fun migrateLegacyPacks(index: Index) {
+        val base = root(context)
+        base.listFiles()?.filter { it.name.endsWith(".staging") || it.name.endsWith(".old") }
+            ?.forEach { it.deleteRecursively() }
+        for (pack in index.packs.values) {
+            currentCoroutineContext().ensureActive()
+            if (!File(File(base, pack.language), "manifest.json").isFile) continue
+            val verified = pack.requiredFiles.map { spec -> spec to existingVerifiedFile(pack.language, spec) }
+            if (verified.any { it.second == null }) {
+                if (pack.language == "ja") File(base, "ja").deleteRecursively()
+                continue
+            }
+            val staging = File(base, "${pack.language}.staging")
+            staging.deleteRecursively()
+            check(staging.mkdirs()) { "cannot create migration staging directory" }
+            try {
+                val tokens = LinkedHashMap<String, String>()
+                verified.forEach { (spec, source) ->
+                    val target = File(staging, spec.name)
+                    source!!.copyTo(target, overwrite = true)
+                    if (spec.name == pack.tokensFile) readTokens(target, tokens)
+                }
+                File(staging, "manifest.json").writeText(localManifest(pack, index.releaseTag, tokens).toString())
+                publish(pack.language, staging)
+                Log.i(TAG, "migrated ${pack.language} model metadata to ${index.releaseTag}; model bytes reused")
+            } catch (error: Throwable) {
+                staging.deleteRecursively()
+                throw error
+            }
+        }
     }
 
     private fun InputStream.readBounded(maxBytes: Long): ByteArray {
@@ -280,8 +350,10 @@ internal class AutoSyncModelRepository(
                 put("accuracy_status", pack.accuracyStatus)
                 val files = JSONObject()
                 pack.files.firstOrNull { it.role == "model" }?.let { model ->
-                    files.put("int8", JSONObject().put("name", model.name).put("bytes", model.bytes))
+                    files.put("int8", JSONObject().put("name", model.name).put("bytes", model.bytes)
+                        .put("sha256", model.sha256))
                 }
+                put("g2p_available", pack.language != "ja")
                 put("files", files)
                 put("tokens", tokenArray)
             }
@@ -319,17 +391,17 @@ internal class AutoSyncModelRepository(
          * Pinned release. The index itself is verified by SHA-256 against
          * [INDEX_SHA256] so a moved tag cannot silently swap the payload.
          */
-        const val RELEASE_TAG = "android-models-v0.1.0-beta.1"
+        const val RELEASE_TAG = "android-models-v0.1.0-beta.2"
         const val RELEASE_PREFIX =
-            "https://github.com/lladlam/MeloX-AutoSync/releases/download/android-models-v0.1.0-beta.1/"
+            "https://github.com/lladlam/MeloX-AutoSync/releases/download/android-models-v0.1.0-beta.2/"
         const val INDEX_URL = RELEASE_PREFIX + "android-models.json"
 
         /**
          * Pinned hash of the published index (`android-models.json`,
-         * 12 517 bytes). A moved or rewritten tag therefore cannot silently
+         * 12 973 bytes). A moved or rewritten tag therefore cannot silently
          * change which weights this build is willing to install.
          */
-        const val INDEX_SHA256 = "1354ed027fccdd1a1afbdc41e8f37f224d703e1026ffb1cb5d6ddd6f11d46eca"
+        const val INDEX_SHA256 = "ffcc9b5db19dff668b9994aae7d2e49e6810564131f51039bc49e7c779f475d4"
         private const val MAX_INDEX_BYTES = 1L shl 20
 
         /**

@@ -4,15 +4,19 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.os.Bundle
 import android.os.SystemClock
+import android.media.AudioManager
 import android.util.Log
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlin.math.abs
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.network.NeteaseSearchClient
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.core.lyrics.LyricTimelineProcessor
+import com.lladlam.melox.core.network.MeloXGitHubRouting
 
 /**
  * Device regression runner. Uses a caller-supplied cached audio file; no songs,
@@ -31,6 +35,13 @@ class AutoSyncDeviceRunner : Instrumentation() {
         val result = Bundle()
         try {
             runBlocking(Dispatchers.IO) {
+                if (args.getString("syncModels") == "true") {
+                    val repository = AutoSyncModelRepository(targetContext, MeloXGitHubRouting(targetContext))
+                    val index = checkNotNull(repository.fetchIndex().getOrThrow())
+                    check(index.releaseTag == AutoSyncModelRepository.RELEASE_TAG)
+                    result.putString("modelRelease", index.releaseTag)
+                    result.putString("installedLanguages", AutoSyncModelStore.installedLanguages(targetContext).joinToString(","))
+                }
                 val relative = checkNotNull(args.getString("audio")) { "supply -e audio <cached path>" }
                 val audio = File(targetContext.dataDir, relative).canonicalFile
                 check(audio.toPath().startsWith(targetContext.dataDir.canonicalFile.toPath()))
@@ -93,10 +104,32 @@ class AutoSyncDeviceRunner : Instrumentation() {
                         AutoSyncPlaybackBridge.isCurrentTrack = { true }
                         MeloXSettingsRuntime.autoSyncWordLyricsEnabled = true
                         val generationAt = SystemClock.elapsedRealtime()
-                        val upgraded = checkNotNull(AutoSyncCoordinator.generate(targetContext, document, "netease:$id"))
+                        val audioManager = targetContext.getSystemService(AudioManager::class.java)
+                        val musicBefore = audioManager?.isMusicActive == true
+                        val rssBefore = rssBytes()
+                        val running = AtomicBoolean(true)
+                        val peakRss = AtomicLong(rssBefore)
+                        val monitor = Thread {
+                            while (running.get()) {
+                                peakRss.accumulateAndGet(rssBytes(), ::maxOf)
+                                try { Thread.sleep(100) } catch (_: InterruptedException) { break }
+                            }
+                        }.apply { name = "AutoSyncRssMonitor"; isDaemon = true; start() }
+                        val upgraded = try {
+                            checkNotNull(AutoSyncCoordinator.generate(targetContext, document, "netease:$id"))
+                        } finally {
+                            running.set(false)
+                            monitor.join(500)
+                        }
+                        val musicAfter = audioManager?.isMusicActive == true
                         check(upgraded.lines.map { it.text } == document.lines.map { it.text })
                         check(!upgraded.pseudoTimingAllowed)
                         result.putLong("generationMs", SystemClock.elapsedRealtime() - generationAt)
+                        result.putLong("rssBeforeBytes", rssBefore)
+                        result.putLong("rssPeakBytes", peakRss.get())
+                        result.putBoolean("musicActiveBefore", musicBefore)
+                        result.putBoolean("musicActiveAfter", musicAfter)
+                        result.putBoolean("musicActivityPreserved", musicBefore == musicAfter)
                         result.putInt("wordLines", upgraded.lines.count { it.syllables.isNotEmpty() })
                         result.putInt("units", upgraded.lines.sumOf { it.syllables.size })
                         val cached = checkNotNull(AutoSyncCoordinator.applyStored(targetContext, document, "netease:$id"))
@@ -117,4 +150,10 @@ class AutoSyncDeviceRunner : Instrumentation() {
             finish(Activity.RESULT_CANCELED, result)
         }
     }
+
+    private fun rssBytes(): Long = runCatching {
+        File("/proc/self/status").useLines { lines ->
+            lines.first { it.startsWith("VmRSS:") }.substringAfter(':').trim().substringBefore(' ').toLong() * 1024L
+        }
+    }.getOrDefault(-1L)
 }

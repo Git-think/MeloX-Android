@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 import java.security.MessageDigest
+import org.json.JSONObject
 
 /**
  * Resolves AutoSync model assets without ever touching the network.
@@ -38,7 +39,14 @@ object AutoSyncModelStore {
                 if (isAssetDirectory(context, "$ROOT/$name")) languages.add(name)
             }
         }
-        return languages.filter { manifest(context, it) != null }
+        return languages.filter { language ->
+            if (language == "ja") return@filter false // model downloaded is not G2P-ready
+            val directory = languageDirectory(context, language) ?: return@filter false
+            runCatching {
+                JSONObject(File(directory, "manifest.json").readText())
+                    .optString("release_tag") == AutoSyncModelRepository.RELEASE_TAG && manifest(context, language) != null
+            }.getOrDefault(false)
+        }
     }
 
     fun manifest(context: Context, language: String): AutoSyncManifest? {

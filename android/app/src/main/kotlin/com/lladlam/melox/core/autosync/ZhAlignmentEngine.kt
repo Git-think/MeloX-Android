@@ -87,12 +87,14 @@ internal class ZhAlignmentEngine private constructor(
         private val lock = Any()
 
         fun forLanguage(context: Context, language: String): ZhAlignmentEngine? {
+            OnnxCtcEngine.releaseAll()
             val manifest = AutoSyncModelStore.manifest(context, language) ?: return null
             val tokenNumName = manifest.tokenCountName ?: return null
             if (manifest.tokens.isEmpty()) return null
             val path = AutoSyncModelStore.modelPath(context, language) ?: return null
             val key = "$language|$path|${File(path).lastModified()}"
             synchronized(lock) { cache[key]?.let { return it } }
+            val loadStarted = android.os.SystemClock.elapsedRealtime()
             return runCatching {
                 val environment = OrtEnvironment.getEnvironment()
                 val options = OrtSession.SessionOptions().apply {
@@ -116,6 +118,7 @@ internal class ZhAlignmentEngine private constructor(
                         }
                         cache[key] = engine
                     }
+                    Log.i(TAG, "model loaded language=zh loadMs=${android.os.SystemClock.elapsedRealtime() - loadStarted} rss=${rssBytes()}B")
                 }
             }.onFailure { Log.w(TAG, "cannot open Chinese model", it) }.getOrNull()
         }
@@ -126,6 +129,12 @@ internal class ZhAlignmentEngine private constructor(
                 cache.clear()
             }
         }
+
+        private fun rssBytes(): Long = runCatching {
+            File("/proc/self/status").useLines { lines ->
+                lines.first { it.startsWith("VmRSS:") }.substringAfter(':').trim().substringBefore(' ').toLong() * 1024L
+            }
+        }.getOrDefault(-1L)
     }
 }
 

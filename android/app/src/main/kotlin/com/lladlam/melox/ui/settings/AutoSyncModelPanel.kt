@@ -185,7 +185,7 @@ private fun formatMegabytes(bytes: Long): String = String.format("%.0f MB", byte
 
 private fun languageLabel(language: String): String = when (language) {
     "zh" -> "中文"
-    "ja" -> "日本語"
+    "ja" -> "日本語（G2P 未就绪）"
     "en" -> "English"
     else -> language
 }

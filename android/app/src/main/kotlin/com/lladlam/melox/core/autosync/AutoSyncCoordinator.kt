@@ -63,7 +63,15 @@ internal object AutoSyncCoordinator {
     ): LyricsDocument? = generationLock.withLock {
         if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return@withLock null
         applyStored(context, document, trackKey)?.let { return@withLock it }
-        generateUncached(context, document, trackKey, onProgress)
+        try {
+            generateUncached(context, document, trackKey, onProgress)
+        } finally {
+            // Keep at most one language session resident, and release native
+            // memory immediately after each serialized job (including cancel).
+            OnnxCtcEngine.releaseAll()
+            ZhAlignmentEngine.releaseAll()
+            System.gc()
+        }
     }
 
     private suspend fun generateUncached(
@@ -77,6 +85,10 @@ internal object AutoSyncCoordinator {
         if (document.lines.any { it.syllables.isNotEmpty() }) return null
 
         val language = AutoSyncText.detectLanguage(document.lines.map(LyricLine::text)) ?: return null
+        if (language == "ja") {
+            Log.i(TAG, "Japanese AutoSync unavailable: on-device G2P dependency is not installed")
+            return null
+        }
         // Chinese is a monotonic-aligner/CIF pack, not CTC: a separate engine and
         // a separate decoder, never the Viterbi path below.
         if (language == "zh") return generateChinese(context, document, trackKey, onProgress)
@@ -232,7 +244,8 @@ internal object AutoSyncCoordinator {
             TAG,
             "aligned $trackKey lines=${timings.size}/${document.lines.size} units=$alignedUnits " +
                 "failed=$failedLines decode=${decodeMs}ms total=" +
-                "${android.os.SystemClock.elapsedRealtime() - startedAt}ms model=${engine.modelSizeBytes}B",
+                "${android.os.SystemClock.elapsedRealtime() - startedAt}ms model=${engine.modelSizeBytes}B " +
+                "rss=${currentRssBytes()}B",
         )
         onProgress?.invoke(1f)
         return merge(document, timeline)
@@ -432,6 +445,12 @@ internal object AutoSyncCoordinator {
 
     private const val RANGE_LEAD_MS = 5_000L
     private const val RANGE_TAIL_MS = 15_000L
+
+    private fun currentRssBytes(): Long = runCatching {
+        File("/proc/self/status").useLines { lines ->
+            lines.first { it.startsWith("VmRSS:") }.substringAfter(':').trim().substringBefore(' ').toLong() * 1024L
+        }
+    }.getOrDefault(-1L)
 
     /** Merges generated timing into the display document without touching text. */
     fun merge(document: LyricsDocument, timeline: AutoSyncTimeline): LyricsDocument? {

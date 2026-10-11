@@ -122,6 +122,7 @@ internal class OnnxCtcEngine private constructor(
 
         /** Shared session per installed model; safe because ORT sessions are thread-safe. */
         fun forLanguage(context: Context, language: String): OnnxCtcEngine? {
+            ZhAlignmentEngine.releaseAll()
             val manifest = AutoSyncModelStore.manifest(context, language) ?: return null
             if (!isCtcCompatible(manifest)) {
                 Log.i(TAG, "language $language uses a non-CTC contract; skipped")
@@ -132,6 +133,7 @@ internal class OnnxCtcEngine private constructor(
             synchronized(lock) {
                 cache[key]?.let { return it }
             }
+            val loadStarted = android.os.SystemClock.elapsedRealtime()
             return runCatching {
                 val environment = OrtEnvironment.getEnvironment()
                 val options = OrtSession.SessionOptions().apply {
@@ -151,6 +153,7 @@ internal class OnnxCtcEngine private constructor(
                         }
                         cache[key] = engine
                     }
+                    Log.i(TAG, "model loaded language=$language loadMs=${android.os.SystemClock.elapsedRealtime() - loadStarted} rss=${rssBytes()}B")
                 }
             }.onFailure { Log.w(TAG, "cannot open ONNX model for $language", it) }.getOrNull()
         }
@@ -161,5 +164,11 @@ internal class OnnxCtcEngine private constructor(
                 cache.clear()
             }
         }
+
+        private fun rssBytes(): Long = runCatching {
+            File("/proc/self/status").useLines { lines ->
+                lines.first { it.startsWith("VmRSS:") }.substringAfter(':').trim().substringBefore(' ').toLong() * 1024L
+            }
+        }.getOrDefault(-1L)
     }
 }
