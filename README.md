@@ -22,11 +22,11 @@
 
 > MeloX Android is an unofficial open-source project. It is not affiliated with, partnered with, or authorized by NetEase Cloud Music, Xiaomi, Apple, or their related companies.
 
-## Current version: 0.6.3
+## Current version: 0.6.4
 
-`0.6.3` merges the contributor branch (an iOS-style shared-element now-playing screen, the Kyant0 Backdrop liquid-glass material, haptics, a VRR frame-rate controller, NetEase QR login, and song recognition) and keeps the new on-device AutoSync word-level lyrics backed by ONNX Runtime.
+`0.6.4` restores the mainline fixes that the contributor merge in 0.6.3 had silently reverted (encrypted-session startup recovery, HyperOS Super Island publishing, lyric-translation alignment, the artist page and playlist layout, plus ProGuard rules and missing tests), keeps the contributor player/glass UI, and retains the on-device AutoSync word-level lyrics backed by ONNX Runtime.
 
-- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.3)
+- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.4)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]

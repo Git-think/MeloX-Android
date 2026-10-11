@@ -2,6 +2,35 @@
 
 [English](../README.md)
 
+## 0.6.4 — 2026-10-12
+
+- 版本号升级为 `0.6.4`，`versionCode 22`；正式产物名为 `MeloX-Android-0.6.4.apk`。
+- 修复 0.6.3 合并贡献者分支时被静默回退的主线修复。
+
+### 恢复被回退的主线修复
+
+- 会话加密存储：恢复损坏 keystore / 密文不可用时的启动兜底，`EncryptedSharedPreferences`
+  创建失败不再让进程崩溃（`SecureSessionPreferences`、`YouTubeSessionStore`）。
+- HyperOS 超级岛发布：恢复主线的 Shizuku 保活与隐藏 API 豁免实现，并补回
+  `org.lsposed.hiddenapibypass` 依赖。
+- 歌词翻译对齐：`alignSecondary` 改为按时间合并两条轨，带头部无翻译行时不再整体错位。
+- 歌手页与歌单：恢复歌手页直达专辑/歌手、歌单封面显示、排序与下拉搜索隐藏。
+- 崩溃记录：恢复 `MeloXCrashStore` 的主线实现。
+- 播放/网络：恢复队列与歌词时序相关修复、跨平台未知时长下的完整歌手匹配、
+  音质弹窗真实玻璃表面、Shizuku XMSF helper 与 ProGuard 规则。
+- 恢复 `LrcLyricsParserTest`、`TtmlLyricsParserTest` 等被删测试。
+
+### 其它
+
+- 移除贡献者分支重新引入的 Mei GPU Mesh 背景（该背景此前已由主线移除）。
+- 新增 `AGENT.md`，记录构建、签名、发版与合并贡献者分支的注意事项。
+
+### 已知问题
+
+- AutoSync 三个模型仍为 `NOT_ACCEPTED_FOR_WORD_LEVEL_ACCURACY`，逐字精度未人工验收。
+- 日文 AutoSync 依赖未打包，暂不可用。
+- `values-*` 系统多语言机制仍为 0.6.3 起的内联中文状态。
+
 ## 0.6.3 — 2026-10-11
 
 - 版本号升级为 `0.6.3`，`versionCode 21`；正式产物名为 `MeloX-Android-0.6.3.apk`。

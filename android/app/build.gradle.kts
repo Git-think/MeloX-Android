@@ -42,8 +42,8 @@ android {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
         targetSdk = 37
-        versionCode = 21
-        versionName = "0.6.3"
+        versionCode = 22
+        versionName = "0.6.4"
         testInstrumentationRunner = "com.lladlam.melox.core.autosync.AutoSyncDeviceRunner"
         // One APK for real phones: both ARM architectures stay in the package,
         // so 32-bit devices keep working exactly as before. Only the
@@ -329,6 +329,7 @@ dependencies {
     // permission is denied, MeloX continues publishing Focus notifications directly.
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     // Framework Binder signatures used only at compile time. Android supplies the
     // real hidden interfaces at runtime; this module is never packaged in the APK.
     compileOnly(project(":hidden-api"))

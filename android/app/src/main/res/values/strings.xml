@@ -1186,7 +1186,6 @@
     <string name="settings_bg_flowing_light">Flowing color light (original)</string>
     <string name="settings_bg_apple_lyrics">Apple three-layer lyrics background</string>
     <string name="settings_bg_blurred_artwork">Static blurred artwork</string>
-    <string name="settings_bg_mei_mesh">Mei GPU mesh background</string>
     <string name="settings_flowing_backdrop">Flowing light background</string>
     <string name="settings_flowing_backdrop_note">When off, a blurred artwork background is used.</string>
     <string name="settings_background_isolation">Isolate the player background</string>
