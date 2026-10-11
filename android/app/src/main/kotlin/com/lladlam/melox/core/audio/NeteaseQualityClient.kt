@@ -26,7 +26,7 @@ data class NeteasePlaybackSource(
 class NeteasePlaybackUnavailableException(
     message: String,
     cause: Throwable? = null,
-) : IOException(message, cause)
+) : MeloXPlaybackUnavailableException(message, cause)
 
 /**
  * Android port of the quality-sensitive parts of MeloX NeteaseAPI.

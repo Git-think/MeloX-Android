@@ -4,11 +4,7 @@ on:
   push:
     branches:
       - main
-  # Run the same build on PRs targeting main so the required status check
-  # (`build-debug`) can gate merges via the main-branch ruleset.
-  pull_request:
-    branches:
-      - main
+      - debug/one-time-issue-fixes
   workflow_dispatch:
 
 permissions:
@@ -58,11 +54,3 @@ jobs:
                  --notes "Rolling debug build, overwritten on every push to main."
           gh release upload dev-latest /tmp/MeloX-Android-debug.apk \
             --clobber --repo "${GITHUB_REPOSITORY}"
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: MeloX-Android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14

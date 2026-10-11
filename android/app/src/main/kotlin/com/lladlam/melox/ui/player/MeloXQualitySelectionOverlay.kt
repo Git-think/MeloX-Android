@@ -153,10 +153,7 @@ internal fun MeloXQualitySelectionOverlay(
                     onOpenPlaybackSettings()
                 },
                 modifier = Modifier.weight(1f),
-                // Plain renders a fully transparent pill, which read as a broken /
-                // washed-out button next to the filled confirm. Keep the secondary
-                // button on the normal glass surface instead.
-                style = MeloXGlassButtonStyle.Bordered,
+                style = MeloXGlassButtonStyle.Plain,
             ) { Text(stringResource(R.string.player_quality_settings)) }
             MeloXGlassButton(
                 onClick = onDismiss,

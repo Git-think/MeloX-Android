@@ -20,9 +20,9 @@ class MeloXMeiScreenMigrationTest {
         val search = File("src/main/kotlin/com/lladlam/melox/ui/search/SearchScreen.kt").readText()
 
         assertTrue(search.contains("private fun SearchSwipeSongRow"))
-        assertTrue(search.contains("MeloXSwipeAction(stringResource(R.string.player_play_next)"))
-        assertTrue(search.contains("MeloXSwipeAction(stringResource(R.string.artist_play_later)"))
-        assertTrue(search.contains("MeloXSwipeAction(stringResource(R.string.artist_add_library)"))
+        assertTrue(search.contains("MeloXSwipeAction(\"下一首播放\""))
+        assertTrue(search.contains("MeloXSwipeAction(\"稍后播放\""))
+        assertTrue(search.contains("MeloXSwipeAction(\"添加到资料库\""))
     }
 
     @Test

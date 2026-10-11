@@ -22,11 +22,6 @@ import com.lladlam.melox.core.network.MeloXNetworkAvailability
 import java.io.IOException
 import java.util.concurrent.Executor
 import java.util.UUID
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 object PlaybackCommands {
     private const val TAG = "MeloXPlayback"
@@ -40,8 +35,6 @@ object PlaybackCommands {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mainExecutor = Executor { command -> mainHandler.post(command) }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val queueGeneration = java.util.concurrent.atomic.AtomicLong()
 
     @Volatile
     private var activeController: MediaController? = null
@@ -62,10 +55,14 @@ object PlaybackCommands {
         heartMode: Boolean = false,
         onFailure: ((Throwable) -> Unit)? = null,
     ) {
+        val appContext = context.applicationContext
         val selectedProviderTrack = songs.firstOrNull { it.id == selectedSongId }?.providerTrack
         if (selectedProviderTrack != null) {
             val providerTracks = songs.mapNotNull(SearchSong::providerTrack)
-            if (providerTracks.isEmpty()) return
+            if (providerTracks.isEmpty()) {
+                MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.EMPTY_QUEUE)
+                return
+            }
             ProviderPlaybackCommands.playQueue(
                 context = context,
                 tracks = providerTracks,
@@ -76,7 +73,6 @@ object PlaybackCommands {
             return
         }
 
-        val appContext = context.applicationContext
         val quality = MusicQualityPreferences.read(appContext)
         MusicQualityRuntime.selected = quality
         MusicQualityRuntime.clear()
@@ -91,7 +87,11 @@ object PlaybackCommands {
             {
                 try {
                     val controller = controllerFuture.get()
-                    val sourceSongs = songs.ifEmpty { return@addListener }
+                    val sourceSongs = songs.ifEmpty {
+                        MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.EMPTY_QUEUE)
+                        controller.release()
+                        return@addListener
+                    }
                     val downloads = MeloXDownloadStore.get(appContext)
                     val offline = !MeloXNetworkAvailability.isOnline(appContext)
                     val sourceStartIndex = sourceSongs.indexOfFirst { it.id == selectedSongId }
@@ -103,23 +103,14 @@ object PlaybackCommands {
                         }
                     if (playable.isEmpty()) {
                         controller.release()
+                        MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.OFFLINE_NO_DOWNLOADS)
                         onFailure?.invoke(IOException("离线状态下没有可播放的已下载歌曲"))
                         return@addListener
                     }
                     val selectedPair = playable.firstOrNull { it.first == sourceStartIndex }
                         ?: playable.firstOrNull { it.first > sourceStartIndex }
                         ?: playable.first()
-
-                    adoptController(controller)
-                    controller.shuffleModeEnabled = false
-
-                    val smartQueueEnabled = MeloXPlaybackModePreferences.autoMix(appContext) &&
-                        MeloXPlaybackModePreferences.smartQueue(appContext) &&
-                        playable.size > 1
-                    val useShuffle = MeloXPlaybackModePreferences.shuffle(appContext) && !smartQueueEnabled
-                    val generation = queueGeneration.incrementAndGet()
-                    val selectedSourceIndex = selectedPair.first
-                    val firstItem = selectedPair.let { (index, song) ->
+                    val originalQueue = playable.map { (index, song) ->
                         song.toMediaItem(
                             quality = quality,
                             queueOrigin = QUEUE_ORIGIN_BASE,
@@ -128,59 +119,81 @@ object PlaybackCommands {
                             heartMode = heartMode,
                         )
                     }
-                    controller.setMediaItems(listOf(firstItem), 0, startPositionMs)
+                    val selectedItemIndex = originalQueue.indexOfFirst {
+                        it.mediaMetadata.extras?.getInt(QUEUE_ORIGINAL_INDEX_KEY) == selectedPair.first
+                    }.coerceAtLeast(0)
+                    val smartQueue = MeloXPlaybackModePreferences.autoMix(appContext) &&
+                        MeloXPlaybackModePreferences.smartQueue(appContext) &&
+                        originalQueue.size > 1
+                    val useShuffle = MeloXPlaybackModePreferences.shuffle(appContext) && !smartQueue
+                    val queue = if (useShuffle) {
+                        val selected = originalQueue[selectedItemIndex]
+                        listOf(selected) + originalQueue.filterIndexed { index, _ -> index != selectedItemIndex }.shuffled()
+                    } else {
+                        originalQueue
+                    }
+                    val startIndex = if (useShuffle) 0 else selectedItemIndex
+                    // 智能队列**仍然把整首歌单交给播放器**。候选池只决定"下一首是谁"，
+                    // 靠 `moveMediaItem` 在时间线里重排（见 MeloXPlaybackService.commitSmartQueueChain），
+                    // 不再把歌扣在池子里等分析完才逐首补。旧实现只 setMediaItems 1 首，
+                    // 而队列面板完全按 mediaItemCount 建（MeloXPlayerUi.buildQueue），
+                    // 结果"打开歌单/播放搜索完的歌曲"后列表从头到尾都是空的。
+                    if (smartQueue) MeloXSmartQueueBuilder.begin(queue, startIndex)
+                    else MeloXSmartQueueBuilder.reset()
+                    val dispatchedQueue = queue
+                    val dispatchedStartIndex = startIndex
+
+                    adoptController(controller)
+                    controller.shuffleModeEnabled = false
+                    controller.setMediaItems(dispatchedQueue, dispatchedStartIndex, startPositionMs)
                     MeloXPlaybackModeRuntime.heartModeActive = heartMode
                     controller.prepare()
                     controller.play()
 
-                    scope.launch(Dispatchers.Default) {
-                        val built = playable.map { (index, song) ->
-                            index to song.toMediaItem(
-                                quality = quality,
-                                queueOrigin = QUEUE_ORIGIN_BASE,
-                                originalIndex = index,
-                                artworkOverride = downloads.localArtworkUri(song.id),
-                                heartMode = heartMode,
-                            )
-                        }
-                        val ordered = if (useShuffle) {
-                            val selected = built.first { it.first == selectedSourceIndex }.second
-                            listOf(selected) + built.filter { it.first != selectedSourceIndex }.map { it.second }.shuffled()
-                        } else {
-                            built.sortedBy { it.first }.map { it.second }
-                        }
-                        withContext(Dispatchers.Main) {
-                            if (generation != queueGeneration.get()) return@withContext
-                            if (controller.mediaItemCount != 1 || controller.getMediaItemAt(0).mediaId != firstItem.mediaId) return@withContext
-                            if (smartQueueEnabled) {
-                                val selectedIndex = if (useShuffle) 0 else ordered.indexOfFirst {
-                                    it.mediaMetadata.extras?.getInt(QUEUE_ORIGINAL_INDEX_KEY) == selectedSourceIndex
-                                }.coerceAtLeast(0)
-                                MeloXSmartQueueBuilder.begin(ordered, selectedIndex)
-                                return@withContext
-                            }
-                            if (useShuffle) {
-                                controller.addMediaItems(ordered.drop(1))
-                            } else {
-                                val after = ordered.dropWhile {
-                                    it.mediaMetadata.extras?.getInt(QUEUE_ORIGINAL_INDEX_KEY) != selectedSourceIndex
-                                }.drop(1)
-                                if (after.isNotEmpty()) controller.addMediaItems(after)
-                            }
-                            Log.d(TAG, "Playback queue finalized: total=${ordered.size}, smart=$smartQueueEnabled, offline=$offline")
-                        }
-                    }
-
                     Log.d(
                         TAG,
-                        "Playback started: firstItem=${selectedPair.first}, useShuffle=$useShuffle, offline=$offline",
+                        "Playback queue dispatched: size=${dispatchedQueue.size}, smart=$smartQueue, start=$dispatchedStartIndex, offline=$offline, quality=${quality.apiLevel}",
                     )
                 } catch (error: Throwable) {
                     Log.e(TAG, "Unable to connect MediaController", error)
+                    MeloXPlaybackNotice.show(
+                        appContext,
+                        MeloXPlaybackNotice.describe(
+                            error,
+                            offline = !MeloXNetworkAvailability.isOnline(appContext),
+                        ),
+                    )
                     onFailure?.invoke(error)
                 }
             },
             mainExecutor,
+        )
+    }
+
+    /**
+     * 「播放全部 / 随机播放」按钮的入口。以前 UI 侧写的是
+     * `songs.firstOrNull()?.let { playQueue(...) }`，列表为空时整个点击被吞掉，
+     * 用户看不到任何反馈。这里把空列表补成一句提示。
+     */
+    fun playAll(
+        context: Context,
+        songs: List<SearchSong>,
+        shuffle: Boolean = false,
+        heartMode: Boolean = false,
+        onFailure: ((Throwable) -> Unit)? = null,
+    ) {
+        val queue = if (shuffle) songs.shuffled() else songs
+        val first = queue.firstOrNull()
+        if (first == null) {
+            MeloXPlaybackNotice.show(context.applicationContext, MeloXPlaybackNotice.EMPTY_QUEUE)
+            return
+        }
+        playQueue(
+            context = context,
+            songs = queue,
+            selectedSongId = first.id,
+            heartMode = heartMode,
+            onFailure = onFailure,
         )
     }
 
@@ -212,7 +225,10 @@ object PlaybackCommands {
         }
 
         val downloads = MeloXDownloadStore.get(appContext)
-        if (!MeloXNetworkAvailability.isOnline(appContext) && !downloads.contains(song.id)) return
+        if (!MeloXNetworkAvailability.isOnline(appContext) && !downloads.contains(song.id)) {
+            MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.OFFLINE_NO_DOWNLOADS)
+            return
+        }
         prioritizeManualQueue(controller)
         val current = controller.currentMediaItemIndex.coerceAtLeast(-1)
         val manualCount = ((current + 1) until controller.mediaItemCount).count { index ->
@@ -254,7 +270,10 @@ object PlaybackCommands {
         }
 
         val downloads = MeloXDownloadStore.get(appContext)
-        if (!MeloXNetworkAvailability.isOnline(appContext) && !downloads.contains(song.id)) return
+        if (!MeloXNetworkAvailability.isOnline(appContext) && !downloads.contains(song.id)) {
+            MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.OFFLINE_NO_DOWNLOADS)
+            return
+        }
         prioritizeManualQueue(controller)
         val insertion = (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
         controller.addMediaItem(
@@ -408,8 +427,7 @@ object PlaybackCommands {
                     putString(QUEUE_ENTRY_ID_KEY, UUID.randomUUID().toString())
                     putBoolean(HEART_MODE_KEY, heartMode)
                     putLong(PlaybackTrackIdentity.DurationMsExtra, durationMs.coerceAtLeast(0L))
-                    if (albumId != null) putLong("melox.system.original_album_id", albumId)
-                    if (artistId != null) putLong("melox.system.original_artist_id", artistId)
+                    putBoolean(PlaybackTrackIdentity.IsFavoriteExtra, false)
                 },
             )
             .apply {

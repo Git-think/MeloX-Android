@@ -23,6 +23,7 @@ import com.xzakota.hyper.notification.island.model.TextInfo
 object HyperOsFocusBridge {
     private const val FOCUS_PROTOCOL_SETTING = "notification_focus_protocol"
     private const val SUPER_ISLAND_CHANNEL = "melox_super_island_lyrics_v1"
+    private const val SUPER_ISLAND_NOTIFICATION_ID = 1703
 
     @Volatile
     private var lastPublishedKey: String? = null
@@ -148,6 +149,7 @@ object HyperOsFocusBridge {
 
         ShizukuXmsfNetworkHelper.dispatchFocusNotification(
             context = appContext,
+            notificationId = SUPER_ISLAND_NOTIFICATION_ID,
             notification = notification,
         )
         return null
@@ -159,13 +161,10 @@ object HyperOsFocusBridge {
 
     fun clearSuperIsland(context: Context) {
         lastPublishedKey = null
-        ShizukuXmsfNetworkHelper.clearFocusNotification(context.applicationContext)
-    }
-
-    /** Settings-only authorization. Playback never calls this. */
-    fun requestShizukuPermission(context: Context) {
-        if (!supportsSuperIsland(context)) return
-        ShizukuXmsfNetworkHelper.requestPermission(context.applicationContext)
+        ShizukuXmsfNetworkHelper.clearFocusNotification(
+            context.applicationContext,
+            SUPER_ISLAND_NOTIFICATION_ID,
+        )
     }
 
     private fun ensureSuperIslandChannel(context: Context) {
@@ -190,6 +189,7 @@ object HyperOsFocusBridge {
         lyric: String,
         nextLyric: String,
     ) {
+        // 左侧常驻当前句，右侧显示下一句（上游 0.6.2 c3ff9d2）。
         val left = lyric.take(42).ifBlank { "♪" }
         val right = nextLyric.trim().take(42).ifBlank { left }
         imageTextInfoLeft {

@@ -7,8 +7,6 @@ data class SearchSong(
     val name: String,
     val artists: String,
     val album: String,
-    val albumId: Long? = null,
-    val artistId: Long? = null,
     val artworkUrl: String?,
     val durationMs: Long = 0L,
     /**
