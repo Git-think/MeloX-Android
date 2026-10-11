@@ -83,7 +83,13 @@ private fun rememberAlternativeLyrics(
         if (!active || mediaId.isNullOrBlank() || loadedRequestKey == requestKey) return@LaunchedEffect
         loading = true
         error = null
-        runCatching { MeloXProviderLyricsLoader.load(context, state) }
+        runCatching {
+            MeloXProviderLyricsLoader.load(context, state) { upgraded ->
+                // AutoSync/AMLL may finish after the fast line-timed path; only
+                // accept it while this panel still shows the same track.
+                if (state.mediaId == mediaId) document = upgraded
+            }
+        }
             .onSuccess {
                 document = it
                 loadedRequestKey = requestKey
@@ -155,7 +161,13 @@ private fun rememberTextPVLyrics(
         if (!active || mediaId.isNullOrBlank() || loadedRequestKey == requestKey) return@LaunchedEffect
         loading = true
         error = null
-        runCatching { MeloXProviderLyricsLoader.load(context, state) }
+        runCatching {
+            MeloXProviderLyricsLoader.load(context, state) { upgraded ->
+                // AutoSync/AMLL may finish after the fast line-timed path; only
+                // accept it while this panel still shows the same track.
+                if (state.mediaId == mediaId) document = upgraded
+            }
+        }
             .onSuccess {
                 document = it
                 loadedRequestKey = requestKey

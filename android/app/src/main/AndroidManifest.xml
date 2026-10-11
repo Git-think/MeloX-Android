@@ -88,6 +88,16 @@
             </intent-filter>
         </activity>
 
+        <!-- ONNX Runtime registers its telemetry as a ContentProvider that runs on
+             every cold start, collects a device id and calls a native hook that
+             is absent from the Android build (UnsatisfiedLinkError in logcat).
+             AutoSync inference is fully offline and local, so the provider is
+             removed outright rather than merely muting its log. -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            android:authorities="${applicationId}.onnxruntime_telemetry_initializer"
+            tools:node="remove" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

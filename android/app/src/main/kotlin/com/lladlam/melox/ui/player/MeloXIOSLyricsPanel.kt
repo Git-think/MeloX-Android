@@ -470,7 +470,25 @@ private fun MeloXAppleMusicLyricsPanel(
         if (mediaId.isNullOrBlank()) return@LaunchedEffect
         isLoading = true
         errorMessage = null
-        runCatching { MeloXProviderLyricsLoader.load(appContext, state) }
+        runCatching {
+            MeloXProviderLyricsLoader.load(appContext, state) { upgraded ->
+                // Authored-source swaps keep their early window. Local model
+                // timing can finish later, but must still belong to this track.
+                val livePositionMs = anchorPositionMs +
+                    (SystemClock.elapsedRealtime() - anchorRealtimeMs)
+                if (state.mediaId == mediaId &&
+                    (upgraded.autoSyncModelKey != null || livePositionMs <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs)
+                ) {
+                    lyrics = upgraded
+                    if (upgraded.autoSyncModelKey != null) {
+                        android.util.Log.i(
+                            "MeloXLyricsAuto",
+                            "AutoSync displayed track=$mediaId wordLines=${upgraded.lines.count { it.syllables.isNotEmpty() }}",
+                        )
+                    }
+                }
+            }
+        }
             .onSuccess { lyrics = it }
             .onFailure { errorMessage = it.message ?: "歌词加载失败" }
         // A newly selected item always enters from its lyric start anchor.

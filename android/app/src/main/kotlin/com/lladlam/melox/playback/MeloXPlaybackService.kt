@@ -544,6 +544,38 @@ class MeloXPlaybackService : MediaSessionService() {
             dataSourceFactory = cached,
             cache = playbackCache,
         )
+        // AutoSync aligns lyrics against the same cached bytes the analysis
+        // pipeline already materialises. The resolver stays lazy: it only runs
+        // when the lyric loader actually decides to generate a timeline.
+        com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.isCurrentTrack = { expected ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                val id = PlaybackTrackIdentity.fromMediaItem(player?.currentMediaItem)
+                id != null && "${id.source.storageValue}:${id.value}" == expected
+            }
+        }
+        com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.audioResolver = { expected ->
+            // AutoSync runs on an IO coroutine, but ExoPlayer only allows
+            // `currentMediaItem` on its application thread. Reading it off-thread
+            // throws, and the throw was swallowed upstream — which looked exactly
+            // like "AutoSync never ran". Hop to main for the read only; the
+            // (potentially long) materialise stays on the caller's dispatcher.
+            val item = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                player?.currentMediaItem
+            }
+            val id = PlaybackTrackIdentity.fromMediaItem(item)
+            if (item == null || id == null || "${id.source.storageValue}:${id.value}" != expected) {
+                null
+            } else {
+                // Never decode the user's playback stream: a hi-res item is tens
+                // of MB and takes minutes to decode, while alignment only needs
+                // 16 kHz mono. Downgrade to the standard analysis source exactly
+                // like the auto-mix pipeline does before materialising anything.
+                val analysisItem = item.copyWithStandardAnalysisUri()
+                mediaPrefetcher.materialize(analysisItem).takeIf {
+                    com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.isCurrentTrack?.invoke(expected) == true
+                }
+            }
+        }
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(cached)
 
         val active = buildPlayer(managesAudioFocus = shouldManageAudioFocus())
@@ -1373,6 +1405,7 @@ class MeloXPlaybackService : MediaSessionService() {
     }
 
     private fun createLyricsNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(
@@ -1871,6 +1904,8 @@ class MeloXPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.audioResolver = null
+        com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.isCurrentTrack = { false }
         persistQueueIfEnabled(immediate = true)
         historySongId?.let { playbackHistoryReporter.recordDuration(it, elapsedMs = listenedTimeTracker.elapsedMs(SystemClock.elapsedRealtime())) }
         historySongId = null

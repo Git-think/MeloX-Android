@@ -34,58 +34,24 @@ fun currentGitSha(): String {
         .take(40)
 }
 
-// ── 自增 versionCode（fork 专用，2026-10-07 定稿 · 请勿改回固定值）──────────────
-//
-// ⚠⚠ 为什么必须「每次构建都 +1」——实测根因：
-//   vivo / iQOO（OriginOS）的安装器把「**同 versionCode 重装**」判定为失败。
-//   同一份 APK、同一签名、同一台机器，唯一变量是 versionCode：
-//     · versionCode 52 → 53（真升级）：`Performing Streamed Install` → **Success**，
-//       秒过，手机上不弹任何框。
-//     · versionCode 53 → 53（同版本重装）：`INSTALL_FAILED_ABORTED: User rejected
-//       permissions`；手机上还会弹一个**自相矛盾**的页面 —— 同时显示
-//       「✅ 安装完成」和「❌ 安装失败 / 因系统原因安装失败，建议可重装系统或重新
-//       下载安装包。」（包其实装上了，但 UI 与 adb 结果都说失败）。
-//   实测无效的旁路：`-i com.android.vending`、`--skip-verification`、`--user 0`、
-//   `--no-streaming`、push + 设备内 `pm install`，全部照样失败。
-//   ⇒ 开发时反复构建的永远是同一个版本，于是**每次安装都撞这个坑**。
-//   ⇒ 唯一可行解：让 versionCode **每次构建单调 +1**，使每次安装都是"真升级"。
-//
-// 计数持久化在 `android/.melox-build-count`（已 gitignore，机器本地）。
-//   换机器 / 新克隆时从基线 52 重新开始，只会让版本号**回退一次**；
-//   回退的那一次用 `adb install -r -d`（允许降级）装即可，之后继续单调递增。
-//   基线就是 `versionCode = 52`（= versionName 0.10.7 对应的上游版本号）。
-//
-// ⚠ 代价（已知并接受）：`MeloXRemoteConfig.appliesTo()` 用
-//   `versionCode in minVersionCode..maxVersionCode` 做区间匹配，而服务端下发的区间
-//   是按上游版本号定的。本地 versionCode 递增后会逐渐走出该区间 ⇒ **云控可能不再
-//   生效**。只影响云控（功能开关 / 兜底顺序 / 公告），不影响任何本地功能。
-val meloxBuildCountFile = file("${rootDir}/.melox-build-count")
-val meloxBuildCount = meloxBuildCountFile
-    .takeIf { it.exists() }
-    ?.readText()?.trim()?.toIntOrNull()
-    ?: 0
-// 只有本次调用真的在构建产物时才自增；IDE sync / `gradlew tasks` 之类的调用不动它。
-val meloxBuildRequested = gradle.startParameter.taskNames.any { task ->
-    val name = task.substringAfterLast(':').lowercase()
-    name.startsWith("assemble") || name.startsWith("bundle") ||
-        name.startsWith("install") || name.startsWith("package") || name == "build"
-}
-val meloxVersionCode = 52 + meloxBuildCount + if (meloxBuildRequested) 1 else 0
-if (meloxBuildRequested) {
-    meloxBuildCountFile.writeText((meloxBuildCount + 1).toString())
-}
-
 android {
     namespace = "com.lladlam.melox"
     compileSdk = 37
 
     defaultConfig {
         applicationId = "com.lladlam.melox.android"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 37
-        // ⚠ 自增，别改回常量 —— 原因见文件顶部「自增 versionCode」注释块。
-        versionCode = meloxVersionCode
-        versionName = "0.10.7"
+        versionCode = 21
+        versionName = "0.6.3"
+        testInstrumentationRunner = "com.lladlam.melox.core.autosync.AutoSyncDeviceRunner"
+        // One APK for real phones: both ARM architectures stay in the package,
+        // so 32-bit devices keep working exactly as before. Only the
+        // emulator-only x86/x86_64 copies are removed — ONNX Runtime alone
+        // ships ~39 MB of native code per x86 ABI and no phone loads them.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
         buildConfigField(
             "String",
             "SPOTIFY_CLIENT_ID",
@@ -341,6 +307,10 @@ dependencies {
     implementation("androidx.media3:media3-datasource:1.10.1")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
+
+    // AutoSync word-level lyric alignment. Inference is fully local (ONNX
+    // Runtime on CPU); weights are supplied per language, never bundled here.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
     implementation("io.coil-kt.coil3:coil-compose:3.5.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")

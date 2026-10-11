@@ -308,6 +308,13 @@ object MeloXSettingsRuntime {
         internal set
     var floatingHighContrast by mutableStateOf(true)
         internal set
+    /**
+     * AutoSync: generate a real word-level timeline locally (ONNX) when a song
+     * only has line-timed lyrics. Off by default — it is an experimental path
+     * that spends CPU and battery on the current track.
+     */
+    var autoSyncWordLyricsEnabled by mutableStateOf(false)
+        internal set
     var homeTabEnabled by mutableStateOf(true)
         internal set
     var homeQuickActionsEnabled by mutableStateOf(true)
@@ -586,6 +593,7 @@ object MeloXSettingsRuntime {
         }.getOrDefault(MeloXSecondaryLyricMode.Auto)
         floatingFontSizeSp = MeloXSettingsPreferences.int(app, "floating_lyrics_font_size", 18).coerceIn(14, 28)
         floatingHighContrast = MeloXSettingsPreferences.boolean(app, "floating_lyrics_high_contrast", true)
+        autoSyncWordLyricsEnabled = MeloXSettingsPreferences.boolean(app, "autosync_word_lyrics_enabled", false)
         homeTabEnabled = MeloXSettingsPreferences.boolean(app, "tab_home", true)
         homeQuickActionsEnabled = MeloXSettingsPreferences.boolean(app, "home_quick_actions", true)
         homePlaylistsEnabled = MeloXSettingsPreferences.boolean(app, "home_playlists", true)
@@ -789,6 +797,7 @@ object MeloXSettingsPreferences {
             "lyrics_notification_dismiss_paused" -> MeloXSettingsRuntime.lyricNotificationDismissWhenPaused = value
             "floating_lyrics_enabled" -> MeloXSettingsRuntime.floatingLyricsEnabled = value
             "floating_lyrics_high_contrast" -> MeloXSettingsRuntime.floatingHighContrast = value
+            "autosync_word_lyrics_enabled" -> MeloXSettingsRuntime.autoSyncWordLyricsEnabled = value
             "tab_home" -> MeloXSettingsRuntime.homeTabEnabled = value
             "home_quick_actions" -> MeloXSettingsRuntime.homeQuickActionsEnabled = value
             "home_playlists" -> MeloXSettingsRuntime.homePlaylistsEnabled = value

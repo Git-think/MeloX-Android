@@ -51,7 +51,7 @@ class CrossProviderPlaybackFallbackResolverTest {
     }
 
     @Test
-    fun unknownDurationUsesExactTitleAndCompleteArtistMatch() {
+    fun unknownDurationIsNotMatchedAcrossProviders() {
         val partialArtists = track(
             source = MusicSource.QQMusic,
             artist = "Primary Artist",
@@ -65,6 +65,8 @@ class CrossProviderPlaybackFallbackResolverTest {
             FakeProvider(MusicSource.Kugou, listOf(exact), playable = true),
         )
 
+        // Without a duration there is no reliable disambiguator, so the
+        // resolver refuses to swap providers rather than guess.
         val result = resolver.resolve(
             request().copy(
                 artist = "Primary Artist / Guest",
@@ -72,8 +74,7 @@ class CrossProviderPlaybackFallbackResolverTest {
             ),
         )
 
-        assertEquals(MusicSource.Kugou, result?.source)
-        assertEquals(exact.id.value, result?.resourceId)
+        assertNull(result)
     }
 
     @Test
