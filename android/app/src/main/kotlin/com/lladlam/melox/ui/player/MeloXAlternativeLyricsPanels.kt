@@ -85,9 +85,9 @@ private fun rememberAlternativeLyrics(
         error = null
         runCatching {
             MeloXProviderLyricsLoader.load(context, state) { upgraded ->
-                // Hot upgrade to authored word timing, only while the track is
-                // still near its start. The callback runs on the main thread.
-                if (livePositionMs() <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs) {
+                if (livePlaybackState.mediaId == mediaId &&
+                    (upgraded.autoSyncModelKey != null || livePositionMs() <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs)
+                ) {
                     document = upgraded
                 }
             }
@@ -167,9 +167,9 @@ private fun rememberTextPVLyrics(
         error = null
         runCatching {
             MeloXProviderLyricsLoader.load(context, state) { upgraded ->
-                // Hot upgrade to authored word timing, only while the track is
-                // still near its start. The callback runs on the main thread.
-                if (livePositionMs() <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs) {
+                if (livePlaybackState.mediaId == mediaId &&
+                    (upgraded.autoSyncModelKey != null || livePositionMs() <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs)
+                ) {
                     document = upgraded
                 }
             }

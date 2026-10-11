@@ -38,10 +38,18 @@ android {
 
     defaultConfig {
         applicationId = "com.lladlam.melox.android"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 37
         versionCode = 20
         versionName = "0.6.2"
+        testInstrumentationRunner = "com.lladlam.melox.core.autosync.AutoSyncDeviceRunner"
+        // One APK for real phones: both ARM architectures stay in the package,
+        // so 32-bit devices keep working exactly as before. Only the
+        // emulator-only x86/x86_64 copies are removed — ONNX Runtime alone
+        // ships ~39 MB of native code per x86 ABI and no phone loads them.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
         buildConfigField(
             "String",
             "SPOTIFY_CLIENT_ID",
@@ -152,6 +160,10 @@ dependencies {
     implementation("androidx.media3:media3-datasource:1.10.1")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
+
+    // AutoSync word-level lyric alignment. Inference is fully local (ONNX
+    // Runtime on CPU); weights are supplied per language, never bundled here.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
     implementation("io.coil-kt.coil3:coil-compose:3.5.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")

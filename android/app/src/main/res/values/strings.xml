@@ -746,6 +746,11 @@
     <string name="settings_skyline_drift">Drift amount</string>
     <string name="settings_skyline_reset">Restore default fullscreen Skyline lyrics</string>
     <string name="settings_floating_show">Show floating lyrics</string>
+    <string name="settings_floating_requires_android_8">Floating lyrics require Android 8.0 or later. Core music features remain available on this device.</string>
+    <string name="settings_autosync_word">AutoSync word lyrics</string>
+    <string name="settings_autosync_word_note">When a song only has line-timed lyrics, generate real word timing on this device (ONNX, fully offline). Lyrics stay line-timed when the model is missing or alignment fails.</string>
+    <string name="settings_autosync_no_model">No AutoSync model installed yet. Add one under the app folder files/autosync/&lt;language&gt;/ to enable generation.</string>
+    <string name="settings_autosync_models">Installed AutoSync models: %1$s</string>
     <string name="settings_floating_show_note">Show the current lyric plus translation or romanization over other apps. Drag to move it.</string>
     <string name="settings_floating_secondary">Secondary lyric</string>
     <string name="settings_floating_secondary_auto">Auto (translation / romanization / next line)</string>
@@ -1323,4 +1328,14 @@
     <string name="search_cat_work">Work</string>
     <string name="search_cat_relax">Relax</string>
     <string name="search_cat_night">Night</string>
+    <string name="autosync_models_title">AutoSync models</string>
+    <string name="autosync_models_loading">Loading model list…</string>
+    <string name="autosync_models_retry">Retry</string>
+    <string name="autosync_model_download">Download</string>
+    <string name="autosync_model_delete">Delete</string>
+    <string name="autosync_model_installed">Installed %1$s</string>
+    <string name="autosync_model_not_installed">Not installed</string>
+    <string name="autosync_model_downloading">Downloading %1$d%%</string>
+    <string name="autosync_model_failed">Failed: %1$s</string>
+    <string name="autosync_model_confirm">This downloads about %1$s. Continue?</string>
 </resources>

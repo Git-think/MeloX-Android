@@ -308,17 +308,32 @@ private fun MeloXAppleMusicLyricsPanel(
         errorMessage = null
         runCatching {
             MeloXProviderLyricsLoader.load(appContext, state) { upgraded ->
-                // Hot upgrade to authored word timing. Only swap while the
-                // track is still near its start; a style change mid-song would
-                // be jarring. The callback fires on the main thread.
+                // Authored-source swaps keep their early window. Local model
+                // timing can finish later, but must still belong to this track.
                 val livePositionMs = anchorPositionMs +
                     (SystemClock.elapsedRealtime() - anchorRealtimeMs)
-                if (livePositionMs <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs) {
+                if (state.mediaId == mediaId &&
+                    (upgraded.autoSyncModelKey != null || livePositionMs <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs)
+                ) {
                     lyrics = upgraded
+                    if (upgraded.autoSyncModelKey != null) {
+                        android.util.Log.i(
+                            "MeloXLyricsAuto",
+                            "AutoSync displayed track=$mediaId wordLines=${upgraded.lines.count { it.syllables.isNotEmpty() }}",
+                        )
+                    }
                 }
             }
         }
-            .onSuccess { lyrics = it }
+            .onSuccess {
+                lyrics = it
+                if (it.autoSyncModelKey != null) {
+                    android.util.Log.i(
+                        "MeloXLyricsAuto",
+                        "AutoSync displayed from cache track=$mediaId wordLines=${it.lines.count { line -> line.syllables.isNotEmpty() }}",
+                    )
+                }
+            }
             .onFailure { errorMessage = it.message ?: "歌词加载失败" }
         // A newly selected item always enters from its lyric start anchor.
         // Subsequent seeks keep using the normal position callback above.

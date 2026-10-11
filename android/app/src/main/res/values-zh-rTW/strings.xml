@@ -746,6 +746,11 @@
     <string name="settings_skyline_drift">漂移幅度</string>
     <string name="settings_skyline_reset">還原全螢幕天際歌詞預設值</string>
     <string name="settings_floating_show">顯示懸浮歌詞</string>
+    <string name="settings_floating_requires_android_8">懸浮歌詞需要 Android 8.0 或更新版本。此裝置仍可使用音樂核心功能。</string>
+    <string name="settings_autosync_word">AutoSync 自動逐字歌詞</string>
+    <string name="settings_autosync_word_note">當歌曲只有逐行歌詞時，在本機用 ONNX 完全離線產生真實逐字時間軸。模型缺失或對齊失敗時仍保持逐行歌詞。</string>
+    <string name="settings_autosync_no_model">尚未安裝 AutoSync 模型。將模型放入應用程式目錄 files/autosync/&lt;語言&gt;/ 後即可生效。</string>
+    <string name="settings_autosync_models">已安裝的 AutoSync 模型：%1$s</string>
     <string name="settings_floating_show_note">在其他應用上方顯示目前歌詞與翻譯／羅馬拼音，可直接拖曳位置。</string>
     <string name="settings_floating_secondary">副歌詞內容</string>
     <string name="settings_floating_secondary_auto">自動（翻譯／羅馬拼音／下一句）</string>
@@ -1323,4 +1328,14 @@
     <string name="search_cat_work">工作</string>
     <string name="search_cat_relax">放鬆</string>
     <string name="search_cat_night">夜晚</string>
+    <string name="autosync_models_title">AutoSync 模型</string>
+    <string name="autosync_models_loading">正在取得模型清單…</string>
+    <string name="autosync_models_retry">重試</string>
+    <string name="autosync_model_download">下載</string>
+    <string name="autosync_model_delete">刪除</string>
+    <string name="autosync_model_installed">已安裝 %1$s</string>
+    <string name="autosync_model_not_installed">未安裝</string>
+    <string name="autosync_model_downloading">下載中 %1$d%%</string>
+    <string name="autosync_model_failed">失敗：%1$s</string>
+    <string name="autosync_model_confirm">將下載約 %1$s，是否繼續？</string>
 </resources>

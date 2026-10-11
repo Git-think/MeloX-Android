@@ -843,7 +843,9 @@ private fun SystemPlaybackSettings(context: android.content.Context) {
     )
     SettingsActionButton(stringResource(R.string.settings_notify_test)) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("melox_lyrics", context.getString(R.string.settings_notify_channel_lyrics), NotificationManager.IMPORTANCE_LOW))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(NotificationChannel("melox_lyrics", context.getString(R.string.settings_notify_channel_lyrics), NotificationManager.IMPORTANCE_LOW))
+        }
         manager.notify(
             10_043,
             NotificationCompat.Builder(context, "melox_lyrics")
@@ -870,6 +872,24 @@ private fun ExperimentalSettings(context: android.content.Context, source: Music
         mutableStateOf(MeloXSettingsPreferences.boolean(context, "bilibili_lyric_audio_alignment", false))
     }
     var refreshRevision by remember { mutableIntStateOf(0) }
+    var autoSyncEnabled by remember(source) {
+        mutableStateOf(MeloXSettingsRuntime.autoSyncWordLyricsEnabled)
+    }
+    SettingsGlassGroup {
+        SettingsExternalToggleRow(
+            title = stringResource(R.string.settings_autosync_word),
+            value = autoSyncEnabled,
+            note = stringResource(R.string.settings_autosync_word_note),
+            grouped = true,
+        ) { enabled ->
+            autoSyncEnabled = enabled
+            MeloXSettingsPreferences.setBoolean(context, "autosync_word_lyrics_enabled", enabled)
+        }
+    }
+    if (autoSyncEnabled) {
+        SettingsGlassGroup { AutoSyncModelPanel(context) }
+        Spacer(Modifier.height(10.dp))
+    }
 
     if (source == MusicSource.Bilibili) {
         SettingsGlassGroup {
@@ -1180,6 +1200,15 @@ private fun SkylineLyricsSettings(context: android.content.Context) {
 
 @Composable
 private fun FloatingLyricsSettings(context: android.content.Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        Text(
+            text = stringResource(R.string.settings_floating_requires_android_8),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+            fontSize = 14.sp,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
+        )
+        return
+    }
     var enabled by remember { mutableStateOf(MeloXSettingsRuntime.floatingLyricsEnabled) }
     var permissionGranted by remember { mutableStateOf(AndroidSettings.canDrawOverlays(context)) }
 
