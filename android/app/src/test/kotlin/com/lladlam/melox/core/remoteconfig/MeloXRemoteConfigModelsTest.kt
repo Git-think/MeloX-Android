@@ -105,6 +105,31 @@ class MeloXRemoteConfigModelsTest {
     }
 
     @Test
+    fun colorOverridesAcceptHexAndDropUnknownRoles() {
+        val parsed = parseColorOverrides(
+            org.json.JSONObject(
+                """
+                {
+                  "primary": "#FF8800",
+                  "dark.background": "#0B0B0D",
+                  "light.primary": "#007AFF",
+                  "unknownRole": "#FFFFFF",
+                  "bad": "not-a-colour",
+                  "short": "#12345"
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(setOf("primary", "dark.background", "light.primary"), parsed.keys)
+        assertEquals(0xFFFF8800.toInt(), parsed.getValue("primary"))
+        assertEquals(0xFF0B0B0D.toInt(), parsed.getValue("dark.background"))
+        org.junit.Assert.assertNull(parseHexColor("not-a-colour"))
+        org.junit.Assert.assertNull(parseHexColor("#12345"))
+        org.junit.Assert.assertEquals(0x80123456.toInt(), parseHexColor("#80123456"))
+    }
+
+    @Test
     fun scriptsAreParsedWithRevisionAndSource() {
         val scripts = parseScripts(
             org.json.JSONObject(

@@ -44,6 +44,8 @@ data class MeloXRemoteConfig(
      */
     val textOverrides: Map<String, Map<String, String>>,
     val scripts: Map<String, MeloXRemoteScript>,
+    /** ARGB theme colours, keyed `<role>` or `<light|dark>.<role>`. */
+    val colorOverrides: Map<String, Int>,
 ) {
     fun appliesTo(versionCode: Int): Boolean = versionCode in minVersionCode..maxVersionCode
 
@@ -101,6 +103,7 @@ data class MeloXRemoteConfig(
                 notice = notice,
                 textOverrides = parseTextOverrides(root.optJSONObject("textOverrides")),
                 scripts = parseScripts(root.optJSONObject("scripts")),
+                colorOverrides = parseColorOverrides(root.optJSONObject("colorOverrides")),
             )
         }
     }
@@ -187,6 +190,59 @@ internal fun parseScripts(json: JSONObject?): Map<String, MeloXRemoteScript> {
     }
     return result
 }
+
+/**
+ * Parses the signed `colorOverrides` block.
+ *
+ * Only the Material roles the app actually consumes are accepted, values must be
+ * `#RRGGBB` / `#AARRGGBB`, and the whole block is length-capped. An invalid entry
+ * is dropped rather than failing the config, so a typo can never blank the UI.
+ */
+internal fun parseColorOverrides(json: JSONObject?): Map<String, Int> {
+    if (json == null) return emptyMap()
+    val result = LinkedHashMap<String, Int>()
+    for (key in json.keys()) {
+        if (result.size >= MaxColorOverrides) break
+        val cleanKey = key.trim()
+        if (cleanKey.length > MaxColorOverrideKeyLength) continue
+        val role = cleanKey.substringAfterLast('.')
+        if (role !in AllowedColorRoles) continue
+        val prefix = cleanKey.substringBeforeLast('.', "")
+        if (prefix.isNotEmpty() && prefix != "light" && prefix != "dark") continue
+        val parsed = parseHexColor(json.optString(key)) ?: continue
+        result[cleanKey] = parsed
+    }
+    return result
+}
+
+/** `#RRGGBB`, `#AARRGGBB`, or the same without the leading `#`. */
+internal fun parseHexColor(value: String): Int? {
+    val text = value.trim().removePrefix("#")
+    if (text.length != 6 && text.length != 8) return null
+    if (!text.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) return null
+    val body = text.toLong(16)
+    return if (text.length == 6) (0xFF000000L or body).toInt() else body.toInt()
+}
+
+internal val AllowedColorRoles = setOf(
+    "primary",
+    "onPrimary",
+    "primaryContainer",
+    "onPrimaryContainer",
+    "secondary",
+    "tertiary",
+    "error",
+    "background",
+    "onBackground",
+    "surface",
+    "onSurface",
+    "surfaceVariant",
+    "onSurfaceVariant",
+    "outline",
+)
+
+internal const val MaxColorOverrides = 48
+internal const val MaxColorOverrideKeyLength = 48
 
 internal const val MaxHotScripts = 8
 internal const val MaxHotScriptNameLength = 64

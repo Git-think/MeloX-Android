@@ -66,6 +66,7 @@ object MeloXRemoteConfigRuntime {
                         )
                         MeloXHotStrings.update(effective.textOverrides)
                         MeloXHotScripts.update(effective.scripts)
+                        MeloXHotStyles.update(effective.colorOverrides)
                     }
                 }
             }

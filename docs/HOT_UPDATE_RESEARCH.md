@@ -98,6 +98,24 @@
 服务端：`MeloX-Remote-Config` 的 schema、`RemoteConfig` 模型与 `RemoteConfigValidator` 已同步支持
 该字段并通过测试；admin GUI 尚无覆盖编辑器，保存时会原样保留已加载的覆盖表。
 
+### 4.2b 主题色覆盖（M1 扩展，已实现）
+
+```json
+"colorOverrides": {
+  "primary": "#FF8800",
+  "dark.background": "#0B0B0D",
+  "light.surface": "#FDFDFE"
+}
+```
+
+- key 为 Material 角色名（`primary` / `onPrimary` / `primaryContainer` / `onPrimaryContainer` /
+  `secondary` / `tertiary` / `error` / `background` / `onBackground` / `surface` / `onSurface` /
+  `surfaceVariant` / `onSurfaceVariant` / `outline`），可加 `light.` / `dark.` 前缀只覆盖单模式；
+  不带前缀则两种模式都生效。
+- 取值必须是 `#RRGGBB` 或 `#AARRGGBB`；角色未知、格式错误或条目超过 48 条直接丢弃。
+- 客户端在 `MeloXTheme` 唯一入口处应用（`ui/theme/MeloXHotColors.kt`），因此底栏插值、
+  玻璃材质等派生颜色会跟着一起变；未覆盖的角色保持内置配色。
+
 ### 4.3 quickjs 受限脚本（M2 已实现）
 
 脚本同样随**已签名的云控 payload** 下发，字段为：
@@ -150,6 +168,7 @@
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | M1 | 签名文案覆盖（并入云控 payload；客户端 + admin + 测试） | **已完成** |
+| M1b | 主题色覆盖（`colorOverrides`，`MeloXTheme` 单一入口应用） | **已完成** |
 | M2 | 签名脚本沙箱（quickjs、内存/超时限制、`search.keywords` 接线） | **已完成** |
 | M3 | DEX 热修复决策 | **已完成：暂不引入**（见 4.4） |
 | — | 插件化 | 不做 |
@@ -158,15 +177,15 @@
 
 ### 7.1 客户端行为
 
-- 只有「已授权云控 + 配置验签通过 + `versionCode` 在区间内」时，覆盖与脚本才生效；
-  其余情况一律用内置文案与内置逻辑。
+- 只有「已授权云控 + 配置验签通过 + `versionCode` 在区间内」时，文案/颜色覆盖与脚本才生效；
+  其余情况一律用内置文案、内置配色与内置逻辑。
 - 撤回云控授权、清缓存或配置回滚，覆盖与脚本会立即失效。
 - 脚本通道一旦超时会**在本进程内关闭**，重启应用后恢复。
 
 ### 7.2 维护者发布覆盖/脚本
 
-1. 在 `MeloX-Remote-Config` 仓库里编辑 `config/current-v1.json`，加入 `textOverrides`
-   或 `scripts`，并把 `configVersion` +1。
+1. 在 `MeloX-Remote-Config` 仓库里编辑 `config/current-v1.json`，加入 `textOverrides` /
+   `colorOverrides` / `scripts`，并把 `configVersion` +1。
 2. 启动 admin（`./gradlew :admin:run`，工作目录为仓库根）→ 加载当前配置 → 保存并发布，
    或使用 CLI：`bootstrap <口令文件>`（会重新签名并发布）。
 3. 发布产物落到 `MeloX-Remote-Config-Public` 的 `v1/latest.json`；客户端最迟在下次前台
@@ -183,7 +202,15 @@
 
 key 见 §4.2 的表格；新增 key 时把内联文案改成 `hotText("模块.用途", "默认值")`。
 
-### 7.4 写一条脚本 hook
+### 7.4 写一条颜色覆盖
+
+```json
+"colorOverrides": { "dark.primary": "#FF375F", "light.primary": "#007AFF" }
+```
+
+配合系统深浅色自动切换；不带前缀的 key 对两种模式都生效。
+
+### 7.5 写一条脚本 hook
 
 ```json
 "scripts": {
