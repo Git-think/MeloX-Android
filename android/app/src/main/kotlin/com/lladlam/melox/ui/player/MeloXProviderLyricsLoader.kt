@@ -1039,7 +1039,14 @@ internal fun isSafeCrossProviderLyricMatch(
     if (target.version != LyricTrackVersion.Original && target.versionLabel != other.versionLabel) return false
     if (targetDurationMs > 0L) {
         val candidateDuration = candidate.durationMs ?: return false
-        val toleranceMs = if (target.version == LyricTrackVersion.Original) 2_000L else 1_000L
+        // Tolerances come from the signed rules so cross-provider matching can be
+        // tightened or loosened without an APK.
+        val hotRules = com.lladlam.melox.core.remoteconfig.MeloXHotRules.current
+        val toleranceMs = if (target.version == LyricTrackVersion.Original) {
+            hotRules.lyricMatchOriginalToleranceMs
+        } else {
+            hotRules.lyricMatchVersionToleranceMs
+        }
         if (kotlin.math.abs(targetDurationMs - candidateDuration) > toleranceMs) return false
     }
     val targetArtistKey = normalizeLyricMatchText(targetArtist.substringBefore(" /"))

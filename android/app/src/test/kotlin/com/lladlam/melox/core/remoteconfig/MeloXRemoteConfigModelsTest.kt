@@ -130,6 +130,99 @@ class MeloXRemoteConfigModelsTest {
     }
 
     @Test
+    fun rulesParseTolerancesAndTitleSuffixes() {
+        val tooLong = "y".repeat(MaxTitleStripSuffixLength + 1)
+        val rules = parseRules(
+            org.json.JSONObject(
+                """
+                {
+                  "lyricMatch": { "originalToleranceMs": 99999, "versionToleranceMs": 500 },
+                  "searchTitleStripSuffixes": ["(Live)", " - Live", "", "$tooLong"]
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(MaxLyricMatchToleranceMs, rules.lyricMatchOriginalToleranceMs)
+        assertEquals(500L, rules.lyricMatchVersionToleranceMs)
+        // Suffixes are trimmed at parse time; the matcher keeps working because
+        // the stripped title is trimmed again afterwards.
+        assertEquals(listOf("(Live)", "- Live"), rules.searchTitleStripSuffixes)
+    }
+
+    @Test
+    fun titleSuffixStrippingIsRepeatedAndNeverEmptiesTheTitle() {
+        val suffixes = listOf("(Live)", " - Live")
+        assertEquals("夜曲", stripTitleSuffixes("夜曲(Live) - Live", suffixes))
+        assertEquals("夜曲", stripTitleSuffixes("夜曲(LIVE)", suffixes))
+        assertEquals("(Live)", stripTitleSuffixes("(Live)", suffixes))
+        assertEquals("夜曲", stripTitleSuffixes("夜曲", suffixes))
+    }
+
+    @Test
+    fun compatStrategyIsAcceptedAndUnknownFallsBack() {
+        val compat = MeloXRemoteConfig.parse(
+            defaultPayload().replace("\"netease_playback\": \"v1\"", "\"netease_playback\": \"compat\"").toByteArray(),
+        )
+        assertEquals("compat", compat.strategies["netease_playback"])
+
+        val bogus = MeloXRemoteConfig.parse(
+            defaultPayload().replace("\"netease_playback\": \"v1\"", "\"netease_playback\": \"v9\"").toByteArray(),
+        )
+        assertEquals("v1", bogus.strategies["netease_playback"])
+    }
+
+    private fun defaultPayload(): String = """
+        {
+          "schemaVersion": 1,
+          "configVersion": 1,
+          "issuedAtEpochSeconds": 1,
+          "minVersionCode": 1,
+          "maxVersionCode": 100,
+          "disabledCapabilities": [],
+          "strategies": { "netease_playback": "v1", "qq_playback": "v1", "kugou_playback": "v1" },
+          "crossProviderFallback": {
+            "enabled": true,
+            "order": ["qq_music", "kugou", "bilibili"],
+            "disabledProviders": [],
+            "timeoutMs": 6000
+          }
+        }
+    """.trimIndent()
+
+    @Test
+    fun updatePatchesRequirePinnedHostAndValidHashes() {
+        val good = "a".repeat(64)
+        val patch = parseUpdatePatches(
+            org.json.JSONArray(
+                """
+                [
+                  {
+                    "fromApkSha256": "$good",
+                    "toVersion": "0.6.6",
+                    "apkSha256": "$good",
+                    "patchUrl": "https://github.com/lladlam/MeloX-Android/releases/download/0.6.6/MeloX-0.6.5-0.6.6.patch",
+                    "patchSha256": "$good",
+                    "patchBytes": 123456
+                  },
+                  {
+                    "fromApkSha256": "$good",
+                    "toVersion": "0.6.7",
+                    "apkSha256": "$good",
+                    "patchUrl": "https://evil.example/0.6.7.patch",
+                    "patchSha256": "$good",
+                    "patchBytes": 123456
+                  }
+                ]
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(1, patch.size)
+        assertEquals("0.6.6", patch.first().toVersion)
+    }
+
+    @Test
     fun scriptsAreParsedWithRevisionAndSource() {
         val scripts = parseScripts(
             org.json.JSONObject(

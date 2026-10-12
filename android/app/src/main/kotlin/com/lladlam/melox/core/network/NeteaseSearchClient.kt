@@ -5,6 +5,7 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.lyrics.NeteaseLyricParser
 import com.lladlam.melox.core.model.SearchSong
+import com.lladlam.melox.core.remoteconfig.MeloXHotRules
 import com.lladlam.melox.core.remoteconfig.MeloXHotScripts
 import java.io.IOException
 import java.net.URLEncoder
@@ -68,13 +69,15 @@ class NeteaseSearchClient(
         keywords: String,
         limit: Int = 30,
     ): List<SearchSong> = withContext(Dispatchers.IO) {
-        // Signed `search.keywords` hook: the maintainer can fix keyword quirks
-        // without an APK. Absent, failing or slow hooks fall back to the input.
+        // Signed rules strip known literal suffixes first, then the signed
+        // `search.keywords` hook may rewrite whatever is left. Both are optional
+        // and fall back to the caller's keyword.
+        val stripped = MeloXHotRules.stripTitleSuffixes(keywords.trim())
         val query = MeloXHotScripts.run(
             "search.keywords",
-            JSONObject().put("keywords", keywords.trim()),
+            JSONObject().put("keywords", stripped),
         )?.optString("keywords")?.trim()?.takeIf(String::isNotEmpty)
-            ?: keywords.trim()
+            ?: stripped
         if (query.isEmpty()) return@withContext emptyList()
 
         val payload = JSONObject()

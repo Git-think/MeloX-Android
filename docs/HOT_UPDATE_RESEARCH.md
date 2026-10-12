@@ -156,6 +156,32 @@
 重新评估的条件（满足其一再考虑）：出现必须改 Native/启动路径的线上阻断问题，
 且整包更新无法在可接受时间内覆盖用户；或接入 Google Play 后仍需要 Play 之外的补丁通道。
 
+### 4.5 增量 APK 更新（M4 已实现）
+
+整包 82 MB 里 58 MB 是 ONNX Runtime 原生库、9.6 MB 是 dex；只改代码时用户却要下整包。
+增量更新用 **BSDIFF40** 补丁解决：设备端从「已安装的 APK + 补丁」重建出目标 APK。
+
+- 发布期生成：`tools/make_apk_patch.sh <旧.apk> <新.apk> <out.patch> <version>`（依赖参考实现
+  `bsdiff4`），并直接打印可粘贴进云控的 `updatePatches` 条目。
+- 客户端：`core/update/BsPatch.kt` 实现 BSDIFF40 应用（bzip2 三个流按头部声明长度切片，
+  commons-compress 解压）；`MeloXApkDelta` 负责重建、校验、拉起系统安装器。
+- 校验链：补丁体积 + 补丁 SHA-256 → 重建后的 APK SHA-256 必须等于发布的
+  `apkSha256` → 安装器再校验签名与已安装应用一致。任一步不符就回落整包下载。
+- 实测：0.6.4 → 0.6.5 的补丁 **4.8 MB**（整包的 5.9%），设备端重建耗时 <1 秒。
+- 权限：新增 `REQUEST_INSTALL_PACKAGES`，只用于「增量更新」这一显式操作。
+
+`updatePatches` 条目（由脚本生成）：
+
+```json
+{
+  "fromApkSha256": "...", "toVersion": "0.6.5", "apkSha256": "...",
+  "patchUrl": "https://github.com/lladlam/MeloX-Android/releases/download/<tag>/xxx.patch",
+  "patchSha256": "...", "patchBytes": 5016788
+}
+```
+
+URL 必须位于固定 release 前缀下（客户端与 admin 双向校验），条目 ≤4 条、单补丁 ≤64 MB。
+
 ## 5. 风险与合规
 
 - 安全：DEX/JS 下发是任意代码/逻辑执行面；必须签名校验 + 固定下载源 + 失败回退。密钥泄露等同于可被投毒。
@@ -171,6 +197,8 @@
 | M1b | 主题色覆盖（`colorOverrides`，`MeloXTheme` 单一入口应用） | **已完成** |
 | M2 | 签名脚本沙箱（quickjs、内存/超时限制、`search.keywords` 接线） | **已完成** |
 | M3 | DEX 热修复决策 | **已完成：暂不引入**（见 4.4） |
+| M4 | 规则/策略数据化（`rules`、`strategies=compat`） | **已完成** |
+| M5 | 增量 APK（BSDIFF40 + 重建校验 + 安装） | **已完成** |
 | — | 插件化 | 不做 |
 
 ## 7. 使用方法
@@ -210,7 +238,18 @@ key 见 §4.2 的表格；新增 key 时把内联文案改成 `hotText("模块.�
 
 配合系统深浅色自动切换；不带前缀的 key 对两种模式都生效。
 
-### 7.5 写一条脚本 hook
+### 7.5 发布一条增量补丁
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install bsdiff4
+PYTHON=.venv/bin/python tools/make_apk_patch.sh \
+  /path/MeloX-Android-0.6.4.apk /path/MeloX-Android-0.6.5.apk melox-0.6.4-to-0.6.5.patch 0.6.5
+```
+
+把输出的 `updatePatches` 数组粘进 `config/current-v1.json`（`configVersion` +1），并把 patch 文件
+作为 release 资产上传；用户端在关于页看到「增量更新 X.Y.Z（约 N MB）」，点击即重建并拉起安装器。
+
+### 7.6 写一条脚本 hook
 
 ```json
 "scripts": {

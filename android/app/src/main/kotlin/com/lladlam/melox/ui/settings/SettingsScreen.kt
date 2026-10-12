@@ -2763,6 +2763,7 @@ private fun RemoteConfigSettings() {
         )
         RemoteConfigStatusLine("回退顺序", status.config.fallback.order.joinToString(" → "))
         RemoteConfigStatusLine("回退超时", "${status.config.fallback.timeoutMs} ms")
+        RemoteConfigStatusLine("热更新", hotUpdateSummary())
     }
     status.error?.let { error ->
         Spacer(Modifier.height(12.dp))
@@ -2783,6 +2784,29 @@ private fun RemoteConfigSettings() {
     Spacer(Modifier.height(10.dp))
     SettingsDangerButton("清除缓存并恢复内置配置") {
         scope.launch { MeloXRemoteConfigRuntime.clearCache(context) }
+    }
+}
+
+/**
+ * Compact view of what the signed hot-update channel currently contributes, so
+ * a maintainer can confirm a payload landed without digging through logs.
+ */
+@Composable
+private fun hotUpdateSummary(): String {
+    val text by com.lladlam.melox.core.remoteconfig.MeloXHotStrings.overrides.collectAsState()
+    val colors by com.lladlam.melox.core.remoteconfig.MeloXHotStyles.colors.collectAsState()
+    val scripts by com.lladlam.melox.core.remoteconfig.MeloXHotScripts.scripts.collectAsState()
+    val rules by com.lladlam.melox.core.remoteconfig.MeloXHotRules.rules.collectAsState()
+    val neteaseStrategy = com.lladlam.melox.core.remoteconfig.MeloXHotStrategies.value("netease_playback")
+    return buildString {
+        append("文案 ").append(text.values.sumOf { it.size })
+        append(" · 颜色 ").append(colors.size)
+        append(" · 脚本 ").append(scripts.size)
+        append(" · 后缀 ").append(rules.searchTitleStripSuffixes.size)
+        append(" · 网易云 ").append(neteaseStrategy)
+        val overridden = text.values.sumOf { it.size } + colors.size + scripts.size +
+            rules.searchTitleStripSuffixes.size
+        if (overridden == 0 && neteaseStrategy == "v1") append("（未覆盖）")
     }
 }
 
@@ -2981,6 +3005,52 @@ private fun AboutSettings(context: android.content.Context) {
     }
     release?.takeIf { updateClient.isNewer(it.version, BuildConfig.VERSION_NAME) }?.let { available ->
         Spacer(Modifier.height(10.dp))
+        var deltaPatch by remember(available.version) {
+            mutableStateOf<com.lladlam.melox.core.remoteconfig.MeloXRemoteUpdatePatch?>(null)
+        }
+        LaunchedEffect(available.version) {
+            deltaPatch = withContext(Dispatchers.IO) {
+                val patch = com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime.status.value
+                    .config.updatePatches.firstOrNull { it.toVersion == available.version }
+                    ?: return@withContext null
+                val installed = com.lladlam.melox.core.update.MeloXApkDelta.installedApkSha256(context)
+                    ?: return@withContext null
+                patch.takeIf { it.fromApkSha256.equals(installed, ignoreCase = true) }
+            }
+        }
+        deltaPatch?.let { patch ->
+            SettingsActionButton(
+                "增量更新 ${available.version}（约 %.0f MB）".format(patch.patchBytes / 1024.0 / 1024.0),
+            ) {
+                scope.launch {
+                    updateStatus = "正在下载增量补丁…"
+                    val patchFile = updateClient.downloadPatch(context, patch)
+                    if (patchFile == null) {
+                        updateStatus = "增量补丁下载失败，可用整包下载"
+                        return@launch
+                    }
+                    updateStatus = "正在重建安装包…"
+                    val apk = withContext(Dispatchers.IO) {
+                        com.lladlam.melox.core.update.MeloXApkDelta.reconstruct(
+                            context = context,
+                            patch = patchFile,
+                            expectedApkSha256 = patch.apkSha256,
+                            versionName = available.version,
+                        )
+                    }
+                    if (apk == null) {
+                        updateStatus = "增量重建校验失败，请用整包下载"
+                        return@launch
+                    }
+                    updateStatus = if (com.lladlam.melox.core.update.MeloXApkDelta.launchInstaller(context, apk)) {
+                        "已打开系统安装器"
+                    } else {
+                        "无法打开安装器，请用整包下载"
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
         SettingsActionButton(if (available.apkUrl != null) "下载 ${available.version} APK" else "打开 ${available.version} 发布页") {
             scope.launch {
                 val target = runCatching { updateClient.downloadUrl(available) }.getOrNull() ?: available.pageUrl

@@ -21,6 +21,30 @@ data class MeloXRemoteNotice(
  * A signed, sandboxed behaviour hook. The source must define `run(input)` and
  * return a JSON-serialisable value; see [com.lladlam.melox.core.remoteconfig.MeloXHotScripts].
  */
+/**
+ * Data-driven matching/search rules. Everything is bounded and validated at
+ * parse time so a bad payload can only fall back to the built-in behaviour.
+ */
+data class MeloXRemoteRules(
+    val lyricMatchOriginalToleranceMs: Long,
+    val lyricMatchVersionToleranceMs: Long,
+    val searchTitleStripSuffixes: List<String>,
+)
+
+/**
+ * One incremental-update patch: rebuilding the APK published as [toVersion] from
+ * the currently installed one (identified by [fromApkSha256]) must yield exactly
+ * [apkSha256]. Every field is verified before the file is handed to the installer.
+ */
+data class MeloXRemoteUpdatePatch(
+    val fromApkSha256: String,
+    val toVersion: String,
+    val apkSha256: String,
+    val patchUrl: String,
+    val patchSha256: String,
+    val patchBytes: Long,
+)
+
 data class MeloXRemoteScript(
     val name: String,
     val revision: Int,
@@ -46,6 +70,8 @@ data class MeloXRemoteConfig(
     val scripts: Map<String, MeloXRemoteScript>,
     /** ARGB theme colours, keyed `<role>` or `<light|dark>.<role>`. */
     val colorOverrides: Map<String, Int>,
+    val rules: MeloXRemoteRules,
+    val updatePatches: List<MeloXRemoteUpdatePatch>,
 ) {
     fun appliesTo(versionCode: Int): Boolean = versionCode in minVersionCode..maxVersionCode
 
@@ -63,7 +89,8 @@ data class MeloXRemoteConfig(
                 .filterTo(linkedSetOf()) { it in MeloXRemoteConfigDefaults.AllowedCapabilities }
             val strategyJson = root.getJSONObject("strategies")
             val strategies = MeloXRemoteConfigDefaults.Strategies.mapValues { (name, default) ->
-                strategyJson.optString(name).takeIf { it == "v1" } ?: default
+                val allowed = MeloXRemoteConfigDefaults.AllowedStrategyValues[name].orEmpty()
+                strategyJson.optString(name).takeIf { it in allowed } ?: default
             }
             val fallbackJson = root.getJSONObject("crossProviderFallback")
             val order = fallbackJson.getJSONArray("order").strings()
@@ -104,6 +131,8 @@ data class MeloXRemoteConfig(
                 textOverrides = parseTextOverrides(root.optJSONObject("textOverrides")),
                 scripts = parseScripts(root.optJSONObject("scripts")),
                 colorOverrides = parseColorOverrides(root.optJSONObject("colorOverrides")),
+                rules = parseRules(root.optJSONObject("rules")),
+                updatePatches = parseUpdatePatches(root.optJSONArray("updatePatches")),
             )
         }
     }
@@ -240,6 +269,91 @@ internal val AllowedColorRoles = setOf(
     "onSurfaceVariant",
     "outline",
 )
+
+/**
+ * Parses the signed `rules` block: matching tolerances and safe literal title
+ * suffixes to strip before a provider search. Deliberately no regex from the
+ * remote side — that is an unbounded CPU surface with no timeout.
+ */
+internal fun parseRules(json: JSONObject?): MeloXRemoteRules {
+    val defaults = MeloXRemoteConfigDefaults.Rules
+    if (json == null) return defaults
+    val lyric = json.optJSONObject("lyricMatch")
+    val suffixes = json.optJSONArray("searchTitleStripSuffixes")?.let { array ->
+        buildList {
+            for (index in 0 until array.length()) {
+                if (size >= MaxTitleStripSuffixes) break
+                val value = array.optString(index).trim()
+                if (value.isNotEmpty() && value.length <= MaxTitleStripSuffixLength) add(value)
+            }
+        }.distinct()
+    } ?: defaults.searchTitleStripSuffixes
+    return MeloXRemoteRules(
+        lyricMatchOriginalToleranceMs = lyric
+            ?.optLong("originalToleranceMs", defaults.lyricMatchOriginalToleranceMs)
+            ?.coerceIn(0L, MaxLyricMatchToleranceMs) ?: defaults.lyricMatchOriginalToleranceMs,
+        lyricMatchVersionToleranceMs = lyric
+            ?.optLong("versionToleranceMs", defaults.lyricMatchVersionToleranceMs)
+            ?.coerceIn(0L, MaxLyricMatchToleranceMs) ?: defaults.lyricMatchVersionToleranceMs,
+        searchTitleStripSuffixes = suffixes,
+    )
+}
+
+/** Removes configured literal suffixes from the end of a search keyword. */
+internal fun stripTitleSuffixes(title: String, suffixes: List<String>): String {
+    var result = title.trim()
+    var changed = true
+    while (changed && result.isNotEmpty()) {
+        changed = false
+        for (suffix in suffixes) {
+            if (suffix.isNotEmpty() && result.endsWith(suffix, ignoreCase = true) &&
+                result.length > suffix.length
+            ) {
+                result = result.dropLast(suffix.length).trim()
+                changed = true
+            }
+        }
+    }
+    return result.ifEmpty { title.trim() }
+}
+
+/**
+ * Parses the signed `updatePatches` list.
+ *
+ * The patch URL must live under the project's own GitHub release path — the same
+ * allow-list the full APK download uses — and every hash is length-checked, so a
+ * payload can never point the updater at a foreign host or a truncated hash.
+ */
+internal fun parseUpdatePatches(json: org.json.JSONArray?): List<MeloXRemoteUpdatePatch> {
+    if (json == null) return emptyList()
+    val patches = ArrayList<MeloXRemoteUpdatePatch>()
+    for (index in 0 until json.length()) {
+        if (patches.size >= MaxUpdatePatches) break
+        val entry = json.optJSONObject(index) ?: continue
+        val from = entry.optString("fromApkSha256").lowercase()
+        val apkSha = entry.optString("apkSha256").lowercase()
+        val patchSha = entry.optString("patchSha256").lowercase()
+        val toVersion = entry.optString("toVersion").trim()
+        val url = entry.optString("patchUrl")
+        val bytes = entry.optLong("patchBytes", -1L)
+        if (!isSha256(from) || !isSha256(apkSha) || !isSha256(patchSha)) continue
+        if (toVersion.isEmpty() || toVersion.length > 32) continue
+        if (!url.startsWith(MeloXRemoteConfigDefaults.PinnedReleasePrefix)) continue
+        if (bytes <= 0L || bytes > MaxUpdatePatchBytes) continue
+        patches += MeloXRemoteUpdatePatch(from, toVersion, apkSha, url, patchSha, bytes)
+    }
+    return patches
+}
+
+private fun isSha256(value: String): Boolean =
+    value.length == 64 && value.all { it.isDigit() || it in 'a'..'f' }
+
+internal const val MaxUpdatePatches = 4
+internal const val MaxUpdatePatchBytes = 64L * 1024 * 1024
+
+internal const val MaxTitleStripSuffixes = 16
+internal const val MaxTitleStripSuffixLength = 32
+internal const val MaxLyricMatchToleranceMs = 10_000L
 
 internal const val MaxColorOverrides = 48
 internal const val MaxColorOverrideKeyLength = 48
