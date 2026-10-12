@@ -5,6 +5,7 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.lyrics.NeteaseLyricParser
 import com.lladlam.melox.core.model.SearchSong
+import com.lladlam.melox.core.remoteconfig.MeloXHotScripts
 import java.io.IOException
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -67,7 +68,13 @@ class NeteaseSearchClient(
         keywords: String,
         limit: Int = 30,
     ): List<SearchSong> = withContext(Dispatchers.IO) {
-        val query = keywords.trim()
+        // Signed `search.keywords` hook: the maintainer can fix keyword quirks
+        // without an APK. Absent, failing or slow hooks fall back to the input.
+        val query = MeloXHotScripts.run(
+            "search.keywords",
+            JSONObject().put("keywords", keywords.trim()),
+        )?.optString("keywords")?.trim()?.takeIf(String::isNotEmpty)
+            ?: keywords.trim()
         if (query.isEmpty()) return@withContext emptyList()
 
         val payload = JSONObject()

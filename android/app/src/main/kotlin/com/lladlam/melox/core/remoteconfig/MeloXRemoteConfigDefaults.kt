@@ -33,5 +33,6 @@ object MeloXRemoteConfigDefaults {
         ),
         notice = null,
         textOverrides = emptyMap(),
+        scripts = emptyMap(),
     )
 }

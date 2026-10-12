@@ -103,4 +103,42 @@ class MeloXRemoteConfigModelsTest {
     fun missingTextOverridesYieldEmptyMap() {
         assertTrue(parseTextOverrides(null).isEmpty())
     }
+
+    @Test
+    fun scriptsAreParsedWithRevisionAndSource() {
+        val scripts = parseScripts(
+            org.json.JSONObject(
+                """
+                {
+                  "search.keywords": {
+                    "revision": 3,
+                    "source": "function run(input){ return input; }"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(setOf("search.keywords"), scripts.keys)
+        assertEquals(3, scripts.getValue("search.keywords").revision)
+        assertTrue(scripts.getValue("search.keywords").source.contains("function run"))
+    }
+
+    @Test
+    fun oversizedAndExcessScriptsAreDropped() {
+        val huge = "s".repeat(MaxHotScriptSourceLength + 1)
+        val text = buildString {
+            append("{")
+            append("\"too.long\": {\"source\": \"").append(huge).append("\"},")
+            repeat(MaxHotScripts + 2) { index ->
+                append("\"hook.$index\": {\"source\": \"function run(i){ return i; }\"}")
+                if (index <= MaxHotScripts) append(",")
+            }
+            append("}")
+        }
+        val scripts = parseScripts(org.json.JSONObject(text))
+
+        assertTrue(scripts.size <= MaxHotScripts)
+        assertTrue("too.long" !in scripts)
+    }
 }

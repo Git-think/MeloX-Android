@@ -2,6 +2,31 @@
 
 [English](../README.md)
 
+## 0.6.5 — 2026-10-12
+
+- 版本号升级为 `0.6.5`，`versionCode 23`；正式产物名为 `MeloX-Android-0.6.5.apk`。
+- 新增签名热更新通道：**文案覆盖**与**受限脚本**，两者都随已签名的云控 payload 下发，不新增下载链路。
+
+### 热更新 · 文案覆盖（M1）
+
+- `textOverrides`：`localeTag -> key -> text`，客户端按「精确 locale → 语言 → default」回退，缺失即用内置文案。
+- 只有「已授权云控 + 验签通过 + 版本区间命中」时生效；撤回授权、清缓存或配置回滚会立即失效。
+- 边界：条目 ≤256、locale ≤24、key ≤120、value ≤400，超限条目直接丢弃。
+- 已接入：关于页维护者/上游信息、彩蛋标题与正文（内联 key），AutoSync 开关标题与说明（资源 key）。
+
+### 热更新 · 受限脚本（M2）
+
+- `scripts`：hook → `{revision, source}`，脚本必须定义 `function run(input)` 并返回可序列化结果。
+- 沙箱：每次调用全新 QuickJS context、8 MB 内存与 256 KB 栈上限、单线程 daemon、600ms 墙钟超时；
+  超时后**本进程内禁用脚本通道**；语法/异常/缺 hook 一律返回 `null`，调用方回落内置逻辑。
+- 边界：单脚本 ≤16 KB、总量 ≤32 KB、最多 8 条。
+- 首批接线：`search.keywords`（网易云搜索关键词清洗）。
+
+### 服务端与决策
+
+- `MeloX-Remote-Config` 的 schema、模型、校验与测试同步支持 `textOverrides` / `scripts`。
+- 决策：**暂不引入 DEX 热修复框架**（Tinker/Sophix），理由与重估条件见 `docs/HOT_UPDATE_RESEARCH.md`。
+
 ## 0.6.4 — 2026-10-12
 
 - 版本号升级为 `0.6.4`，`versionCode 22`；正式产物名为 `MeloX-Android-0.6.4.apk`。

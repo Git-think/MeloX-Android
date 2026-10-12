@@ -22,11 +22,11 @@
 
 > MeloX Android is an unofficial open-source project. It is not affiliated with, partnered with, or authorized by NetEase Cloud Music, Xiaomi, Apple, or their related companies.
 
-## Current version: 0.6.4
+## Current version: 0.6.5
 
-`0.6.4` restores the mainline fixes that the contributor merge in 0.6.3 had silently reverted (encrypted-session startup recovery, HyperOS Super Island publishing, lyric-translation alignment, the artist page and playlist layout, plus ProGuard rules and missing tests), keeps the contributor player/glass UI, and retains the on-device AutoSync word-level lyrics backed by ONNX Runtime.
+`0.6.5` adds a signed hot-update channel: UI text overrides and sandboxed QuickJS behaviour hooks delivered inside the already-signed remote config, so copy and small logic fixes no longer need an APK. Everything falls back to the built-in text and logic when consent is off, the config is unverified, or a hook fails or times out.
 
-- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.4)
+- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.5)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]

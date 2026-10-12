@@ -98,23 +98,45 @@
 服务端：`MeloX-Remote-Config` 的 schema、`RemoteConfig` 模型与 `RemoteConfigValidator` 已同步支持
 该字段并通过测试；admin GUI 尚无覆盖编辑器，保存时会原样保留已加载的覆盖表。
 
-### 4.3 quickjs 受限脚本（次优先）
+### 4.3 quickjs 受限脚本（M2 已实现）
 
-- 复用 `LxUserRuntime` 的 quickjs 环境，新增一个受控入口（白名单 API、执行超时、内存上限、无网络/文件系统权限）。
-- 适合：歌词清洗规则、搜索标题归一化、通知格式等纯函数逻辑。
-- 不适合：UI 结构、播放器状态机（放进去会变成两套状态源）。
+脚本同样随**已签名的云控 payload** 下发，字段为：
 
-### 4.4 DEX 热修复（可选，谨慎）
+```json
+"scripts": {
+  "search.keywords": {
+    "revision": 3,
+    "source": "function run(input) { return { keywords: input.keywords.trim() }; }"
+  }
+}
+```
 
-只有确认要走这条路才引入 Tinker：
+客户端 `core/remoteconfig/MeloXHotScripts.kt` 的执行约束：
 
-1. 依赖：`com.tencent.tinker:tinker-android-lib` + `tinker-patch-gradle-plugin`。
-2. 入口改造：`MeloXApplication` 改为 `TinkerApplication` + `ApplicationLike`（改动大，需回归启动链路）。
-3. 补丁生成：CI 用「旧基线 APK + 新代码」产出 patch 包，签名后上传到固定 release。
-4. 客户端：启动时拉清单 → 校验 hash/签名 → `TinkerInstaller` 安装 → 下次启动生效；崩溃率异常自动 `Tinker.with(context).cleanPatch()` 回滚。
-5. 约束：补丁只对**同 versionCode 的基线**有效；ROM/加固/多进程场景兼容性要真机验证。
+- 每次调用创建**全新的 QuickJS context**（无跨调用状态），设置 8 MB 内存上限与 256 KB 栈上限；
+- 单线程 daemon executor + **600ms 墙钟超时**；超时后**整个脚本通道在本进程内禁用**，
+  不会反复消耗 CPU；
+- 脚本必须定义 `function run(input)` 并返回可 JSON 序列化的值；输入以 `JSON.parse`
+  传入字符串字面量，不做属性注入；
+- 任何失败（语法、异常、缺 hook、超时）一律返回 `null`，调用方回落到内置逻辑。
 
-> 注意：Tinker 的基线绑定意味着每个正式版发布后都要归档对应基线 APK；本项目已有 `releases/` 目录与 GitHub Release，可作为归档点。
+首批接线 hook：**`search.keywords`**——网易云搜索关键词在请求前经过它（
+`NeteaseSearchClient.searchSongs`），用于修掉关键词类线上问题。
+
+不适合放进脚本：UI 结构、播放器状态机（会变成两套状态源）、需要长耗时/网络的逻辑。
+
+### 4.4 DEX 热修复（M3 决策：暂不引入）
+
+结论：**当前不引入 Tinker/Sophix 等 DEX 补丁框架**。理由：
+
+- 本项目自签名自分发，但 Tinker 需要 `TinkerApplication` 入口改造、基线 APK 归档、
+  补丁 CI、补丁服务器与回滚链路，改动面覆盖启动路径，回归成本大于收益；
+- 已有「签名配置 + 签名脚本 + 应用内整包更新」三层，绝大多数线上问题（文案错误、
+  解析规则、开关与回退策略）无需 DEX；
+- DEX 下发是任意代码执行面，密钥泄露即等于可投毒，安全责任远高于收益。
+
+重新评估的条件（满足其一再考虑）：出现必须改 Native/启动路径的线上阻断问题，
+且整包更新无法在可接受时间内覆盖用户；或接入 Google Play 后仍需要 Play 之外的补丁通道。
 
 ## 5. 风险与合规
 
@@ -128,10 +150,52 @@
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | M1 | 签名文案覆盖（并入云控 payload；客户端 + admin + 测试） | **已完成** |
-| M2 | quickjs 白名单脚本通道（先接 1~2 个纯函数场景） | 待办 |
-| M3 | 决策是否引入 Tinker；如是，做基线归档 + 补丁 CI + 回滚 | 待办 |
+| M2 | 签名脚本沙箱（quickjs、内存/超时限制、`search.keywords` 接线） | **已完成** |
+| M3 | DEX 热修复决策 | **已完成：暂不引入**（见 4.4） |
 | — | 插件化 | 不做 |
 
-## 7. 与 AutoSync 模型下发的复用
+## 7. 使用方法
+
+### 7.1 客户端行为
+
+- 只有「已授权云控 + 配置验签通过 + `versionCode` 在区间内」时，覆盖与脚本才生效；
+  其余情况一律用内置文案与内置逻辑。
+- 撤回云控授权、清缓存或配置回滚，覆盖与脚本会立即失效。
+- 脚本通道一旦超时会**在本进程内关闭**，重启应用后恢复。
+
+### 7.2 维护者发布覆盖/脚本
+
+1. 在 `MeloX-Remote-Config` 仓库里编辑 `config/current-v1.json`，加入 `textOverrides`
+   或 `scripts`，并把 `configVersion` +1。
+2. 启动 admin（`./gradlew :admin:run`，工作目录为仓库根）→ 加载当前配置 → 保存并发布，
+   或使用 CLI：`bootstrap <口令文件>`（会重新签名并发布）。
+3. 发布产物落到 `MeloX-Remote-Config-Public` 的 `v1/latest.json`；客户端最迟在下次前台
+   刷新（最多 2 小时）拿到。
+
+### 7.3 写一条文案覆盖
+
+```json
+"textOverrides": {
+  "zh-CN": { "about.cat_title": "新的彩蛋标题" },
+  "default": { "about.cat_title": "New easter-egg title" }
+}
+```
+
+key 见 §4.2 的表格；新增 key 时把内联文案改成 `hotText("模块.用途", "默认值")`。
+
+### 7.4 写一条脚本 hook
+
+```json
+"scripts": {
+  "search.keywords": {
+    "revision": 1,
+    "source": "function run(input) { return { keywords: input.keywords.replace(/【.*?】/g, '').trim() }; }"
+  }
+}
+```
+
+约束：脚本 ≤ 16 KB、总量 ≤ 32 KB、最多 8 条；必须定义 `function run`；只做纯函数变换。
+
+## 8. 与 AutoSync 模型下发的复用
 
 模型包（`android-models-v0.1.0-beta.2`）已经是「签名索引 + 固定 release + 逐文件 SHA-256 + 原子安装 + 失败回退」的成熟模式，热更新清单应直接复用同一套下载/校验/镜像代码，避免再造一套下发通道。

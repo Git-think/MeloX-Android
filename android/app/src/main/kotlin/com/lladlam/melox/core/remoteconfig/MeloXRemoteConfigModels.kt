@@ -17,6 +17,16 @@ data class MeloXRemoteNotice(
     val frequency: String,
 )
 
+/**
+ * A signed, sandboxed behaviour hook. The source must define `run(input)` and
+ * return a JSON-serialisable value; see [com.lladlam.melox.core.remoteconfig.MeloXHotScripts].
+ */
+data class MeloXRemoteScript(
+    val name: String,
+    val revision: Int,
+    val source: String,
+)
+
 data class MeloXRemoteConfig(
     val schemaVersion: Int,
     val configVersion: Int,
@@ -33,6 +43,7 @@ data class MeloXRemoteConfig(
      * authority for what text a build will show.
      */
     val textOverrides: Map<String, Map<String, String>>,
+    val scripts: Map<String, MeloXRemoteScript>,
 ) {
     fun appliesTo(versionCode: Int): Boolean = versionCode in minVersionCode..maxVersionCode
 
@@ -89,6 +100,7 @@ data class MeloXRemoteConfig(
                 ),
                 notice = notice,
                 textOverrides = parseTextOverrides(root.optJSONObject("textOverrides")),
+                scripts = parseScripts(root.optJSONObject("scripts")),
             )
         }
     }
@@ -146,3 +158,37 @@ internal const val MaxTextOverrideEntries = 256
 internal const val MaxTextOverrideLocaleLength = 24
 internal const val MaxTextOverrideKeyLength = 120
 internal const val MaxTextOverrideValueLength = 400
+
+/**
+ * Parses the signed `scripts` block defensively.
+ *
+ * Scripts run in a memory-limited JS sandbox, but the config still only gets a
+ * fixed budget: a handful of hooks, each length-capped, with a hard total so a
+ * compromised or oversized payload cannot turn into a large download.
+ */
+internal fun parseScripts(json: JSONObject?): Map<String, MeloXRemoteScript> {
+    if (json == null) return emptyMap()
+    val result = LinkedHashMap<String, MeloXRemoteScript>()
+    var total = 0
+    for (name in json.keys()) {
+        if (result.size >= MaxHotScripts) break
+        val cleanName = name.trim()
+        if (cleanName.isBlank() || cleanName.length > MaxHotScriptNameLength) continue
+        val entry = json.optJSONObject(name) ?: continue
+        val source = entry.optString("source")
+        if (source.isBlank() || source.length > MaxHotScriptSourceLength) continue
+        if (total + source.length > MaxHotScriptTotalLength) break
+        total += source.length
+        result[cleanName] = MeloXRemoteScript(
+            name = cleanName,
+            revision = entry.optInt("revision", 1).coerceAtLeast(1),
+            source = source,
+        )
+    }
+    return result
+}
+
+internal const val MaxHotScripts = 8
+internal const val MaxHotScriptNameLength = 64
+internal const val MaxHotScriptSourceLength = 16_384
+internal const val MaxHotScriptTotalLength = 32_768
