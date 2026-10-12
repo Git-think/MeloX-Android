@@ -2,6 +2,106 @@
 
 [English](../README.md)
 
+## 未发布
+
+### 多语言恢复
+
+- 恢复 0.6.3 被移除的系统多语言机制：设置、音乐库、搜索、发现页、播客页等界面的文案重新走
+  `stringResource`，跟随系统语言切换（0.6.2 为 1048 处，恢复后 976 处）。
+- 新增独立翻译目录 **`android/app/i18n/`**：每种语言一个 `values-<BCP-47>/strings.xml`，
+  已通过 Gradle `res.srcDir` 注册，贡献语言**不需要改任何 Kotlin 代码**；说明见
+  `android/app/i18n/README.md`。
+- 待补充：仍有约 70 处内联中文，分两类 —— ①与数据比较的 **id 类字符串**（歌单分类「华语」、
+  快捷入口「私信」等）**按设计保持字面量**，不参与本地化；②少数在非 Composable 上下文
+  （协程 / 点击回调）里直接写死的文案，需要先把字符串上提到 Composable 再资源化。
+
+## 0.6.5 — 2026-10-12
+
+- 版本号升级为 `0.6.5`，`versionCode 23`；正式产物名为 `MeloX-Android-0.6.5.apk`。
+- 新增签名热更新通道：**文案覆盖**与**受限脚本**，两者都随已签名的云控 payload 下发，不新增下载链路。
+
+### 热更新 · 文案覆盖（M1）
+
+- `textOverrides`：`localeTag -> key -> text`，客户端按「精确 locale → 语言 → default」回退，缺失即用内置文案。
+- 只有「已授权云控 + 验签通过 + 版本区间命中」时生效；撤回授权、清缓存或配置回滚会立即失效。
+- 边界：条目 ≤256、locale ≤24、key ≤120、value ≤400，超限条目直接丢弃。
+- 已接入：关于页维护者/上游信息、彩蛋标题与正文（内联 key），AutoSync 开关标题与说明（资源 key）。
+
+### 热更新 · 受限脚本（M2）
+
+- `scripts`：hook → `{revision, source}`，脚本必须定义 `function run(input)` 并返回可序列化结果。
+- 沙箱：每次调用全新 QuickJS context、8 MB 内存与 256 KB 栈上限、单线程 daemon、600ms 墙钟超时；
+  超时后**本进程内禁用脚本通道**；语法/异常/缺 hook 一律返回 `null`，调用方回落内置逻辑。
+- 边界：单脚本 ≤16 KB、总量 ≤32 KB、最多 8 条。
+- 首批接线：`search.keywords`（网易云搜索关键词清洗）。
+
+### 服务端与决策
+
+- `MeloX-Remote-Config` 的 schema、模型、校验与测试同步支持 `textOverrides` / `scripts`。
+- 决策：**暂不引入 DEX 热修复框架**（Tinker/Sophix），理由与重估条件见 `docs/HOT_UPDATE_RESEARCH.md`。
+
+## 0.6.4 — 2026-10-12
+
+- 版本号升级为 `0.6.4`，`versionCode 22`；正式产物名为 `MeloX-Android-0.6.4.apk`。
+- 修复 0.6.3 合并贡献者分支时被静默回退的主线修复。
+
+### 恢复被回退的主线修复
+
+- 会话加密存储：恢复损坏 keystore / 密文不可用时的启动兜底，`EncryptedSharedPreferences`
+  创建失败不再让进程崩溃（`SecureSessionPreferences`、`YouTubeSessionStore`）。
+- HyperOS 超级岛发布：恢复主线的 Shizuku 保活与隐藏 API 豁免实现，并补回
+  `org.lsposed.hiddenapibypass` 依赖。
+- 歌词翻译对齐：`alignSecondary` 改为按时间合并两条轨，带头部无翻译行时不再整体错位。
+- 歌手页与歌单：恢复歌手页直达专辑/歌手、歌单封面显示、排序与下拉搜索隐藏。
+- 崩溃记录：恢复 `MeloXCrashStore` 的主线实现。
+- 播放/网络：恢复队列与歌词时序相关修复、跨平台未知时长下的完整歌手匹配、
+  音质弹窗真实玻璃表面、Shizuku XMSF helper 与 ProGuard 规则。
+- 恢复 `LrcLyricsParserTest`、`TtmlLyricsParserTest` 等被删测试。
+
+### 其它
+
+- 移除贡献者分支重新引入的 Mei GPU Mesh 背景（该背景此前已由主线移除）。
+- 新增 `AGENT.md`，记录构建、签名、发版与合并贡献者分支的注意事项。
+
+### 已知问题
+
+- AutoSync 三个模型仍为 `NOT_ACCEPTED_FOR_WORD_LEVEL_ACCURACY`，逐字精度未人工验收。
+- 日文 AutoSync 依赖未打包，暂不可用。
+- `values-*` 系统多语言机制仍为 0.6.3 起的内联中文状态。
+
+## 0.6.3 — 2026-10-11
+
+- 版本号升级为 `0.6.3`，`versionCode 21`；正式产物名为 `MeloX-Android-0.6.3.apk`。
+- 合并贡献者分支（iOS 风格播放页、液态玻璃材质），并保留设备端 AutoSync 本地逐字歌词。
+
+### AutoSync 本地逐字歌词
+
+- 在设备端用 ONNX Runtime 生成逐字时间轴：英文走 CTC，中文走独立的 CIF 单调对齐。
+- 模型改为从云端下载并逐文件校验 SHA-256，索引版本固定为 `android-models-v0.1.0-beta.2`；已安装且哈希一致的旧包直接复用，不重复下载。
+- 自动生成任务串行化，切歌或关闭开关即停止；每次任务结束后释放 ONNX 会话，同一时间只保留一个语言模型。
+- 有人工逐字时间轴时不覆盖；无法对齐的行保留逐行时间，不用均分伪造逐字。
+- 日文在设备端 G2P（OpenJTalk + NAIST 词典）就绪前保持不可用。
+
+### 播放页与视觉（来自贡献者分支）
+
+- 播放页重做：Compose 共享元素 / 共享边界一镜到底转场、横竖屏布局重建。
+- 采用 Kyant0 Backdrop 液态玻璃材质、Liquid 底栏与变换背景；新增 Mei 网格背景、平滑圆角与展示角落。
+- 新增触感反馈、可变刷新率帧率控制器、系统动画倍率桥接与音量键桥接。
+- 新增网易云 WebView 扫码登录、听歌识曲浮层、独立设置详情页。
+- 新增崩溃记录器 `MeloXCrashRecorder`、网络重试拦截器、播放不可用提示与播放通知。
+- 加入 Baseline Profile，改善启动与滚动性能。
+
+### 变更与移除
+
+- 移除 0.6.2 的系统多语言机制：界面文案内联，`values/strings.xml` 等翻译不再随系统语言切换。
+- 对齐贡献者分支实现，回退了部分 0.6.1/0.6.2 改动（歌手页优化、跨平台匹配、会话加密存储修复、崩溃存储等）。
+- 歌词与其它核心逻辑仍采用主线实现并保留 AutoSync 接入。
+
+### 已知问题
+
+- 三个 AutoSync 模型仍标记为 `NOT_ACCEPTED_FOR_WORD_LEVEL_ACCURACY`，逐字精度尚未经人工真值验收。
+- 日文逐字依赖未打包，暂不可用。
+
 ## 0.6.2 — 2026-10-02
 
 - 版本号升级为 `0.6.2`，`versionCode 20`；正式产物名为 `MeloX-Android-0.6.2.apk`。

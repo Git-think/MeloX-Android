@@ -1,12 +1,14 @@
 package com.lladlam.melox.playback
 
 import android.net.Uri
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.ResolvingDataSource
 import com.lladlam.melox.core.audio.MusicQuality
 import com.lladlam.melox.core.audio.MusicQualityRuntime
+import com.lladlam.melox.core.audio.MeloXPlaybackUnavailableException
 import com.lladlam.melox.core.audio.NeteaseQualityClient
 import com.lladlam.melox.core.audio.NeteasePlaybackUnavailableException
 import com.lladlam.melox.core.music.model.AudioQualityTier
@@ -27,8 +29,6 @@ class NeteasePlaybackResolver(
     private val localSourceProvider: (Long) -> Uri? = { null },
     private val providerLocalSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val crossProviderFallback: CrossProviderPlaybackFallbackResolver? = null,
-    private val chkszPlayback: ChkszPlaybackResolver? = null,
-    private val lxUserPlayback: LxUserPlaybackResolver? = null,
     private val providerPlaybackEnabled: (com.lladlam.melox.core.music.model.MusicSource) -> Boolean = { true },
     private val thirdPartySourcesEnabled: () -> Boolean = { true },
     private val thirdPartyOnlyForMembership: () -> Boolean = { false },
@@ -46,6 +46,7 @@ class NeteasePlaybackResolver(
         val expiresAtEpochMs: Long? = null,
         val cacheIdentity: String = "netease",
     )
+    private data class RecentFailure(val error: Throwable, val atMs: Long)
 
     private val cacheLock = Any()
     private val resolvedUris = object : LinkedHashMap<ResolveKey, ResolvedRequest>(MAX_RESOLVED_URIS, .75f, true) {
@@ -53,6 +54,24 @@ class NeteasePlaybackResolver(
             size > MAX_RESOLVED_URIS
     }
     private val inFlight = ConcurrentHashMap<ResolveKey, CompletableFuture<ResolvedRequest>>()
+
+    /**
+     * 「音源不可用」短期冷却表。
+     *
+     * ExoPlayer 在数据源解析失败后会**反复重试**，而每次重试都会重跑整条降级链
+     * （官方 → 跨平台兜底，含多处十几秒超时）。2026-09-30 真机实测：
+     * 同一首歌 22 秒内跑了两轮完整兜底，播放器一直停在 `STATE_BUFFERING`，
+     * 用户看到的就是「进度条一直转、没有任何提示」。
+     *
+     * 把这类失败记住 [FAILURE_COOLDOWN_MS]，重试时立刻抛出，让 `onPlayerError`
+     * 尽快触发（从而给出跳过/提示），而不是让用户干等。
+     * 只记「音源不可用」语义的异常；网络抖动等仍走正常重试。
+     */
+    private val recentFailures = object : LinkedHashMap<ResolveKey, RecentFailure>(MAX_RESOLVED_URIS, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ResolveKey, RecentFailure>?): Boolean =
+            size > MAX_RESOLVED_URIS
+    }
+
     private val qualityClient = NeteaseQualityClient(cookieProvider = cookieProvider)
 
     @Volatile
@@ -85,6 +104,7 @@ class NeteasePlaybackResolver(
             }.orEmpty(),
         )
         cached(key)?.let { return it }
+        recentFailure(key)?.let { throw it }
         val pending = CompletableFuture<ResolvedRequest>()
         val existing = inFlight.putIfAbsent(key, pending)
         if (existing != null) {
@@ -125,35 +145,21 @@ class NeteasePlaybackResolver(
                         cacheIdentity = "${fallback.source.storageValue}:${fallback.resourceId}",
                     )
                     } else {
-                        val chksz = if (thirdPartySourcesEnabled()) {
-                            chkszPlayback?.resolve(songId, quality.toCommonTier())
-                        } else null
-                        chksz?.let { result ->
-                            ResolvedRequest(
-                                uri = Uri.parse(result.url),
-                                cacheIdentity = "chksz:${chkszPlayback?.cacheIdentity()}",
-                            )
-                        } ?: (if (thirdPartySourcesEnabled()) fallbackRequest?.let {
-                            lxUserPlayback?.resolve(
-                                songId = it.songId,
-                                title = it.title,
-                                artist = it.artist,
-                                durationMs = it.durationMs,
-                                quality = it.quality,
-                            )
-                        }?.let { result ->
-                            ResolvedRequest(
-                                uri = Uri.parse(result.url),
-                                headers = result.requestHeaders,
-                                cacheIdentity = "lx-user:${result.sourceId}",
-                            )
-                        } else null) ?: throw error
+                        throw error
                     }
             }
-            synchronized(cacheLock) { resolvedUris[key] = resolved }
+            synchronized(cacheLock) {
+                recentFailures.remove(key)
+                resolvedUris[key] = resolved
+            }
             pending.complete(resolved)
             resolved
         } catch (error: Throwable) {
+            if (error.blocksPlaybackSource()) {
+                synchronized(cacheLock) {
+                    recentFailures[key] = RecentFailure(error, System.currentTimeMillis())
+                }
+            }
             pending.completeExceptionally(error)
             throw error
         } finally {
@@ -264,6 +270,17 @@ class NeteasePlaybackResolver(
         }
     }
 
+    /** 命中冷却期内的失败则原样抛出；过期则清除。 */
+    private fun recentFailure(key: ResolveKey): Throwable? = synchronized(cacheLock) {
+        val recent = recentFailures[key] ?: return@synchronized null
+        if (System.currentTimeMillis() - recent.atMs > FAILURE_COOLDOWN_MS) {
+            recentFailures.remove(key)
+            return@synchronized null
+        }
+        Log.i(TAG, "Resolve skipped (recent source failure) song=${key.songId} quality=${key.quality}")
+        recent.error
+    }
+
     private fun providerDelegate(): ProviderPlaybackResolver? {
         providerDelegate?.let { return it }
         val registry = ProviderPlaybackRuntime.registryOrNull() ?: return null
@@ -274,8 +291,6 @@ class NeteasePlaybackResolver(
                 localSourceProvider = providerLocalSourceProvider,
                 authKeyProvider = ProviderPlaybackRuntime::authKey,
                 providerPlaybackEnabled = providerPlaybackEnabled,
-                chkszPlayback = chkszPlayback,
-                lxUserPlayback = lxUserPlayback,
                 thirdPartySourcesEnabled = thirdPartySourcesEnabled,
                 thirdPartyOnlyForMembership = thirdPartyOnlyForMembership,
             ).also { providerDelegate = it }
@@ -289,8 +304,12 @@ class NeteasePlaybackResolver(
         private const val TITLE_QUERY = "title"
         private const val ARTIST_QUERY = "artist"
         private const val DURATION_QUERY = "durationMs"
+        private const val TAG = "MeloXNeteaseResolver"
         private const val MAX_RESOLVED_URIS = 96
         private const val PLAYBACK_CACHE_VERSION = 3
+
+        /** 「音源不可用」失败的冷却时长：重试期间不重复跑整条降级链。 */
+        private const val FAILURE_COOLDOWN_MS = 15_000L
 
         private fun playbackCacheKey(
             songId: Long,
@@ -322,6 +341,20 @@ class NeteasePlaybackResolver(
 }
 
 private fun Long?.orZero(): Long = this ?: 0L
+
+/**
+ * 该异常是否表示「音源本身不可用」（网易云无版权/会员/地区限制，或降级链也没拿到链接），
+ * 而不是网络抖动。只有这类失败才值得记入冷却表。
+ */
+private fun Throwable.blocksPlaybackSource(): Boolean {
+    var cursor: Throwable? = this
+    var depth = 0
+    while (cursor != null && depth++ < 8) {
+        if (cursor is NeteasePlaybackUnavailableException || cursor is MeloXPlaybackUnavailableException) return true
+        cursor = cursor.cause
+    }
+    return false
+}
 
 private fun AudioQualityTier.toMusicQuality(requested: MusicQuality): MusicQuality = when (this) {
     AudioQualityTier.Standard -> MusicQuality.Standard

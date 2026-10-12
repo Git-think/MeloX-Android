@@ -71,6 +71,8 @@ data class LyricsDocument(
     val quality: LyricQuality = LyricQuality.Fallback,
     /** Whether line-timed lyrics may be expanded into synthetic per-grapheme timing. */
     val pseudoTimingAllowed: Boolean = true,
+    /** Local model provenance; generated upgrades may finish after the AMLL early-update window. */
+    val autoSyncModelKey: String? = null,
 ) {
     fun highlightedIndex(positionMs: Long, strategy: LyricHighlightStrategy = LyricHighlightStrategy.LineStart): Int? {
         if (lines.isEmpty()) return null

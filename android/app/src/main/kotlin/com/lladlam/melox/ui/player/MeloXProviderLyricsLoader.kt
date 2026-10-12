@@ -4,9 +4,11 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import com.lladlam.melox.core.account.NeteaseSessionStore
+import com.lladlam.melox.core.autosync.AutoSyncCoordinator
 import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.lyrics.LyricSource
 import com.lladlam.melox.core.lyrics.LyricsDocument
+import com.lladlam.melox.core.lyrics.MeloXLyricPreference
 import com.lladlam.melox.core.lyrics.MeloXLyricScript
 import com.lladlam.melox.core.lyrics.MeloXLyricScriptConverter
 import com.lladlam.melox.core.lyrics.LyricTimelineProcessor
@@ -145,7 +147,21 @@ internal object MeloXProviderLyricsLoader {
             bilibiliAlignment = bilibiliAlignment,
             binding = binding,
         )
-        cached(cacheKey)?.let { return scripted(it) }
+        cached(cacheKey)?.let { hit ->
+            // Queue preloading caches line-timed documents before any caller asks
+            // for upgrades. Returning straight here would permanently suppress
+            // AutoSync for the track, so a cache hit still gets its pass.
+            if (onUpgrade != null) {
+                scheduleAutoSyncIfNeeded(
+                    appContext,
+                    cacheKey,
+                    "${resourceId.source.storageValue}:${resourceId.value}",
+                    hit,
+                    onUpgrade,
+                )
+            }
+            return scripted(hit)
+        }
 
         // Snapshot Compose/player state before handing work to the IO scope. This
         // avoids reading rapidly changing snapshot state from the worker thread.
@@ -209,7 +225,18 @@ internal object MeloXProviderLyricsLoader {
         snapshot: LyricTrackSnapshot,
         onUpgrade: ((LyricsDocument) -> Unit)? = null,
     ): LyricsDocument {
-        cached(cacheKey)?.let { return scripted(it) }
+        cached(cacheKey)?.let { hit ->
+            if (onUpgrade != null) {
+                scheduleAutoSyncIfNeeded(
+                    appContext,
+                    cacheKey,
+                    "${snapshot.resourceId.source.storageValue}:${snapshot.resourceId.value}",
+                    hit,
+                    onUpgrade,
+                )
+            }
+            return scripted(hit)
+        }
         val deferred = synchronized(lock) {
             cache[cacheKey]?.let { return scripted(it) }
             inFlight[cacheKey] ?: workerScope.async {
@@ -233,8 +260,91 @@ internal object MeloXProviderLyricsLoader {
             Log.w("MeloXLyricsAuto", "Lyrics load timed out for $cacheKey")
             throw java.io.IOException("歌词加载超时")
         }
-        if (onUpgrade != null) scheduleWordTimingUpgrade(appContext, cacheKey, snapshot, document, onUpgrade)
+        if (onUpgrade != null) {
+            val trackKey = "${snapshot.resourceId.source.storageValue}:${snapshot.resourceId.value}"
+            // A timeline generated on an earlier visit is reused with no model
+            // work at all; generation only starts when nothing is stored.
+            val stored = runCatching {
+                AutoSyncCoordinator.applyStored(appContext, document, trackKey)
+            }.getOrNull()
+            val amllJob = scheduleWordTimingUpgrade(appContext, cacheKey, snapshot, stored ?: document, onUpgrade)
+            if (stored != null) {
+                remember(cacheKey, stored)
+            } else {
+                scheduleAutoSyncUpgrade(appContext, cacheKey, trackKey, document, amllJob, onUpgrade)
+            }
+            return scripted(stored ?: document)
+        }
         return scripted(document)
+    }
+
+    /**
+     * Generates a real word-level timeline locally when the provider only gave
+     * line timing, then hands it to [onUpgrade] exactly like the AMLL path.
+     *
+     * Authored AMLL timing always wins: this waits for [amllJob] first and
+     * re-checks the cache, so a successful AMLL upgrade always suppresses
+     * generation. Every failure (no model, no cached audio, infeasible
+     * alignment) simply leaves the line-timed document on screen.
+     */
+    private fun scheduleAutoSyncUpgrade(
+        appContext: Context,
+        cacheKey: String,
+        trackKey: String,
+        document: LyricsDocument,
+        amllJob: Job?,
+        onUpgrade: (LyricsDocument) -> Unit,
+    ) {
+        if (!MeloXSettingsRuntime.autoSyncWordLyricsEnabled) return
+        if (document.lines.isEmpty() || hasWordTiming(document)) return
+        workerScope.launch {
+            amllJob?.join()
+            if (!MeloXSettingsRuntime.autoSyncWordLyricsEnabled) return@launch
+            // AMLL may have won the race while we waited.
+            if (hasWordTiming(cached(cacheKey) ?: document)) return@launch
+            val upgraded = runCatching {
+                AutoSyncCoordinator.generate(appContext, document, trackKey)
+            }.onFailure { Log.w("MeloXLyricsAuto", "autoSync failed for $trackKey", it) }
+                .getOrNull() ?: return@launch
+            // An authored upgrade or a song change may have arrived during inference.
+            if (hasWordTiming(cached(cacheKey) ?: document)) return@launch
+            if (com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return@launch
+            remember(cacheKey, upgraded)
+            Log.d(
+                "MeloXLyricsAuto",
+                "autoSync applied lines=${upgraded.lines.size} " +
+                    "wordLines=${upgraded.lines.count { it.syllables.isNotEmpty() }}",
+            )
+            withContext(Dispatchers.Main.immediate) { onUpgrade(scripted(upgraded)) }
+        }
+    }
+
+    /**
+     * AutoSync pass for a document that is already in memory.
+     *
+     * A stored timeline is handed to [onUpgrade] immediately; otherwise
+     * generation is started (after the AMLL chase, which always wins). A
+     * document that already carries word timing is left untouched.
+     */
+    private fun scheduleAutoSyncIfNeeded(
+        appContext: Context,
+        cacheKey: String,
+        trackKey: String,
+        document: LyricsDocument,
+        onUpgrade: (LyricsDocument) -> Unit,
+    ) {
+        if (document.lines.isEmpty() || hasWordTiming(document)) return
+        val stored = runCatching {
+            AutoSyncCoordinator.applyStored(appContext, document, trackKey)
+        }.getOrNull()
+        if (stored != null) {
+            remember(cacheKey, stored)
+            workerScope.launch {
+                withContext(Dispatchers.Main.immediate) { onUpgrade(scripted(stored)) }
+            }
+            return
+        }
+        scheduleAutoSyncUpgrade(appContext, cacheKey, trackKey, document, null, onUpgrade)
     }
 
     /**
@@ -250,7 +360,7 @@ internal object MeloXProviderLyricsLoader {
         snapshot: LyricTrackSnapshot,
         current: LyricsDocument,
         onUpgrade: (LyricsDocument) -> Unit,
-    ) {
+    ): Job? {
         // Nothing to chase when the on-screen document already comes from AMLL
         // (it is the target), when the track has no lyrics at all, or when
         // automatic selection is off (an explicit choice is final). A
@@ -260,9 +370,9 @@ internal object MeloXProviderLyricsLoader {
             current.source == LyricSource.AmlL ||
             !snapshot.automaticSelection
         ) {
-            return
+            return null
         }
-        workerScope.launch {
+        return workerScope.launch {
             val upgraded = runCatching {
                 withTimeoutOrNull(AmllUpgradeTimeoutMs) {
                     loadMatchedSource(appContext, snapshot, LyricAutoSource.AmlL)
@@ -302,7 +412,7 @@ internal object MeloXProviderLyricsLoader {
         return ratio >= AmllUpgradeMinLineRatio && ratio <= (1.0 / AmllUpgradeMinLineRatio)
     }
     private fun scripted(document: LyricsDocument): LyricsDocument =
-        MeloXLyricScriptConverter.convert(document, requestedLyricScript())
+        MeloXLyricScriptConverter.convert(document, requestedLyricPreference().script)
 
     private suspend fun loadDocument(
         appContext: Context,
@@ -369,7 +479,7 @@ internal object MeloXProviderLyricsLoader {
         val amllResult = async {
             val track = neteaseTrackResult.await() ?: return@async null
             val id = track.id.value.toLongOrNull() ?: return@async null
-            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricScript()) }
+            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricPreference()) }
                 .onFailure { Log.w("MeloXBilibiliLyrics", "AMLL primary lyric failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.lines.isNotEmpty() }
                 ?.let { BilibiliLyricSourceResult("amll", it, track) }
@@ -422,7 +532,7 @@ internal object MeloXProviderLyricsLoader {
         val verificationAmllResult = async {
             val track = neteaseTrack ?: return@async null
             val id = track.id.value.toLongOrNull() ?: return@async null
-            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricScript()) }
+            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricPreference()) }
                 .onFailure { Log.w("MeloXBilibiliLyrics", "AMLL verification lyric failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.lines.isNotEmpty() }
                 ?.let { BilibiliLyricSourceResult("amll", it, track) }
@@ -640,7 +750,7 @@ internal object MeloXProviderLyricsLoader {
                 ?: findMatchedNeteaseTrack(appContext, snapshot)?.id?.value?.toLongOrNull()
                     ?.let(AmlldbLyricQuery::Netease)
                 ?: return ResolvedLyrics.Empty
-            val document = runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricScript()) }
+            val document = runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricPreference()) }
                 .getOrDefault(LyricsDocument(emptyList()))
             return ResolvedLyrics(
                 document,
@@ -705,7 +815,7 @@ internal object MeloXProviderLyricsLoader {
     private suspend fun loadBinding(appContext: Context, binding: LyricBinding): LyricsDocument {
         if (binding.source == BoundLyricSource.AmlL) {
             val query = amlldbQuery(binding.resourceValue) ?: return LyricsDocument(emptyList())
-            return runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricScript()) }
+            return runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricPreference()) }
                 .getOrDefault(LyricsDocument(emptyList()))
         }
         val providerSource = binding.provider ?: return LyricsDocument(emptyList())
@@ -845,7 +955,7 @@ internal object MeloXProviderLyricsLoader {
 
 internal data class AutoLyricCandidate(val priority: Int, val document: LyricsDocument, val binding: LyricBinding? = null)
 
-private fun requestedLyricScript(): MeloXLyricScript = MeloXLyricScript.fromSystem()
+private fun requestedLyricPreference(): MeloXLyricPreference = MeloXLyricPreference.system()
 
 internal enum class LyricAutoSource { AmlL, QQMusic, Netease, Current }
 
@@ -930,7 +1040,14 @@ internal fun isSafeCrossProviderLyricMatch(
     if (target.version != LyricTrackVersion.Original && target.versionLabel != other.versionLabel) return false
     if (targetDurationMs > 0L) {
         val candidateDuration = candidate.durationMs ?: return false
-        val toleranceMs = if (target.version == LyricTrackVersion.Original) 2_000L else 1_000L
+        // Tolerances come from the signed rules so cross-provider matching can be
+        // tightened or loosened without an APK.
+        val hotRules = com.lladlam.melox.core.remoteconfig.MeloXHotRules.current
+        val toleranceMs = if (target.version == LyricTrackVersion.Original) {
+            hotRules.lyricMatchOriginalToleranceMs
+        } else {
+            hotRules.lyricMatchVersionToleranceMs
+        }
         if (kotlin.math.abs(targetDurationMs - candidateDuration) > toleranceMs) return false
     }
     val targetArtistKey = normalizeLyricMatchText(targetArtist.substringBefore(" /"))

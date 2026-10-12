@@ -5,6 +5,8 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.lyrics.NeteaseLyricParser
 import com.lladlam.melox.core.model.SearchSong
+import com.lladlam.melox.core.remoteconfig.MeloXHotRules
+import com.lladlam.melox.core.remoteconfig.MeloXHotScripts
 import java.io.IOException
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -39,7 +41,14 @@ class NeteaseSearchClient(
             cookieHeaderOverride = cookieHeader,
         )
         val profile = response.optJSONObject("profile")
-            ?: throw IOException("网易云登录状态无效")
+        if (profile == null) {
+            NeteaseQrDiag.log(
+                "accountProfile",
+                "profile=null keys=${response.keys().asSequence().toList()} " +
+                    "code=${response.optInt("code", -1)} cookieKeys=${NeteaseQrDiag.cookieKeys(cookieHeader)}",
+            )
+            throw IOException("网易云登录状态无效")
+        }
         val userId = profile.optLong("userId", -1L)
         if (userId <= 0L) throw IOException("网易云返回了无效的用户信息")
 
@@ -60,7 +69,15 @@ class NeteaseSearchClient(
         keywords: String,
         limit: Int = 30,
     ): List<SearchSong> = withContext(Dispatchers.IO) {
-        val query = keywords.trim()
+        // Signed rules strip known literal suffixes first, then the signed
+        // `search.keywords` hook may rewrite whatever is left. Both are optional
+        // and fall back to the caller's keyword.
+        val stripped = MeloXHotRules.stripTitleSuffixes(keywords.trim())
+        val query = MeloXHotScripts.run(
+            "search.keywords",
+            JSONObject().put("keywords", stripped),
+        )?.optString("keywords")?.trim()?.takeIf(String::isNotEmpty)
+            ?: stripped
         if (query.isEmpty()) return@withContext emptyList()
 
         val payload = JSONObject()
@@ -93,12 +110,10 @@ class NeteaseSearchClient(
                             ?.let(::add)
                     }
                 }.joinToString(" / ")
-                val artistId = if (artistsArray.length() > 0) artistsArray.optJSONObject(0)?.optLong("id")?.takeIf { it > 0 } else null
 
                 val albumObject = song.optJSONObject("al")
                     ?: song.optJSONObject("album")
                 val album = albumObject?.optString("name").orEmpty()
-                val albumId = albumObject?.optLong("id")?.takeIf { it > 0 }
                 val artwork = artworkFromAlbum(albumObject)
 
                 add(
@@ -107,8 +122,6 @@ class NeteaseSearchClient(
                         name = song.optString("name", "未知歌曲"),
                         artists = artists.ifBlank { "未知歌手" },
                         album = album,
-                        albumId = albumId,
-                        artistId = artistId,
                         artworkUrl = artwork,
                         durationMs = neteaseSearchDurationMs(song),
                     ),
@@ -325,6 +338,7 @@ class NeteaseSearchClient(
                 val message = jsonObject.optString("message")
                     .ifBlank { jsonObject.optString("msg") }
                     .ifBlank { "请求失败" }
+                NeteaseQrDiag.log("eapi", "uri=$uri code=$code message=$message")
                 throw IOException("网易云请求失败（$code）：$message")
             }
             return jsonObject

@@ -19,6 +19,7 @@ import com.lladlam.melox.core.music.model.MusicResourceId
 import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.network.MeloXNetworkAvailability
 import com.lladlam.melox.core.provider.applemusic.AppleMusicSdkBridge
 import com.lladlam.melox.core.provider.applemusic.AppleMusicSessionStore
 import java.util.concurrent.Executor
@@ -32,8 +33,11 @@ object ProviderPlaybackCommands {
         startPositionMs: Long = C.TIME_UNSET,
         onFailure: ((Throwable) -> Unit)? = null,
     ) {
-        if (tracks.isEmpty()) return
         val appContext = context.applicationContext
+        if (tracks.isEmpty()) {
+            MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.EMPTY_QUEUE)
+            return
+        }
         if (tracks.all { it.id.source == MusicSource.AppleMusic }) {
             // MusicKit playback bypasses Media3, so Media3-backed lyrics remain
             // unavailable for this hidden source until the backend is unified.
@@ -48,7 +52,9 @@ object ProviderPlaybackCommands {
             ) {
                 return
             }
-            onFailure?.invoke(IllegalStateException("Apple Music 官方 DRM SDK 未安装或授权未完成"))
+            val failure = IllegalStateException("Apple Music 官方 DRM SDK 未安装或授权未完成")
+            MeloXPlaybackNotice.show(appContext, MeloXPlaybackNotice.NO_SOURCE)
+            onFailure?.invoke(failure)
             return
         }
         ProviderPlaybackRuntime.initialize(appContext)
@@ -81,21 +87,49 @@ object ProviderPlaybackCommands {
                     val smartQueue = MeloXPlaybackModePreferences.autoMix(appContext) &&
                         MeloXPlaybackModePreferences.smartQueue(appContext) &&
                         items.size > 1
-                    if (smartQueue) {
-                        controller.setMediaItems(
-                            listOf(MeloXSmartQueueBuilder.begin(items, startIndex)),
-                            0,
-                            startPositionMs,
-                        )
-                    } else {
-                        MeloXSmartQueueBuilder.reset()
-                        controller.setMediaItems(items, startIndex, startPositionMs)
-                    }
+                    // 与 PlaybackCommands.playQueue 同款修法：智能队列也全量入队，
+                    // 候选只用于重排，不再扣在池外。QQ/酷狗/B站/搜索结果同样踩过
+                    // "播放完列表没歌"（provider 路径也 setMediaItems 了 1 首）。
+                    if (smartQueue) MeloXSmartQueueBuilder.begin(items, startIndex)
+                    else MeloXSmartQueueBuilder.reset()
+                    controller.setMediaItems(items, startIndex, startPositionMs)
                     controller.prepare()
                     controller.play()
-                }.onFailure { onFailure?.invoke(it) }
+                }.onFailure { error ->
+                    MeloXPlaybackNotice.show(
+                        appContext,
+                        MeloXPlaybackNotice.describe(
+                            error,
+                            offline = !MeloXNetworkAvailability.isOnline(appContext),
+                        ),
+                    )
+                    onFailure?.invoke(error)
+                }
             },
             executor,
+        )
+    }
+
+    /** 同 [PlaybackCommands.playAll]，用于 QQ/酷狗/Bilibili 一类的结果列表。 */
+    fun playAll(
+        context: Context,
+        tracks: List<MusicTrack>,
+        shuffle: Boolean = false,
+        startPositionMs: Long = C.TIME_UNSET,
+        onFailure: ((Throwable) -> Unit)? = null,
+    ) {
+        val queue = if (shuffle) tracks.shuffled() else tracks
+        val first = queue.firstOrNull()
+        if (first == null) {
+            MeloXPlaybackNotice.show(context.applicationContext, MeloXPlaybackNotice.EMPTY_QUEUE)
+            return
+        }
+        playQueue(
+            context = context,
+            tracks = queue,
+            selectedTrackId = first.id,
+            startPositionMs = startPositionMs,
+            onFailure = onFailure,
         )
     }
 
@@ -125,6 +159,11 @@ object ProviderPlaybackCommands {
             putString(PlaybackTrackIdentity.ArtistExtra, artistText)
             putString(PlaybackTrackIdentity.AlbumExtra, album?.name.orEmpty())
             putString(PlaybackTrackIdentity.ArtworkExtra, artworkUrl.orEmpty())
+            // Seed value for MediaSession FAVORITE custom action toggle state.
+            // Providers read the *current* favorite state via FavoriteCapability
+            // on demand; the extras copy is what external controllers (vivo
+            // 原子随身听, Wear, Android Auto) see until the app updates it.
+            putBoolean(PlaybackTrackIdentity.IsFavoriteExtra, false)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(title)

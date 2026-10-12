@@ -24,15 +24,19 @@ class AmlldbLyricsClient(
 ) {
     suspend fun lyrics(
         neteaseSongId: Long,
-        script: MeloXLyricScript = MeloXLyricScript.Original,
-    ): LyricsDocument = lyrics(AmlldbLyricQuery.Netease(neteaseSongId), script)
+        preference: MeloXLyricPreference = MeloXLyricPreference.system(),
+    ): LyricsDocument = lyrics(AmlldbLyricQuery.Netease(neteaseSongId), preference)
+
+    /** 兼容旧调用：只指定中文字形。 */
+    suspend fun lyrics(neteaseSongId: Long, script: MeloXLyricScript): LyricsDocument =
+        lyrics(AmlldbLyricQuery.Netease(neteaseSongId), MeloXLyricPreference(null, script))
 
     suspend fun lyrics(
         query: AmlldbLyricQuery,
-        script: MeloXLyricScript = MeloXLyricScript.Original,
+        preference: MeloXLyricPreference = MeloXLyricPreference.system(),
     ): LyricsDocument = withContext(Dispatchers.IO) {
         val body = fetch(query) ?: return@withContext LyricsDocument(emptyList())
-        TtmlLyricsParser.parse(body, script)
+        TtmlLyricsParser.parse(body, preference)
     }
 
     /**

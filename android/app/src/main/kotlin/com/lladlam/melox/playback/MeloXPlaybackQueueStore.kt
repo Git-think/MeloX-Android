@@ -19,13 +19,13 @@ internal object MeloXPlaybackQueueStore {
     private const val QUEUE = "queue"
     private const val INDEX = "index"
     private const val POSITION = "position"
+    private const val CURRENT_ID = "current_id"
 
-    fun save(context: Context, player: androidx.media3.common.Player) {
+    fun save(context: Context, player: androidx.media3.common.Player, flush: Boolean = false) {
+        // 上游 0.6.2（8b8cf70）：冷启动 restore 流程跑完之前会观察到「空 player」，
+        // 此时清库会把用户队列永久删掉 ⇒ 空队列直接返回，不再 remove。
+        if (player.mediaItemCount == 0) return
         val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (player.mediaItemCount == 0) {
-            preferences.edit().remove(QUEUE).remove(INDEX).remove(POSITION).commit()
-            return
-        }
         val array = JSONArray()
         repeat(player.mediaItemCount) { index ->
             val item = player.getMediaItemAt(index)
@@ -42,24 +42,27 @@ internal object MeloXPlaybackQueueStore {
                 put("originalIndex", extras?.getInt(PlaybackCommands.QUEUE_ORIGINAL_INDEX_KEY, -1) ?: -1)
                 put("entryId", extras?.getString(PlaybackCommands.QUEUE_ENTRY_ID_KEY))
                 put("durationMs", extras?.getLong(PlaybackTrackIdentity.DurationMsExtra, 0L) ?: 0L)
-                put("source", extras?.getString(PlaybackTrackIdentity.SourceExtra))
-                put("resourceId", extras?.getString(PlaybackTrackIdentity.ResourceIdExtra))
-                put("trackTitle", extras?.getString(PlaybackTrackIdentity.TitleExtra))
-                put("trackArtist", extras?.getString(PlaybackTrackIdentity.ArtistExtra))
-                put("trackAlbum", extras?.getString(PlaybackTrackIdentity.AlbumExtra))
-                put("trackArtwork", extras?.getString(PlaybackTrackIdentity.ArtworkExtra))
-                if (extras?.containsKey("melox.system.original_album_id") == true) {
-                    put("albumId", extras.getLong("melox.system.original_album_id"))
-                }
-                if (extras?.containsKey("melox.system.original_artist_id") == true) {
-                    put("artistId", extras.getLong("melox.system.original_artist_id"))
-                }
             })
         }
-        preferences.edit()
+        val currentIndex = player.currentMediaItemIndex.coerceIn(0, player.mediaItemCount - 1)
+        val editor = preferences.edit()
             .putString(QUEUE, array.toString())
-            .putInt(INDEX, player.currentMediaItemIndex.coerceAtLeast(0))
+            .putInt(INDEX, currentIndex)
             .putLong(POSITION, player.currentPosition.coerceAtLeast(0L))
+            .putString(CURRENT_ID, player.getMediaItemAt(currentIndex).mediaId)
+        if (flush) editor.commit() else editor.apply()
+    }
+
+    /**
+     * Cheap partial write for the resume position. Re-serialising the whole
+     * queue (which can be hundreds of KB) on a timer would jank the main
+     * thread, so a crash only costs the small window since the last full save.
+     */
+    fun savePosition(context: Context, index: Int, positionMs: Long) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(INDEX, index.coerceAtLeast(0))
+            .putLong(POSITION, positionMs.coerceAtLeast(0L))
             .commit()
     }
 
@@ -83,30 +86,6 @@ internal object MeloXPlaybackQueueStore {
                         putString(PlaybackCommands.QUEUE_ENTRY_ID_KEY, it)
                     }
                     putLong(PlaybackTrackIdentity.DurationMsExtra, value.optLong("durationMs", 0L))
-                    value.optString("source").takeIf(String::isNotBlank)?.let {
-                        putString(PlaybackTrackIdentity.SourceExtra, it)
-                    }
-                    value.optString("resourceId").takeIf(String::isNotBlank)?.let {
-                        putString(PlaybackTrackIdentity.ResourceIdExtra, it)
-                    }
-                    value.optString("trackTitle").takeIf(String::isNotBlank)?.let {
-                        putString(PlaybackTrackIdentity.TitleExtra, it)
-                    }
-                    value.optString("trackArtist").takeIf(String::isNotBlank)?.let {
-                        putString(PlaybackTrackIdentity.ArtistExtra, it)
-                    }
-                    value.optString("trackAlbum").takeIf(String::isNotBlank)?.let {
-                        putString(PlaybackTrackIdentity.AlbumExtra, it)
-                    }
-                    value.optString("trackArtwork").takeIf(String::isNotBlank)?.let {
-                        putString(PlaybackTrackIdentity.ArtworkExtra, it)
-                    }
-                    if (value.has("albumId")) {
-                        putLong("melox.system.original_album_id", value.optLong("albumId"))
-                    }
-                    if (value.has("artistId")) {
-                        putLong("melox.system.original_artist_id", value.optLong("artistId"))
-                    }
                 }
                 add(
                     MediaItem.Builder()
@@ -126,18 +105,19 @@ internal object MeloXPlaybackQueueStore {
             }
         }
         return items.takeIf { it.isNotEmpty() }?.let {
+            // 按 mediaId 锚定当前索引：持久化后若条目被过滤/截断，旧存的数值 index
+            // 会被 `coerceIn` 压到末尾 ⇒ 恢复到错误的歌。有 id 时用 id 反查，
+            // 找不到再退回数值 index。
+            val numericIndex = prefs.getInt(INDEX, 0).coerceIn(it.indices)
+            val currentId = prefs.getString(CURRENT_ID, null)
+            val index = if (currentId != null) {
+                it.indexOfFirst { item -> item.mediaId == currentId }.takeIf { idx -> idx >= 0 } ?: numericIndex
+            } else numericIndex
             MeloXPersistedQueue(
                 items = it,
-                index = prefs.getInt(INDEX, 0).coerceIn(it.indices),
+                index = index,
                 positionMs = prefs.getLong(POSITION, 0L).coerceAtLeast(0L),
             )
         }
-    }
-
-    fun savePosition(context: Context, index: Int, positionMs: Long) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putInt(INDEX, index)
-            .putLong(POSITION, positionMs)
-            .commit()
     }
 }

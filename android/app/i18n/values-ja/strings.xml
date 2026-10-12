@@ -1324,4 +1324,22 @@
     <string name="search_cat_work">仕事</string>
     <string name="search_cat_relax">リラックス</string>
     <string name="search_cat_night">夜</string>
+    <string name="autosync_model_confirm">約 %1$s をダウンロードします。続行しますか？</string>
+    <string name="autosync_model_delete">削除</string>
+    <string name="autosync_model_download">ダウンロード</string>
+    <string name="autosync_model_downloading">ダウンロード中 %1$d%%</string>
+    <string name="autosync_model_failed">失敗：%1$s</string>
+    <string name="autosync_model_installed">インストール済み %1$s</string>
+    <string name="autosync_model_not_installed">未インストール</string>
+    <string name="autosync_models_loading">モデル一覧を取得中…</string>
+    <string name="autosync_models_retry">再試行</string>
+    <string name="autosync_models_title">AutoSync モデル</string>
+    <string name="player_skyline_lyrics">スカイライン歌詞</string>
+    <string name="settings_autosync_models">導入済みの AutoSync モデル：%1$s</string>
+    <string name="settings_autosync_no_model">AutoSync モデルが未導入です。アプリの files/autosync/&lt;言語&gt;/ に配置すると有効になります。</string>
+    <string name="settings_autosync_word">AutoSync 自動歌詞同期</string>
+    <string name="settings_autosync_word_note">行単位の歌詞しかない曲で、端末上（ONNX・完全オフライン）で実際の語単位タイミングを生成します。モデルが無い場合や整列に失敗した場合は行単位のままです。</string>
+    <string name="settings_floating_requires_android_8">フローティング歌詞には Android 8.0 以降が必要です。この端末でも音楽の基本機能は利用できます。</string>
+
+    <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
 </resources>

@@ -52,6 +52,49 @@ class TtmlLyricsParserTest {
     }
 
     @Test
+    fun selectsTheSystemLanguageTranslationForNonChineseLocales() {
+        val ttml = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal">
+              <body><div>
+                <p begin="00:00:01.000" end="00:00:02.000" itunes:key="L1">
+                  <span begin="00:00:01.000" end="00:00:02.000">Merhaba</span>
+                  <span ttm:role="x-translation" xml:lang="zh-Hans">你好</span>
+                  <span ttm:role="x-translation" xml:lang="en">Hello</span>
+                  <span ttm:role="x-translation" xml:lang="tr">Merhaba</span>
+                </p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+
+        fun translationFor(language: String?) =
+            TtmlLyricsParser.parse(ttml, MeloXLyricPreference(language, MeloXLyricScript.Original))
+                .lines.single().translation
+
+        assertEquals("Merhaba", translationFor("tr"))
+        assertEquals("Hello", translationFor("en"))
+        // 地区变体也算匹配（en-US → en）
+        assertEquals("Hello", translationFor("en"))
+        // 没有目标语言时优先非中文翻译，而不是把中文翻译塞给外语用户
+        assertEquals("Hello", translationFor("de"))
+        // 只有中文翻译时仍然保留（不因偏好而丢翻译）
+        val chineseOnly = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal">
+              <body><div>
+                <p begin="00:00:01.000" end="00:00:02.000" itunes:key="L1">
+                  <span begin="00:00:01.000" end="00:00:02.000">Hello</span>
+                  <span ttm:role="x-translation" xml:lang="zh-Hans">你好</span>
+                </p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+        assertEquals(
+            "你好",
+            TtmlLyricsParser.parse(chineseOnly, MeloXLyricPreference("tr", MeloXLyricScript.Original))
+                .lines.single().translation,
+        )
+    }
+
+    @Test
     fun officialApiLookupPrefersPlatformId() {
         assertEquals("ncmMusicId", AmlldbLyricQuery.Netease(186016).officialParameter()?.first)
         assertEquals("186016", AmlldbLyricQuery.Netease(186016).officialParameter()?.second)

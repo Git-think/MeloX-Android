@@ -1,4 +1,4 @@
-# 弥乐（MeloX Android）
+# MeloX Android
 
 [English](README.md)
 
@@ -22,11 +22,11 @@
 
 > MeloX Android 是非官方开源项目，与网易云音乐、小米、Apple 及其关联公司不存在隶属、合作或授权关系。
 
-## 当前版本：0.6.2
+## 当前版本：0.6.5
 
-`0.6.2` 在 `0.6.1` 的基础上加入共享元素转场（卡片 → 详情封面一镜到底）、跟随系统语言（简中/繁中/日语）、YouTube Music 主页与同步歌词、流光背景游走、液态玻璃设置滑条，并修复大量崩溃与返回动画问题。
+`0.6.5` 新增签名热更新通道：文案覆盖与受限 QuickJS 脚本都随已签名的云控 payload 下发，文案与小逻辑修复不再需要发 APK；未授权云控、验签失败或脚本失败/超时时一律回落内置行为。
 
-- 下载与完整更新日志：[GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.2)
+- 下载与完整更新日志：[GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.5)
 - 详细版本记录：[CHANGELOG.md](CHANGELOG.md)
 - 本次版本说明：[CHANGELOG.md](CHANGELOG.md)
 
@@ -289,33 +289,6 @@ Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/An
 - [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — 网易云接口与播放器实现参考。
 
 如后续 Android 版本迁移 PV Tool、BeatNet 或其他 MeloX 功能，将继续按照上游项目要求保留对应的独立许可证与署名。
-
-## 贡献指南
-
-欢迎您为弥乐做出贡献！无论您是古法手敲开发者，还是 Vibe Code 仙人，我们都热烈欢迎！
-
-### 反馈问题与建议
-
-- 请优先前往 [GitHub Issues](https://github.com/lladlam/MeloX-Android/issues) 提交问题或建议；
-- 如因网络问题无法访问，请**填写邮件发送至 `lladlam@outlook.com`**，注明**主题**、**问题详细说明 / 建议说明**，并附上**截图与日志**。
-
-### 贡献代码
-
-1. **Fork 本仓库**（注意目标分支是 **`contributor`**，而不是 `main`）；
-2. 在您的仓库中修改并提交，请写明清晰的 commit 信息；
-3. 向本仓库的 **`contributor`** 分支提交 Pull Request；
-4. **在 PR 评论区附上实机录屏或截图**，证明该功能已实际可用；
-5. 我们审核通过后合并至 `contributor`，经**再次核验**后合并至 `main`。
-
-> 直接向 `main` 提交的 PR 会被**自动识别**，并引导您改到 `contributor`。
-
-### 贡献要求
-
-以下情况不予采纳：
-
-1. **无用功能不采纳**（与音乐 / 体验无关）；
-2. **违反国家法律法规**的内容（如提供盗版音乐服务）；
-3. **破坏性更改**。
 
 ## 免责声明
 
