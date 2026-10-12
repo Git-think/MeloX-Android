@@ -19,10 +19,12 @@ class MeloXMeiScreenMigrationTest {
     fun searchSongRowsUsePlaylistSwipeActions() {
         val search = File("src/main/kotlin/com/lladlam/melox/ui/search/SearchScreen.kt").readText()
 
+        // 文案已资源化：这里断言的是行为接线与所用资源，而不是中文字面量。
         assertTrue(search.contains("private fun SearchSwipeSongRow"))
-        assertTrue(search.contains("MeloXSwipeAction(\"下一首播放\""))
-        assertTrue(search.contains("MeloXSwipeAction(\"稍后播放\""))
-        assertTrue(search.contains("MeloXSwipeAction(\"添加到资料库\""))
+        assertTrue(search.split("MeloXSwipeAction(").size >= 4)
+        assertTrue(search.contains("R.string.player_play_next"))
+        assertTrue(search.contains("R.string.artist_play_later"))
+        assertTrue(search.contains("R.string.artist_add_library"))
     }
 
     @Test

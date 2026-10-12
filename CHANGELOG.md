@@ -2,6 +2,17 @@
 
 [English](../README.md)
 
+## 未发布
+
+### 多语言恢复
+
+- 恢复 0.6.3 被移除的系统多语言机制：设置、音乐库、搜索、发现页、播客页等界面的文案重新走
+  `stringResource`，跟随系统语言切换（本次补回 500+ 处）。
+- 新增独立翻译目录 **`android/app/i18n/`**：每种语言一个 `values-<BCP-47>/strings.xml`，
+  已通过 Gradle `res.srcDir` 注册，贡献语言**不需要改任何 Kotlin 代码**；说明见
+  `android/app/i18n/README.md`。
+- 待补充：仍有部分内联中文（主要是与数据比较的 id 类字符串，以及少数尚未资源化的位置）。
+
 ## 0.6.5 — 2026-10-12
 
 - 版本号升级为 `0.6.5`，`versionCode 23`；正式产物名为 `MeloX-Android-0.6.5.apk`。

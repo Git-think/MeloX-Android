@@ -520,7 +520,7 @@ fun LibraryScreen(
                                     textAlign = TextAlign.Center,
                                 )
                                 Text(
-                                    text = "重新载入",
+                                    text = stringResource(R.string.library_reload),
                                     modifier = Modifier
                                         .padding(top = 12.dp)
                                         .clip(RoundedCornerShape(18.dp))
@@ -745,7 +745,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
   if (active.isNotEmpty()) {
       item {
           DownloadNavigationCard(
-              title = "正在下载",
+              title = stringResource(R.string.library_downloading),
               subtitle = "${formatDownloadSpeed(downloads.aggregateDownloadBytesPerSecond)} · 剩余 ${active.size} 首未完成",
               onClick = { page = MeloXDownloadsPage.Active },
           )
@@ -758,11 +758,11 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically,
           ) {
-              Text("已下载", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+              Text(stringResource(R.string.library_downloaded), fontSize = 20.sp, fontWeight = FontWeight.Bold)
               Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                   if (selecting) {
                       Text(
-                          if (selectedIds.size == completed.size) "取消全选" else "全选",
+                          if (selectedIds.size == completed.size) stringResource(R.string.library_deselect_all) else stringResource(R.string.library_select_all),
                           color = MaterialTheme.colorScheme.primary,
                           fontWeight = FontWeight.SemiBold,
                           modifier = Modifier.clickable {
@@ -771,7 +771,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                           },
                       )
                       Text(
-                          "取消",
+                          stringResource(R.string.action_cancel),
                           color = MaterialTheme.colorScheme.primary,
                           fontWeight = FontWeight.SemiBold,
                           modifier = Modifier.clickable {
@@ -781,13 +781,13 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                       )
                   } else {
                       Text(
-                          "多选",
+                          stringResource(R.string.library_select),
                           color = MaterialTheme.colorScheme.primary,
                           fontWeight = FontWeight.SemiBold,
                           modifier = Modifier.clickable { selecting = true },
                       )
                       Text(
-                          "播放全部",
+                          stringResource(R.string.library_play_all),
                           color = MaterialTheme.colorScheme.primary,
                           fontWeight = FontWeight.SemiBold,
                           modifier = Modifier.clickable {
@@ -827,7 +827,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
   if (groups.isNotEmpty()) {
       item {
           DownloadNavigationCard(
-              title = "已下载歌单",
+              title = stringResource(R.string.library_downloaded_playlists),
               subtitle = "${groups.size} 个歌单",
               onClick = { page = MeloXDownloadsPage.Playlists },
           )
@@ -878,7 +878,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
               if (selecting) {
                   Text(if (checked) "✓" else "○", color = MaterialTheme.colorScheme.primary, fontSize = 20.sp, modifier = Modifier.padding(10.dp))
               } else {
-                  Text("删除", color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.remove(item.song.id) }.padding(10.dp))
+                  Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.remove(item.song.id) }.padding(10.dp))
               }
           }
       }
@@ -892,7 +892,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                           .clickable(enabled = canDelete) { exportSelected() },
                       contentAlignment = Alignment.Center,
                   ) {
-                      Text("导出已选", color = MaterialTheme.colorScheme.primary.copy(alpha = if (canDelete) 1f else .4f), fontWeight = FontWeight.SemiBold)
+                      Text(stringResource(R.string.library_export_selected), color = MaterialTheme.colorScheme.primary.copy(alpha = if (canDelete) 1f else .4f), fontWeight = FontWeight.SemiBold)
                   }
                   Box(
                       Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(18.dp))
@@ -905,7 +905,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                       contentAlignment = Alignment.Center,
                   ) {
                       Text(
-                          if (canDelete) "删除 ${selectedIds.size} 首" else "请选择歌曲",
+                          if (canDelete) "删除 ${selectedIds.size} 首" else stringResource(R.string.library_select_songs),
                           color = MaterialTheme.colorScheme.error.copy(alpha = if (canDelete) 1f else .4f),
                           fontWeight = FontWeight.SemiBold,
                       )
@@ -942,7 +942,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                       fontSize = 12.sp,
                   )
               }
-              Text("删除", color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { providerDownloads.remove(item.track.id) }.padding(10.dp))
+              Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { providerDownloads.remove(item.track.id) }.padding(10.dp))
           }
       }
   }
@@ -951,9 +951,9 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
       item {
           Box(Modifier.fillMaxWidth().height(260.dp), contentAlignment = Alignment.Center) {
               Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                  Text("还没有下载歌曲", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                  Text(stringResource(R.string.library_none_downloaded), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                   Text(
-                      "在歌曲的更多操作菜单中选择“下载歌曲”。",
+                      stringResource(R.string.library_download_hint),
                       modifier = Modifier.padding(top = 7.dp),
                       color = MaterialTheme.colorScheme.onBackground.copy(alpha = .48f),
                       fontSize = 13.sp,
@@ -969,7 +969,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
   contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 146.dp),
   verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-  item { DownloadsSubpageHeader("正在下载") { page = MeloXDownloadsPage.Root } }
+  item { DownloadsSubpageHeader(stringResource(R.string.library_downloading)) { page = MeloXDownloadsPage.Root } }
   item {
       Text(
           "${formatDownloadSpeed(downloads.aggregateDownloadBytesPerSecond)} · 剩余 ${active.size} 首未完成",
@@ -988,18 +988,18 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
           )
           Column(Modifier.weight(1f).padding(start = 12.dp)) {
               Text(item.song.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-              val progress = item.fractionCompleted?.let { "${(it * 100).toInt()}%" } ?: "准备中"
+              val progress = item.fractionCompleted?.let { "${(it * 100).toInt()}%" } ?: stringResource(R.string.library_preparing)
               Text(
                   "$progress · ${formatDownloadSpeed(item.bytesPerSecond)} · ${item.quality.title}",
                   color = MaterialTheme.colorScheme.onBackground.copy(alpha = .48f),
                   fontSize = 12.sp,
               )
           }
-          Text("取消", color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.cancel(item.song.id) }.padding(10.dp))
+          Text(stringResource(R.string.action_cancel), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.cancel(item.song.id) }.padding(10.dp))
       }
   }
   if (active.isEmpty()) {
-      item { Text("当前没有正在下载的歌曲", color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f), modifier = Modifier.padding(top = 24.dp)) }
+      item { Text(stringResource(R.string.library_none_active), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f), modifier = Modifier.padding(top = 24.dp)) }
   }
         }
 
@@ -1008,7 +1008,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
   contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 146.dp),
   verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-  item { DownloadsSubpageHeader("已下载歌单") { page = MeloXDownloadsPage.Root } }
+  item { DownloadsSubpageHeader(stringResource(R.string.library_downloaded_playlists)) { page = MeloXDownloadsPage.Root } }
   items(groups, key = { "download-playlist-${it.playlist.id}" }) { group ->
       Row(
           Modifier.fillMaxWidth().height(68.dp).clickable {
@@ -1040,7 +1040,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
       contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 146.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
-      item { DownloadsSubpageHeader(group?.playlist?.name ?: "已下载歌单") { page = MeloXDownloadsPage.Playlists } }
+      item { DownloadsSubpageHeader(group?.playlist?.name ?: stringResource(R.string.library_downloaded_playlists)) { page = MeloXDownloadsPage.Playlists } }
       group?.let { existing ->
           item {
               Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1055,7 +1055,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                       Text("${songs.size} 首已下载歌曲", color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f), fontSize = 12.sp)
                   }
                   Text(
-                      "播放全部",
+                      stringResource(R.string.library_play_all),
                       color = MaterialTheme.colorScheme.primary,
                       fontWeight = FontWeight.SemiBold,
                       modifier = Modifier.clickable {
@@ -1151,10 +1151,10 @@ private fun MeloXLibraryLoginUnavailable(
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("需要登录", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.library_login_required), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     if (source == MusicSource.Netease) {
-                        "登录后可读取收藏歌曲、歌单和播放记录。"
+                        stringResource(R.string.library_login_netease_body)
                     } else {
                         "请先在设置中登录 ${source.displayName}，登录后可读取该平台提供的音乐库内容。"
                     },
@@ -1171,7 +1171,7 @@ private fun MeloXLibraryLoginUnavailable(
                         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
                     ) {
                         Text(
-                            if (source == MusicSource.Netease) "登录网易云音乐" else "前往登录 ${source.displayName}",
+                            if (source == MusicSource.Netease) stringResource(R.string.app_login_netease) else "前往登录 ${source.displayName}",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -1314,7 +1314,7 @@ private fun MeloXLibrarySongsPage(
     if (songs.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "暂无歌曲",
+                stringResource(R.string.library_no_songs),
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.48f),
                 fontSize = 17.sp,
             )
@@ -1363,7 +1363,7 @@ private fun MeloXPlayAllRow(onClick: () -> Unit) {
             color = Color(0xFFFF3147),
         )
         Text(
-            text = "播放全部",
+            text = stringResource(R.string.library_play_all),
             fontSize = 17.sp,
             fontWeight = FontWeight.Normal,
             color = MaterialTheme.colorScheme.onBackground,
@@ -1627,7 +1627,7 @@ private fun MeloXLibraryPlaylistsPage(
     if (playlists.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "还没有收藏歌单",
+                stringResource(R.string.library_no_playlists),
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.48f),
                 fontSize = 17.sp,
             )
@@ -1650,7 +1650,7 @@ private fun MeloXLibraryPlaylistsPage(
                 ) {
                     AsyncImage(localRecommendations.firstOrNull()?.artworkUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)))
                     Column(Modifier.weight(1f)) {
-                        Text("MeloX 为你推荐", fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.home_for_you_melox), fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("本地算法 · ${localRecommendations.size} 首 · 只读", fontSize = 12.sp, color = MaterialTheme.colorScheme.onBackground.copy(alpha = .48f))
                     }
                     MeloXActionIcon("›", Modifier.size(18.dp), MaterialTheme.colorScheme.onBackground.copy(alpha = .4f))
@@ -1660,7 +1660,7 @@ private fun MeloXLibraryPlaylistsPage(
         }
         item {
             Text(
-                text = "歌单",
+                text = stringResource(R.string.library_page_playlists),
                 modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.50f),
@@ -1776,7 +1776,7 @@ private fun LocalRecommendationPlaylistScreen(onBack: () -> Unit) {
             onMore = {},
         )
         Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
-            Text("MeloX 为你推荐", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.home_for_you_melox), fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Text("本地规则与轻量模型生成 · 只读内部歌单 · ${tracks.size} 首", modifier = Modifier.padding(top = 5.dp), fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground.copy(alpha = .54f))
         }
         if (tracks.isEmpty()) {
@@ -2310,7 +2310,7 @@ private fun MeloXPlaylistDetailScreen(
                         secondary = secondary,
                         sourceLabel = providerAlbum?.id?.source?.displayName
                             ?: displayed.providerPlaylist?.id?.source?.displayName
-                            ?: "网易云音乐",
+                            ?: stringResource(R.string.share_netease),
                         onPlay = {
                             PlaybackCommands.playAll(
                                 context = context,
@@ -2420,7 +2420,7 @@ private fun MeloXPlaylistDetailScreen(
                                 textAlign = TextAlign.Center,
                             )
                             Text(
-                                "重试",
+                                stringResource(R.string.account_retry),
                                 modifier = Modifier
                                     .padding(top = 12.dp)
                                     .clickable {
@@ -2441,7 +2441,7 @@ private fun MeloXPlaylistDetailScreen(
                                 .height(180.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text("暂无歌曲", color = secondary)
+                            Text(stringResource(R.string.library_no_songs), color = secondary)
                         }
                     }
                     else -> gridItemsIndexed(
@@ -2747,7 +2747,7 @@ private fun MeloXPlaylistSearchField(
         ) {
             if (value.isEmpty()) {
                 Text(
-                    "在歌单中搜索",
+                    stringResource(R.string.library_search_in_playlist),
                     color = foreground.copy(alpha = 0.46f),
                     fontSize = 17.sp,
                 )
@@ -2911,7 +2911,7 @@ private fun MeloXStandardPlaylistHero(
                             if (foreground == Color.White) Color.Black else Color.White,
                         )
                         Text(
-                            "播放",
+                            stringResource(R.string.action_play),
                             color = if (foreground == Color.White) Color.Black else Color.White,
                             fontSize = 19.sp,
                             fontWeight = FontWeight.Bold,
@@ -2967,8 +2967,8 @@ private fun MeloXPlaylistTrackRow(
 ) {
     MeloXSwipeActionRow(
         startActions = listOf(
-            MeloXSwipeAction("下一首播放", MeloXSymbol.Next, Color(0xFF8E5AF7), onPlayNext),
-            MeloXSwipeAction("稍后播放", MeloXSymbol.Queue, Color(0xFFFF9F0A), onPlayLast),
+            MeloXSwipeAction(stringResource(R.string.player_play_next), MeloXSymbol.Next, Color(0xFF8E5AF7), onPlayNext),
+            MeloXSwipeAction(stringResource(R.string.artist_play_later), MeloXSymbol.Queue, Color(0xFFFF9F0A), onPlayLast),
         ),
         endActions = listOfNotNull(endAction),
         startFullSwipeActionIndex = if (MeloXSettingsRuntime.swipeFullAction == MeloXSwipeFullAction.AddToQueue) 1 else 0,

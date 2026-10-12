@@ -62,7 +62,6 @@
     <string name="player_share_netease_friends">NetEaseの友達に送る</string>
     <string name="player_listening_rank">再生履歴</string>
     <string name="player_wiki">曲のWiki</string>
-    <string name="player_skyline_lyrics">スカイライン歌詞</string>
     <string name="player_listen_together">一緒に聴く</string>
     <string name="player_play_next">次に再生</string>
     <string name="player_add_to_queue">キューに追加</string>
@@ -83,6 +82,10 @@
     <string name="player_cancel_sleep">タイマーを解除</string>
     <string name="player_loading_playlists">プレイリストを読み込み中</string>
     <string name="player_new_playlist">新しいプレイリスト</string>
+    <string name="player_rename_playlist">名前を変更</string>
+    <string name="player_move_up">上へ</string>
+    <string name="player_move_down">下へ</string>
+    <string name="player_delete_playlist">プレイリストを削除</string>
     <string name="player_track_count">%1$d曲</string>
     <string name="player_no_writable_playlists">追加できるプレイリストがありません。</string>
     <string name="player_playlist_name">プレイリスト名</string>
@@ -248,6 +251,9 @@
     <string name="account_save_client_id">Client ID を保存</string>
     <string name="account_spotify_auth_failed">Spotify の認証を開始できませんでした</string>
     <string name="account_spotify_browser">ブラウザで Spotify にサインイン</string>
+    <string name="account_spotify_waiting">Spotify を待っています…</string>
+    <string name="account_spotify_return">MeloX に戻れます</string>
+    <string name="provider_jellyfin_insecure">このサーバーの平文接続と独自の証明書を許可する</string>
     <string name="account_login_bilibili">Bilibili にサインイン</string>
     <string name="account_profile_title">プロフィール</string>
     <string name="account_retry">再試行</string>
@@ -559,6 +565,8 @@
     <string name="library_login_source">%1$s にログイン</string>
     <string name="library_no_songs">曲はまだありません</string>
     <string name="library_no_playlists">保存したプレイリストはまだありません</string>
+    <string name="library_no_albums">保存したアルバムはまだありません</string>
+    <string name="library_no_artists">フォロー中のアーティストはまだありません</string>
     <string name="library_local_meta">このデバイス · %1$d 曲 · 読み取り専用</string>
     <string name="library_local_detail">デバイス上のルールと軽量モデル · 読み取り専用プレイリスト · %1$d 曲</string>
     <string name="library_no_similar">類似度の条件を満たす曲がありません。\n再生、いいね、最後まで聴いたあとに、もう一度分析してください。</string>
@@ -738,11 +746,6 @@
     <string name="settings_skyline_drift">漂う量</string>
     <string name="settings_skyline_reset">全画面スカイライン歌詞を初期設定に戻す</string>
     <string name="settings_floating_show">フローティング歌詞を表示</string>
-    <string name="settings_floating_requires_android_8">フローティング歌詞には Android 8.0 以降が必要です。この端末でも音楽の基本機能は利用できます。</string>
-    <string name="settings_autosync_word">AutoSync 自動歌詞同期</string>
-    <string name="settings_autosync_word_note">行単位の歌詞しかない曲で、端末上（ONNX・完全オフライン）で実際の語単位タイミングを生成します。モデルが無い場合や整列に失敗した場合は行単位のままです。</string>
-    <string name="settings_autosync_no_model">AutoSync モデルが未導入です。アプリの files/autosync/&lt;言語&gt;/ に配置すると有効になります。</string>
-    <string name="settings_autosync_models">導入済みの AutoSync モデル：%1$s</string>
     <string name="settings_floating_show_note">現在の歌詞と、翻訳または読み仮名を他のアプリの上に表示します。ドラッグして移動できます。</string>
     <string name="settings_floating_secondary">副歌詞</string>
     <string name="settings_floating_secondary_auto">自動（翻訳 / 読み仮名 / 次の行）</string>
@@ -1160,6 +1163,9 @@
     <string name="settings_bg_blurred_artwork">静止したぼかしアートワーク</string>
     <string name="settings_flowing_backdrop">流れる光の背景</string>
     <string name="settings_flowing_backdrop_note">オフにすると、ぼかしたアートワークを背景に使います。</string>
+    <string name="settings_flowing_speed">流れる速さ</string>
+    <string name="settings_flowing_saturation">色の強さ</string>
+    <string name="settings_flowing_brightness">明るさ</string>
     <string name="settings_background_isolation">プレーヤーの背景を分離</string>
     <string name="settings_background_isolation_note">オンにすると、プレーヤーがホームを単独で覆います。オフにすると、元の透明な背景に戻り、下のページが透けることがあります。</string>
     <string name="settings_background_fps">動く背景のフレームレート</string>
@@ -1317,14 +1323,22 @@
     <string name="search_cat_work">仕事</string>
     <string name="search_cat_relax">リラックス</string>
     <string name="search_cat_night">夜</string>
-    <string name="autosync_models_title">AutoSync モデル</string>
-    <string name="autosync_models_loading">モデル一覧を取得中…</string>
-    <string name="autosync_models_retry">再試行</string>
-    <string name="autosync_model_download">ダウンロード</string>
+    <string name="autosync_model_confirm">約 %1$s をダウンロードします。続行しますか？</string>
     <string name="autosync_model_delete">削除</string>
-    <string name="autosync_model_installed">インストール済み %1$s</string>
-    <string name="autosync_model_not_installed">未インストール</string>
+    <string name="autosync_model_download">ダウンロード</string>
     <string name="autosync_model_downloading">ダウンロード中 %1$d%%</string>
     <string name="autosync_model_failed">失敗：%1$s</string>
-    <string name="autosync_model_confirm">約 %1$s をダウンロードします。続行しますか？</string>
+    <string name="autosync_model_installed">インストール済み %1$s</string>
+    <string name="autosync_model_not_installed">未インストール</string>
+    <string name="autosync_models_loading">モデル一覧を取得中…</string>
+    <string name="autosync_models_retry">再試行</string>
+    <string name="autosync_models_title">AutoSync モデル</string>
+    <string name="player_skyline_lyrics">スカイライン歌詞</string>
+    <string name="settings_autosync_models">導入済みの AutoSync モデル：%1$s</string>
+    <string name="settings_autosync_no_model">AutoSync モデルが未導入です。アプリの files/autosync/&lt;言語&gt;/ に配置すると有効になります。</string>
+    <string name="settings_autosync_word">AutoSync 自動歌詞同期</string>
+    <string name="settings_autosync_word_note">行単位の歌詞しかない曲で、端末上（ONNX・完全オフライン）で実際の語単位タイミングを生成します。モデルが無い場合や整列に失敗した場合は行単位のままです。</string>
+    <string name="settings_floating_requires_android_8">フローティング歌詞には Android 8.0 以降が必要です。この端末でも音楽の基本機能は利用できます。</string>
+
+    <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
 </resources>

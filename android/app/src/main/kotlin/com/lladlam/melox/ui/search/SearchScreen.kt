@@ -1138,7 +1138,7 @@ private fun SearchDiscovery(
         contentPadding = PaddingValues(bottom = MeloXBottomContentClearance),
     ) {
         if (recommendations.isNotEmpty()) {
-            item { Text("热门推荐", modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 12.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+            item { Text(stringResource(R.string.search_trending), modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 12.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold) }
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(recommendations, key = { it.id }) { p ->
@@ -1177,7 +1177,7 @@ private fun SearchDiscovery(
                 }
             }
         }
-        item { Text("浏览类别", modifier = Modifier.padding(start = 20.dp, top = 26.dp, bottom = 12.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+        item { Text(stringResource(R.string.search_browse), modifier = Modifier.padding(start = 20.dp, top = 26.dp, bottom = 12.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold) }
         items(SearchCategories.filter { it != "播客" || MeloXSettingsRuntime.podcastsEnabled }.chunked(categoryColumns)) { pair ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 pair.forEach { category -> SearchCategoryCard(category, Modifier.weight(1f)) { onCategory(category) } }
@@ -1203,7 +1203,7 @@ private fun ProviderSearchDiscovery(
         contentPadding = PaddingValues(bottom = MeloXBottomContentClearance),
     ) {
         if (recommendations.isNotEmpty()) {
-            item { Text("热门推荐", modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 12.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+            item { Text(stringResource(R.string.search_trending), modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 12.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold) }
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(recommendations, key = { "${it.id.source.storageValue}:${it.id.value}" }) { p ->
@@ -1284,14 +1284,14 @@ private fun ProviderSearchSongResults(
             }
         }
         if (values.isEmpty()) {
-            item { SearchEmptyInline("没有找到歌曲") }
+            item { SearchEmptyInline(stringResource(R.string.search_no_songs)) }
         } else {
             items(values, key = { "provider:${it.id.source.storageValue}:${it.id.value}" }) { track ->
                 SearchSwipeSongRow(
                     song = MeloXLegacyUiBridge.track(track),
                     onPlay = { onPlay(track) },
                     onMore = null,
-                    endAction = MeloXSwipeAction("下载到本机", MeloXSymbol.Download, Color(0xFF0EA5E9)) {
+                    endAction = MeloXSwipeAction(stringResource(R.string.search_download_local), MeloXSymbol.Download, Color(0xFF0EA5E9)) {
                         providerDownloads.start(track)
                     },
                     sourceLabel = track.id.source.displayName.takeIf { showSource },
@@ -1310,7 +1310,7 @@ private fun ProviderSearchMediaResults(
     sharedTransitionScope: SharedTransitionScope? = null,
     selectedKey: String? = null,
 ) {
-    if (values.isEmpty()) { SearchEmpty("没有找到内容"); return }
+    if (values.isEmpty()) { SearchEmpty(stringResource(R.string.search_no_results)); return }
     LazyColumn(
         state = state,
         // 触顶/触底橡胶回弹触感。
@@ -1370,7 +1370,7 @@ private fun SearchSongResults(
     onMore: (SearchSong) -> Unit,
     onLike: (SearchSong) -> Unit,
 ) {
-    if (values.isEmpty()) { SearchEmpty("没有找到歌曲"); return }
+    if (values.isEmpty()) { SearchEmpty(stringResource(R.string.search_no_songs)); return }
     LazyColumn(
         state = state,
         // 触顶/触底橡胶回弹触感。
@@ -1382,7 +1382,7 @@ private fun SearchSongResults(
                 song = song,
                 onPlay = { onPlay(song) },
                 onMore = { onMore(song) },
-                endAction = MeloXSwipeAction("添加到资料库", MeloXSymbol.Heart, Color(0xFFFF3B30)) { onLike(song) },
+                endAction = MeloXSwipeAction(stringResource(R.string.artist_add_library), MeloXSymbol.Heart, Color(0xFFFF3B30)) { onLike(song) },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f))
         }
@@ -1400,8 +1400,8 @@ private fun SearchSwipeSongRow(
     val context = LocalContext.current
     MeloXSwipeActionRow(
         startActions = listOf(
-            MeloXSwipeAction("下一首播放", MeloXSymbol.Next, Color(0xFF8E5AF7)) { PlaybackCommands.playNext(context, song) },
-            MeloXSwipeAction("稍后播放", MeloXSymbol.Queue, Color(0xFFFF9F0A)) { PlaybackCommands.addToQueue(context, song) },
+            MeloXSwipeAction(stringResource(R.string.player_play_next), MeloXSymbol.Next, Color(0xFF8E5AF7)) { PlaybackCommands.playNext(context, song) },
+            MeloXSwipeAction(stringResource(R.string.artist_play_later), MeloXSymbol.Queue, Color(0xFFFF9F0A)) { PlaybackCommands.addToQueue(context, song) },
         ),
         endActions = listOfNotNull(endAction),
         startFullSwipeActionIndex = if (MeloXSettingsRuntime.swipeFullAction == MeloXSwipeFullAction.AddToQueue) 1 else 0,
@@ -1440,7 +1440,7 @@ private fun SearchMediaResults(
     sharedTransitionScope: SharedTransitionScope? = null,
     selectedKey: String? = null,
 ) {
-    if (values.isEmpty()) { SearchEmpty("没有找到内容"); return }
+    if (values.isEmpty()) { SearchEmpty(stringResource(R.string.search_no_results)); return }
     // 播客行内直接短路 launch（OneShot），需要 Activity context。
     val context = LocalContext.current
     LazyColumn(
@@ -1523,10 +1523,10 @@ private fun SearchCategoryPage(
     Column(Modifier.fillMaxSize().padding(top = rememberMeloXStableStatusBarHeight()).padding(top = 16.dp)) {
         SearchDetailHeader(title, onBack)
         when {
-            title == "播客" -> SearchEmpty("播客请使用上方搜索框切换到“播客”范围进行搜索。")
+            title == "播客" -> SearchEmpty(stringResource(R.string.search_podcast_hint))
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> SearchEmpty(error)
-            values.isEmpty() -> SearchEmpty("暂无内容")
+            values.isEmpty() -> SearchEmpty(stringResource(R.string.melox_state_empty))
             else -> LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp, bottom = MeloXBottomContentClearance)) {
                 items(values, key = { it.id }) { p ->
                     val destinationKey = SearchDetailDestination.Netease(p.asSearchItem()).key
@@ -1705,7 +1705,7 @@ private fun SearchCollectionDetail(
                     val hasTracks = songs.isNotEmpty() || providerTracks.isNotEmpty()
                     if (hasTracks) {
                         Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            SearchPlayButton("随机") {
+                            SearchPlayButton(stringResource(R.string.search_shuffle)) {
                                 if (providerTracks.isNotEmpty()) {
                                     val shuffled = providerTracks.shuffled()
                                     shuffled.firstOrNull()?.let { ProviderPlaybackCommands.playQueue(context, shuffled, it.id) }
@@ -1714,7 +1714,7 @@ private fun SearchCollectionDetail(
                                     shuffled.firstOrNull()?.let { PlaybackCommands.playQueue(context, shuffled, it.id) }
                                 }
                             }
-                            SearchPlayButton("播放") {
+                            SearchPlayButton(stringResource(R.string.action_play)) {
                                 if (providerTracks.isNotEmpty()) {
                                     providerTracks.firstOrNull()?.let { ProviderPlaybackCommands.playQueue(context, providerTracks, it.id) }
                                 } else {
@@ -1733,7 +1733,7 @@ private fun SearchCollectionDetail(
                         song = MeloXLegacyUiBridge.track(track),
                         onPlay = { ProviderPlaybackCommands.playQueue(context, providerTracks, track.id) },
                         onMore = null,
-                        endAction = MeloXSwipeAction("下载到本机", MeloXSymbol.Download, Color(0xFF0EA5E9)) {
+                        endAction = MeloXSwipeAction(stringResource(R.string.search_download_local), MeloXSymbol.Download, Color(0xFF0EA5E9)) {
                             MeloXProviderDownloadStore.get(context).start(track)
                         },
                         sourceLabel = track.id.source.displayName,
@@ -1744,7 +1744,7 @@ private fun SearchCollectionDetail(
                         song = song,
                         onPlay = { PlaybackCommands.playQueue(context, songs, song.id) },
                         onMore = { selectedActionSong = song },
-                        endAction = MeloXSwipeAction("添加到资料库", MeloXSymbol.Heart, Color(0xFFFF3B30)) {
+                        endAction = MeloXSwipeAction(stringResource(R.string.artist_add_library), MeloXSymbol.Heart, Color(0xFFFF3B30)) {
                             scope.launch {
                                 runCatching { operations.setSongLiked(song.id, true) }
                                     .onFailure { error = it.message ?: "添加到资料库失败" }

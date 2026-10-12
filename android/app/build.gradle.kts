@@ -224,6 +224,10 @@ android {
     sourceSets {
         getByName("main") {
             resources.srcDir("src/main/baselineProfiles")
+            // Translations live outside `res/` so a contributor can add one folder
+            // per language without touching code or the default strings.
+            // See `android/app/i18n/README.md`.
+            res.srcDir("i18n")
         }
     }
 

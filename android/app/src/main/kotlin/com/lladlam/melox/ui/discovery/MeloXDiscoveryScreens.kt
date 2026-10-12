@@ -335,27 +335,27 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
                         candidate.title == recommendation.title && candidate.artistText == recommendation.artist
                     }?.let { DiscoveryTrack.Provider(it) }
                 }
-                if (orderedCandidates.isNotEmpty()) add(HomeBlock.Tracks("MeloX 为你推荐", "跨平台本地算法", orderedCandidates))
+                if (orderedCandidates.isNotEmpty()) add(HomeBlock.Tracks(stringResource(R.string.home_for_you_melox), stringResource(R.string.home_local_algorithm), orderedCandidates))
             }
             MeloXSettingsRuntime.homeSectionOrder.forEach { section ->
                 when (section) {
                     "QuickActions" -> if (MeloXSettingsRuntime.homeQuickActionsEnabled) add(HomeBlock.QuickActions)
                     "Playlists" -> if (MeloXSettingsRuntime.homePlaylistsEnabled && value.playlists.isNotEmpty()) {
-                        add(HomeBlock.Collections("每日推荐", "下拉刷新", value.playlists.map { DiscoveryCollection.Netease(it) }))
+                        add(HomeBlock.Collections("每日推荐", stringResource(R.string.home_pull_to_refresh), value.playlists.map { DiscoveryCollection.Netease(it) }))
                     }
                     "NewSongs" -> if (MeloXSettingsRuntime.homeNewSongsEnabled && value.newSongs.isNotEmpty()) {
-                        add(HomeBlock.Tracks("为你推荐", "新歌", value.newSongs.map { DiscoveryTrack.Netease(it) }))
+                        add(HomeBlock.Tracks(stringResource(R.string.home_for_you), stringResource(R.string.home_new_songs), value.newSongs.map { DiscoveryTrack.Netease(it) }))
                     }
                 }
             }
-            if (value.recentlyTrending.isNotEmpty()) add(HomeBlock.Tracks("近期云村热播", "来自网易云首页", value.recentlyTrending.map { DiscoveryTrack.Netease(it) }))
-            if (value.tailoredSongs.isNotEmpty()) add(HomeBlock.Tracks("根据你的喜好为你推荐", "个性化", value.tailoredSongs.map { DiscoveryTrack.Netease(it) }))
-            if (value.chartPlaylists.isNotEmpty()) add(HomeBlock.Collections("排行榜", "网易云榜单", value.chartPlaylists.map { DiscoveryCollection.Netease(it) }))
-            if (value.radarPlaylists.isNotEmpty()) add(HomeBlock.Collections("私人雷达", "你的雷达歌单", value.radarPlaylists.map { DiscoveryCollection.Netease(it) }))
-            if (value.personalPlaylists.isNotEmpty()) add(HomeBlock.Collections("我的歌单", "为你保留", value.personalPlaylists.map { DiscoveryCollection.Netease(it) }))
-            if (value.regionalSongs.isNotEmpty()) add(HomeBlock.Tracks("${MeloXSettingsRuntime.musicArea}最近热门", "地区推荐", value.regionalSongs.map { DiscoveryTrack.Netease(it) }))
-            if (value.roamingSongs.isNotEmpty()) add(HomeBlock.Tracks("私人漫游", "探索更多", value.roamingSongs.map { DiscoveryTrack.Netease(it) }))
-            if (value.similarSongs.isNotEmpty()) add(HomeBlock.Tracks("相似歌曲", "根据当前播放", value.similarSongs.map { DiscoveryTrack.Netease(it) }))
+            if (value.recentlyTrending.isNotEmpty()) add(HomeBlock.Tracks(stringResource(R.string.home_recent_trending), stringResource(R.string.home_from_netease_home), value.recentlyTrending.map { DiscoveryTrack.Netease(it) }))
+            if (value.tailoredSongs.isNotEmpty()) add(HomeBlock.Tracks(stringResource(R.string.home_based_on_taste), stringResource(R.string.home_personalized), value.tailoredSongs.map { DiscoveryTrack.Netease(it) }))
+            if (value.chartPlaylists.isNotEmpty()) add(HomeBlock.Collections("排行榜", stringResource(R.string.home_netease_charts), value.chartPlaylists.map { DiscoveryCollection.Netease(it) }))
+            if (value.radarPlaylists.isNotEmpty()) add(HomeBlock.Collections("私人雷达", stringResource(R.string.home_your_radar), value.radarPlaylists.map { DiscoveryCollection.Netease(it) }))
+            if (value.personalPlaylists.isNotEmpty()) add(HomeBlock.Collections(stringResource(R.string.home_my_playlists), stringResource(R.string.home_kept_for_you), value.personalPlaylists.map { DiscoveryCollection.Netease(it) }))
+            if (value.regionalSongs.isNotEmpty()) add(HomeBlock.Tracks("${MeloXSettingsRuntime.musicArea}最近热门", stringResource(R.string.home_area_picks), value.regionalSongs.map { DiscoveryTrack.Netease(it) }))
+            if (value.roamingSongs.isNotEmpty()) add(HomeBlock.Tracks("私人漫游", stringResource(R.string.home_explore_more), value.roamingSongs.map { DiscoveryTrack.Netease(it) }))
+            if (value.similarSongs.isNotEmpty()) add(HomeBlock.Tracks("相似歌曲", stringResource(R.string.home_from_now_playing), value.similarSongs.map { DiscoveryTrack.Netease(it) }))
             if (
                 value.podcasts.isNotEmpty() &&
                 MeloXSettingsRuntime.podcastsEnabled &&
@@ -366,11 +366,11 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
 
     val account = session.profile?.let { profile ->
         HomeAccountUi(
-            name = profile.nickname.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) } ?: "网易云音乐用户",
+            name = profile.nickname.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) } ?: stringResource(R.string.home_netease_user),
             avatarUrl = profile.avatarUrl,
             subtitle = profile.signature
                 ?.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) }
-                ?: "查看主页、听歌排行与歌单",
+                ?: stringResource(R.string.home_profile_subtitle),
             onClick = { MeloXAccountActivity.launch(context, profile.userId) },
         )
     }
@@ -672,7 +672,7 @@ private fun ProviderHomeDataScreen(source: MusicSource, onOpenTool: (String) -> 
                 add(HomeBlock.Collections("每日推荐", source.displayName, value.recommendedPlaylists.map { DiscoveryCollection.ProviderPlaylist(it) }))
             }
             if (value.newSongs.isNotEmpty()) {
-                add(HomeBlock.Tracks("为你推荐", "新歌", value.newSongs.map { DiscoveryTrack.Provider(it) }))
+                add(HomeBlock.Tracks(stringResource(R.string.home_for_you), stringResource(R.string.home_new_songs), value.newSongs.map { DiscoveryTrack.Provider(it) }))
             }
             if (provider is RankingCapability && value.rankings.isNotEmpty()) {
                 add(HomeBlock.Collections("排行榜", source.displayName, value.rankings.map { DiscoveryCollection.ProviderRanking(it) }))
@@ -884,23 +884,23 @@ private fun HomeQuickActions(source: MusicSource, active: String?, perform: (Str
     )
     val actions = buildList {
         if (source == MusicSource.Netease) {
-            add(Action("每日推荐", "每日更新", "为你定制的歌曲", MeloXSymbol.Calendar, listOf(Color(0xFFFF5B8A), Color(0xFFFF3147))))
-            add(Action("热歌榜", "全站热门", "大家都在听", MeloXSymbol.Flame, listOf(Color(0xFFFFA14A), Color(0xFFFF5A36))))
-            add(Action("心动模式", "为你心动", "喜欢与惊喜交替播放", MeloXSymbol.Heart, listOf(Color(0xFFFF6EAC), Color(0xFF9B5DE5))))
-            add(Action("私人雷达", "持续发现", "发现符合你口味的歌单", MeloXSymbol.RadioWaves, listOf(Color(0xFF6B7BFF), Color(0xFF8C52FF))))
-            add(Action("私人漫游", "探索模式", "漫游到新的好音乐", MeloXSymbol.Walk, listOf(Color(0xFF26C6DA), Color(0xFF4285F4))))
-            add(Action("相似歌曲", "从当前歌曲出发", "播放更多相似歌曲", MeloXSymbol.List, listOf(Color(0xFF58C9A3), Color(0xFF159D9A))))
+            add(Action("每日推荐", stringResource(R.string.home_eyebrow_daily), stringResource(R.string.home_subtitle_daily), MeloXSymbol.Calendar, listOf(Color(0xFFFF5B8A), Color(0xFFFF3147))))
+            add(Action("热歌榜", stringResource(R.string.home_eyebrow_hot), stringResource(R.string.home_subtitle_hot), MeloXSymbol.Flame, listOf(Color(0xFFFFA14A), Color(0xFFFF5A36))))
+            add(Action("心动模式", stringResource(R.string.home_eyebrow_heart), stringResource(R.string.home_subtitle_heart), MeloXSymbol.Heart, listOf(Color(0xFFFF6EAC), Color(0xFF9B5DE5))))
+            add(Action("私人雷达", stringResource(R.string.home_eyebrow_radar), stringResource(R.string.home_subtitle_radar), MeloXSymbol.RadioWaves, listOf(Color(0xFF6B7BFF), Color(0xFF8C52FF))))
+            add(Action("私人漫游", stringResource(R.string.home_eyebrow_roam), stringResource(R.string.home_subtitle_roam), MeloXSymbol.Walk, listOf(Color(0xFF26C6DA), Color(0xFF4285F4))))
+            add(Action("相似歌曲", stringResource(R.string.home_eyebrow_similar), stringResource(R.string.home_subtitle_similar), MeloXSymbol.List, listOf(Color(0xFF58C9A3), Color(0xFF159D9A))))
         }
-        add(Action("听歌识曲", "快捷工具", "识别环境中正在播放的歌曲", MeloXSymbol.Microphone, listOf(Color(0xFF7B61FF), Color(0xFF36C5F0))))
-        if (source == MusicSource.Netease) add(Action("私信", "网易云社交", "查看联系人和私信会话", MeloXSymbol.Mail, listOf(Color(0xFFFF6B8B), Color(0xFFFF3B30))))
+        add(Action("听歌识曲", stringResource(R.string.home_eyebrow_recognize), stringResource(R.string.home_subtitle_recognize), MeloXSymbol.Microphone, listOf(Color(0xFF7B61FF), Color(0xFF36C5F0))))
+        if (source == MusicSource.Netease) add(Action("私信", stringResource(R.string.home_eyebrow_messages), stringResource(R.string.home_subtitle_messages), MeloXSymbol.Mail, listOf(Color(0xFFFF6B8B), Color(0xFFFF3B30))))
         if (source == MusicSource.Netease && MeloXSettingsRuntime.podcastsEnabled && MeloXSettingsRuntime.podcastsHomePlacement) {
-            add(Action("播客", "首页页面", "浏览播客与节目", MeloXSymbol.RadioWaves, listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
+            add(Action("播客", stringResource(R.string.home_eyebrow_podcasts), stringResource(R.string.home_subtitle_podcasts), MeloXSymbol.RadioWaves, listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
         }
         if (MeloXSettingsRuntime.downloadsEnabled && MeloXSettingsRuntime.downloadsHomePlacement) {
-            add(Action("下载", "本地音乐", "浏览已下载的歌曲", MeloXSymbol.Download, listOf(Color(0xFF0EA5E9), Color(0xFF14B8A6))))
+            add(Action("下载", stringResource(R.string.home_eyebrow_downloads), stringResource(R.string.home_subtitle_downloads), MeloXSymbol.Download, listOf(Color(0xFF0EA5E9), Color(0xFF14B8A6))))
         }
         if (source == MusicSource.Netease && MeloXSettingsRuntime.cloudMusicEnabled && MeloXSettingsRuntime.cloudHomePlacement) {
-            add(Action("云盘", "个人音乐", "打开网易云音乐云盘", MeloXSymbol.Storage, listOf(Color(0xFF64748B), Color(0xFF6366F1))))
+            add(Action("云盘", stringResource(R.string.home_eyebrow_cloud), stringResource(R.string.home_subtitle_cloud), MeloXSymbol.Storage, listOf(Color(0xFF64748B), Color(0xFF6366F1))))
         }
     }
     LazyRow(
@@ -1546,7 +1546,7 @@ private fun HeroCollectionCard(
         )
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .82f)))))
         Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
-            Text("本周主推", color = Color.White.copy(alpha = .72f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.home_featured_this_week), color = Color.White.copy(alpha = .72f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text(value.title, color = Color.White, fontSize = 26.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             (value.description ?: value.creatorName).takeIf(String::isNotBlank)?.let { Text(it, color = Color.White.copy(alpha = .72f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
@@ -1775,7 +1775,7 @@ private fun DiscoveryCollectionDetail(
                     val value = tracks.orEmpty()
                     if (value.isNotEmpty()) {
                         Text(
-                            "▶  播放全部",
+                            stringResource(R.string.home_play_all),
                             modifier = Modifier
                                 .padding(top = 15.dp)
                                 .clip(RoundedCornerShape(22.dp))
@@ -1837,7 +1837,7 @@ private fun EmptyOrLoading(loading: Boolean, error: String?) {
     ) {
         item {
             if (loading) CircularProgressIndicator(color = Accent)
-            else Text(error ?: "暂无内容", color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f))
+            else Text(error ?: stringResource(R.string.melox_state_empty), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f))
         }
     }
 }

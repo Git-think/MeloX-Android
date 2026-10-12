@@ -102,6 +102,17 @@ gradle :app:assembleRelease -PmeloxReleaseIdSuffix= --no-daemon --max-workers=1
 合并前务必逐提交核对“主线的改动是否还在”，合并后用
 `git checkout <main> -- <被回退的文件>` 之类的方式把主线修复还原，再跑单测与真机验证。
 
+## 多语言（i18n）
+
+- 默认文案（英文）在 `android/app/src/main/res/values/strings.xml`，是 key 的唯一来源。
+- **各语言放在独立目录** `android/app/i18n/values-<BCP-47>/strings.xml`，已通过
+  `build.gradle.kts` 的 `res.srcDir("i18n")` 注册进资源合并；新增语言只需加一个目录，
+  不需要改 Kotlin 代码。贡献说明见 `android/app/i18n/README.md`。
+- 新增语言还要在 `res/xml/locales_config.xml` 里登记，Android 13+ 的「应用语言」才会列出。
+- 代码里一律用 `stringResource(R.string.x)`；**id 类字符串（如歌单分类 "华语"）保持字面量**，
+  它们是与数据/逻辑比较用的键，不能本地化。
+- 缺失的翻译会自动回落到默认（英文）。
+
 ## 代码约定
 
 - 注释与文档用中文，标识符用英文；保持与相邻代码一致。
