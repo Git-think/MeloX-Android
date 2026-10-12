@@ -21,6 +21,27 @@ enum class MeloXLyricScript { Original, Simplified, Traditional;
     }
 }
 
+/**
+ * 歌词语言偏好：既决定**挑哪条翻译轨**，也决定是否需要中文字形转换。
+ *
+ * - 中文界面：`languageTag = null`，按 [script] 选 hans/hant（原有逻辑）。
+ * - 其它语言（en/tr/ja...）：`languageTag` = 系统语言，优先选同名 `xml:lang` 的翻译轨，
+ *   没有精确匹配时再退到非中文翻译，最后才用第一条，保证不会因此丢掉翻译。
+ */
+data class MeloXLyricPreference(
+    val languageTag: String?,
+    val script: MeloXLyricScript,
+) {
+    companion object {
+        fun system(locale: Locale = Locale.getDefault()): MeloXLyricPreference {
+            val language = locale.language.lowercase(Locale.ROOT)
+            if (language == "zh") return MeloXLyricPreference(null, MeloXLyricScript.fromSystem(locale))
+            if (language.isBlank() || language == "und") return MeloXLyricPreference(null, MeloXLyricScript.Original)
+            return MeloXLyricPreference(language, MeloXLyricScript.Original)
+        }
+    }
+}
+
 object MeloXLyricScriptConverter {
     private val toSimplified by lazy {
         runCatching { Transliterator.getInstance("Traditional-Simplified") }.getOrNull()

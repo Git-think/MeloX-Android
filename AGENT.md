@@ -112,6 +112,9 @@ gradle :app:assembleRelease -PmeloxReleaseIdSuffix= --no-daemon --max-workers=1
 - 代码里一律用 `stringResource(R.string.x)`；**id 类字符串（如歌单分类 "华语"）保持字面量**，
   它们是与数据/逻辑比较用的键，不能本地化。
 - 缺失的翻译会自动回落到默认（英文）。
+- **歌词语言**：`MeloXLyricPreference`（`core/lyrics/MeloXLyricScript.kt`）由系统语言推导 ——
+  中文走 hans/hant 字形选择与转换，其它语言（en/tr/ja…）优先挑同名 `xml:lang` 的翻译轨，
+  再退到非中文翻译，最后才用第一条；网易云的 `tlyric` 由服务端决定语言，无法指定。
 
 ## 代码约定
 

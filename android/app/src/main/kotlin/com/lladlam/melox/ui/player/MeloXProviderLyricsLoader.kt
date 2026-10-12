@@ -8,6 +8,7 @@ import com.lladlam.melox.core.autosync.AutoSyncCoordinator
 import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.lyrics.LyricSource
 import com.lladlam.melox.core.lyrics.LyricsDocument
+import com.lladlam.melox.core.lyrics.MeloXLyricPreference
 import com.lladlam.melox.core.lyrics.MeloXLyricScript
 import com.lladlam.melox.core.lyrics.MeloXLyricScriptConverter
 import com.lladlam.melox.core.lyrics.LyricTimelineProcessor
@@ -411,7 +412,7 @@ internal object MeloXProviderLyricsLoader {
         return ratio >= AmllUpgradeMinLineRatio && ratio <= (1.0 / AmllUpgradeMinLineRatio)
     }
     private fun scripted(document: LyricsDocument): LyricsDocument =
-        MeloXLyricScriptConverter.convert(document, requestedLyricScript())
+        MeloXLyricScriptConverter.convert(document, requestedLyricPreference().script)
 
     private suspend fun loadDocument(
         appContext: Context,
@@ -478,7 +479,7 @@ internal object MeloXProviderLyricsLoader {
         val amllResult = async {
             val track = neteaseTrackResult.await() ?: return@async null
             val id = track.id.value.toLongOrNull() ?: return@async null
-            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricScript()) }
+            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricPreference()) }
                 .onFailure { Log.w("MeloXBilibiliLyrics", "AMLL primary lyric failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.lines.isNotEmpty() }
                 ?.let { BilibiliLyricSourceResult("amll", it, track) }
@@ -531,7 +532,7 @@ internal object MeloXProviderLyricsLoader {
         val verificationAmllResult = async {
             val track = neteaseTrack ?: return@async null
             val id = track.id.value.toLongOrNull() ?: return@async null
-            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricScript()) }
+            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricPreference()) }
                 .onFailure { Log.w("MeloXBilibiliLyrics", "AMLL verification lyric failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.lines.isNotEmpty() }
                 ?.let { BilibiliLyricSourceResult("amll", it, track) }
@@ -749,7 +750,7 @@ internal object MeloXProviderLyricsLoader {
                 ?: findMatchedNeteaseTrack(appContext, snapshot)?.id?.value?.toLongOrNull()
                     ?.let(AmlldbLyricQuery::Netease)
                 ?: return ResolvedLyrics.Empty
-            val document = runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricScript()) }
+            val document = runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricPreference()) }
                 .getOrDefault(LyricsDocument(emptyList()))
             return ResolvedLyrics(
                 document,
@@ -814,7 +815,7 @@ internal object MeloXProviderLyricsLoader {
     private suspend fun loadBinding(appContext: Context, binding: LyricBinding): LyricsDocument {
         if (binding.source == BoundLyricSource.AmlL) {
             val query = amlldbQuery(binding.resourceValue) ?: return LyricsDocument(emptyList())
-            return runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricScript()) }
+            return runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricPreference()) }
                 .getOrDefault(LyricsDocument(emptyList()))
         }
         val providerSource = binding.provider ?: return LyricsDocument(emptyList())
@@ -954,7 +955,7 @@ internal object MeloXProviderLyricsLoader {
 
 internal data class AutoLyricCandidate(val priority: Int, val document: LyricsDocument, val binding: LyricBinding? = null)
 
-private fun requestedLyricScript(): MeloXLyricScript = MeloXLyricScript.fromSystem()
+private fun requestedLyricPreference(): MeloXLyricPreference = MeloXLyricPreference.system()
 
 internal enum class LyricAutoSource { AmlL, QQMusic, Netease, Current }
 
