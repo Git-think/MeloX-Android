@@ -955,7 +955,8 @@ internal object MeloXProviderLyricsLoader {
 
 internal data class AutoLyricCandidate(val priority: Int, val document: LyricsDocument, val binding: LyricBinding? = null)
 
-private fun requestedLyricPreference(): MeloXLyricPreference = MeloXLyricPreference.system()
+private fun requestedLyricPreference(): MeloXLyricPreference =
+    MeloXLyricPreference.fromSetting(MeloXSettingsRuntime.lyricLanguage)
 
 internal enum class LyricAutoSource { AmlL, QQMusic, Netease, Current }
 

@@ -238,6 +238,9 @@ object MeloXSettingsRuntime {
         internal set
     var lyricsStyle by mutableStateOf(MeloXLyricsStyle.AppleMusic)
         internal set
+    /** 歌词翻译语言：`system` 或具体语言标签（zh-Hans/zh-Hant/en/tr…）。 */
+    var lyricLanguage by mutableStateOf("system")
+        internal set
     var textPVStyle by mutableStateOf(MeloXTextPVStyle.BlueBold)
         internal set
     var textPVMotionIntensity by mutableStateOf(1f)
@@ -478,6 +481,7 @@ object MeloXSettingsRuntime {
         lyricReduceMotion = MeloXSettingsPreferences.boolean(app, "lyrics_reduce_motion", false)
         lyricAdvanceMs = MeloXSettingsPreferences.int(app, "lyrics_advance_ms", 0).coerceIn(-5_000, 5_000)
         lyricAdvanceAppliesToWordByWord = MeloXSettingsPreferences.boolean(app, "lyrics_advance_word_by_word", false)
+        lyricLanguage = MeloXSettingsPreferences.string(app, "lyric_language", "system")
         lyricRefreshRate = MeloXSettingsPreferences.int(app, "lyrics_refresh_rate", 60)
             .takeIf { it in setOf(30, 60, 90, 120) } ?: 60
         lyricBackgroundFrameRate = MeloXSettingsPreferences.int(app, "lyrics_background_frame_rate", 24)
@@ -922,6 +926,7 @@ object MeloXSettingsPreferences {
             "lyrics_style" -> MeloXSettingsRuntime.lyricsStyle = runCatching {
                 MeloXLyricsStyle.valueOf(value)
             }.getOrDefault(MeloXLyricsStyle.AppleMusic)
+            "lyric_language" -> MeloXSettingsRuntime.lyricLanguage = value
             "player_background_mode" -> {
                 MeloXSettingsRuntime.playerBackgroundMode = runCatching {
                     MeloXPlayerBackgroundMode.valueOf(value)

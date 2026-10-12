@@ -1357,4 +1357,10 @@
     <string name="settings_floating_requires_android_8">Floating lyrics require Android 8.0 or later. Core music features remain available on this device.</string>
 
     <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
+    <string name="settings_lyrics_language">Lyric translation language</string>
+    <string name="settings_lyrics_language_system">Follow system</string>
+    <string name="settings_lyrics_language_zh_hans">简体中文</string>
+    <string name="settings_lyrics_language_zh_hant">繁體中文</string>
+    <string name="settings_lyrics_language_en">English</string>
+    <string name="settings_lyrics_language_tr">Türkçe</string>
 </resources>
