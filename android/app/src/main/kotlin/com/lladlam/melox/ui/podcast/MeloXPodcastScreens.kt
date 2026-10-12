@@ -82,6 +82,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.lladlam.melox.R
+import androidx.compose.ui.res.stringResource
 
 // 分区前缀必须进 key：同一个播客可能同时出现在「为你推荐」和「精选播客」，
 // 同一作用域里两个同 key 的共享元素会直接崩，光靠 "prefix + id" 隔不开。
@@ -374,9 +376,9 @@ private fun PodcastHome(
                         item(key = "empty-subscriptions") {
                             PodcastEmptyState(
                                 if (NeteaseSessionStore.containsMusicU(NeteaseSessionStore.readCookie(context))) {
-                                    "还没有订阅播客"
+                                    stringResource(R.string.podcast_none_subscribed)
                                 } else {
-                                    "登录网易云音乐后查看订阅播客"
+                                    stringResource(R.string.podcast_login_subscriptions)
                                 },
                             )
                         }
@@ -523,10 +525,13 @@ private fun PodcastSection(
 }
 
 /**
- * 分类名末尾已含「播客」时不再拼接，避免出现「音乐播客播客」。
  */
-private fun podcastSectionTitle(categoryName: String): String =
-    if (categoryName.endsWith("播客")) categoryName else "${categoryName}播客"
+@Composable
+private fun podcastSectionTitle(categoryName: String): String {
+    // 分类名末尾已含「播客」时不再拼接，避免出现「音乐播客播客」。
+    val localized = stringResource(R.string.podcast_category_title, categoryName)
+    return if (categoryName.endsWith("播客")) categoryName else localized
+}
 
 /**
  * 「为你推荐 / 分类播客」分区。
@@ -565,7 +570,7 @@ private fun PodcastPrimarySection(
         },
     ) { _ ->
         PodcastSection(
-            title = if (category == null) "为你推荐" else podcastSectionTitle(category.name),
+            title = if (category == null) stringResource(R.string.podcast_for_you) else podcastSectionTitle(category.name),
             podcasts = if (category == null) personalized else categoryPodcasts,
             sectionKey = PodcastPrimarySectionKey,
             onPodcast = onPodcast,
@@ -612,6 +617,12 @@ private fun PodcastDetail(
 ) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
+    // 这些文案会在 onClick / 协程里用到，必须在这里先解析。
+    val loginSubscribeMessage = stringResource(R.string.podcast_login_subscribe)
+    val subscribeFailedMessage = stringResource(R.string.podcast_subscribe_failed)
+    val programsFailedMessage = stringResource(R.string.podcast_episodes_failed)
+    val subscribedLabel = stringResource(R.string.podcast_subscribed)
+    val subscribeLabel = stringResource(R.string.podcast_subscribe)
     var podcast by remember(initialPodcast.id) { mutableStateOf(initialPodcast) }
     // 兜底 key 用 initialPodcast.id：详情数据被接口刷新替换后 podcast 会变，id 不变。
     val artworkKey = artworkSharedKey ?: podcastArtworkKey(PodcastPrimarySectionKey, initialPodcast.id)
@@ -633,7 +644,7 @@ private fun PodcastDetail(
         }.onSuccess { (loadedPodcast, loadedPrograms) ->
             loadedPodcast?.let { podcast = it }
             programs = loadedPrograms
-        }.onFailure { error = it.message ?: "节目加载失败" }
+        }.onFailure { error = it.message ?: programsFailedMessage }
         loading = false
     }
 
@@ -647,7 +658,7 @@ private fun PodcastDetail(
             MeloXGlassButton(
                 onClick = {
                     if (!NeteaseSessionStore.containsMusicU(NeteaseSessionStore.readCookie(context))) {
-                        error = "请先登录网易云音乐后再订阅播客"
+                        error = loginSubscribeMessage
                     } else if (!subscribing) {
                         val desired = !podcast.subscribed
                         subscribing = true
@@ -657,7 +668,7 @@ private fun PodcastDetail(
                                     podcast = podcast.copy(subscribed = desired)
                                     onSubscriptionChanged()
                                 }
-                                .onFailure { error = it.message ?: "订阅更新失败" }
+                                .onFailure { error = it.message ?: subscribeFailedMessage }
                             subscribing = false
                         }
                     }
@@ -665,7 +676,7 @@ private fun PodcastDetail(
                 enabled = !subscribing,
                 style = if (podcast.subscribed) MeloXGlassButtonStyle.BorderedProminent else MeloXGlassButtonStyle.Bordered,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            ) { Text(if (podcast.subscribed) "已订阅" else "订阅", maxLines = 1) }
+            ) { Text(if (podcast.subscribed) subscribedLabel else subscribeLabel, maxLines = 1) }
         },
     ) {
         item(key = "podcast-hero") {
