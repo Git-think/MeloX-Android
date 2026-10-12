@@ -139,6 +139,8 @@ import com.lladlam.melox.platform.floating.MeloXFloatingLyricsService
 import com.lladlam.melox.platform.xiaomi.HyperOsFocusBridge
 import com.lladlam.melox.ui.MeloXBottomContentClearance
 import com.lladlam.melox.ui.MeloXPinkCat
+import com.lladlam.melox.ui.hotStringResource
+import com.lladlam.melox.ui.hotText
 import com.lladlam.melox.ui.glass.MeloXActionIcon
 import com.lladlam.melox.ui.glass.MeloXGlassTextField
 import com.lladlam.melox.ui.glass.MeloXGlassDialog
@@ -818,9 +820,9 @@ private fun ExperimentalSettings(context: android.content.Context, source: Music
     }
     SettingsGlassGroup {
         SettingsExternalToggleRow(
-            title = stringResource(R.string.settings_autosync_word),
+            title = hotStringResource(R.string.settings_autosync_word),
             value = autoSyncEnabled,
-            note = stringResource(R.string.settings_autosync_word_note),
+            note = hotStringResource(R.string.settings_autosync_word_note),
             grouped = true,
         ) { enabled ->
             autoSyncEnabled = enabled
@@ -2866,8 +2868,8 @@ private fun AboutSettings(context: android.content.Context) {
                     },
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha=.62f),
             )
-            Text("Android 原生迁移与维护：lladlam", modifier = Modifier.padding(top=14.dp), fontWeight=FontWeight.SemiBold)
-            Text("上游 iOS 原生项目：youshen2/MeloX（SwiftUI）", modifier = Modifier.padding(top=5.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha=.58f))
+            Text(hotText("about.maintainer", "Android 原生迁移与维护：lladlam"), modifier = Modifier.padding(top=14.dp), fontWeight=FontWeight.SemiBold)
+            Text(hotText("about.upstream", "上游 iOS 原生项目：youshen2/MeloX（SwiftUI）"), modifier = Modifier.padding(top=5.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha=.58f))
             }
         }
     }
@@ -2875,8 +2877,8 @@ private fun AboutSettings(context: android.content.Context) {
         MeloXGlassDialog(visible = true, onDismiss = { showCatEgg = false }) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 MeloXPinkCat()
-                Text("MeloX 小猫出现了", style = MaterialTheme.typography.titleLarge)
-                Text("粉色的音乐守护猫。", modifier = Modifier.padding(top = 7.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
+                Text(hotText("about.cat_title", "MeloX 小猫出现了"), style = MaterialTheme.typography.titleLarge)
+                Text(hotText("about.cat_body", "粉色的音乐守护猫。"), modifier = Modifier.padding(top = 7.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
                 MeloXGlassButton(
                     onClick = { showCatEgg = false },
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),

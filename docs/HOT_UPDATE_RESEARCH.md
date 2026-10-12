@@ -67,11 +67,36 @@
 - 清单本身用与云控相同的签名公钥验证，防篡改。
 - 失败一律回退到内置默认，绝不因热更新内容崩溃。
 
-### 4.2 资源/文案覆盖（优先）
+### 4.2 资源/文案覆盖（M1 已实现）
 
-- UI 层已经大量使用 `stringResource`，但 0.6.3 起部分文案内联。建议先把内联文案收回资源，再在 `stringResource` 外层加一层 `MeloXHotStrings.overlay(key)`，命中下发覆盖则用覆盖值。
-- 只允许覆盖「展示文案」，不允许覆盖安全/协议相关字符串。
-- 覆盖表按语言分文件，缺失即回落。
+实现方式：**覆盖表直接放进已签名的云控 payload**，不新建下发通道。
+
+- 客户端：`core/remoteconfig/MeloXHotStrings.kt` 保存「已验签且适用于当前版本」的覆盖表；
+  `MeloXRemoteConfigRuntime` 在有效配置变化时刷新它（撤回授权 / 回滚 / 清缓存都会立刻清空）。
+- UI：`ui/MeloXHotText.kt` 提供两个入口——`hotText("key", 默认值)` 用于内联文案，
+  `hotStringResource(R.string.xxx)` 用资源 entry name 作 key。命中覆盖用覆盖值，否则用内置文案，
+  离线行为与不开启完全一致。
+- 格式：`textOverrides: { "<localeTag>": { "<key>": "<text>" } }`，查找顺序为
+  精确 locale（如 `zh-CN`）→ 语言（`zh`）→ `default`。
+- 边界（客户端与 admin 校验一致）：条目 ≤ 256、locale ≤ 24 字符、key ≤ 120、value ≤ 400；
+  超限条目直接丢弃，不会让整份配置失效。
+- 只用于展示文案，安全/协议类字符串不接入。
+
+已接入的 key（key 需跨版本稳定）：
+
+| key | 来源 | 位置 |
+| --- | --- | --- |
+| `about.maintainer` | 内联 key | 关于页维护者信息 |
+| `about.upstream` | 内联 key | 关于页上游项目 |
+| `about.cat_title` | 内联 key | 彩蛋标题 |
+| `about.cat_body` | 内联 key | 彩蛋正文 |
+| `settings_autosync_word` | 资源 entry name | AutoSync 开关标题 |
+| `settings_autosync_word_note` | 资源 entry name | AutoSync 开关说明 |
+
+新增文案时，把内联字符串换成 `hotText("模块.用途", "默认值")`（或 `hotStringResource`）即可。
+
+服务端：`MeloX-Remote-Config` 的 schema、`RemoteConfig` 模型与 `RemoteConfigValidator` 已同步支持
+该字段并通过测试；admin GUI 尚无覆盖编辑器，保存时会原样保留已加载的覆盖表。
 
 ### 4.3 quickjs 受限脚本（次优先）
 
@@ -100,11 +125,11 @@
 
 ## 6. 里程碑建议
 
-| 阶段 | 内容 | 预估 |
+| 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| M1 | 统一签名热更新清单 + 资源覆盖（文案） | 小 |
-| M2 | quickjs 白名单脚本通道（先接 1~2 个纯函数场景） | 中 |
-| M3 | 决策是否引入 Tinker；如是，做基线归档 + 补丁 CI + 回滚 | 大 |
+| M1 | 签名文案覆盖（并入云控 payload；客户端 + admin + 测试） | **已完成** |
+| M2 | quickjs 白名单脚本通道（先接 1~2 个纯函数场景） | 待办 |
+| M3 | 决策是否引入 Tinker；如是，做基线归档 + 补丁 CI + 回滚 | 待办 |
 | — | 插件化 | 不做 |
 
 ## 7. 与 AutoSync 模型下发的复用

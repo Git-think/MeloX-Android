@@ -32,5 +32,6 @@ object MeloXRemoteConfigDefaults {
             timeoutMs = 6_000,
         ),
         notice = null,
+        textOverrides = emptyMap(),
     )
 }

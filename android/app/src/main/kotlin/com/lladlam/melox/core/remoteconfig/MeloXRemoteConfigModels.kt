@@ -27,6 +27,12 @@ data class MeloXRemoteConfig(
     val strategies: Map<String, String>,
     val fallback: MeloXRemoteFallbackConfig,
     val notice: MeloXRemoteNotice?,
+    /**
+     * Signed UI text overrides, `localeTag -> (key -> text)`. Only applied while
+     * the config is a verified remote one, so the payload signature is the only
+     * authority for what text a build will show.
+     */
+    val textOverrides: Map<String, Map<String, String>>,
 ) {
     fun appliesTo(versionCode: Int): Boolean = versionCode in minVersionCode..maxVersionCode
 
@@ -82,6 +88,7 @@ data class MeloXRemoteConfig(
                     timeoutMs = timeoutMs,
                 ),
                 notice = notice,
+                textOverrides = parseTextOverrides(root.optJSONObject("textOverrides")),
             )
         }
     }
@@ -102,3 +109,40 @@ data class MeloXRemoteConfigStatus(
 private fun org.json.JSONArray.strings(): List<String> = buildList {
     for (index in 0 until length()) optString(index).takeIf(String::isNotBlank)?.let(::add)
 }
+
+/**
+ * Parses the signed `textOverrides` block defensively.
+ *
+ * The block is only allowed to replace *display text*, so it is bounded hard:
+ * at most [MaxTextOverrideEntries] keys across locales, each locale tag, key and
+ * value length-capped. Anything oversized is dropped rather than trusted, and a
+ * malformed block simply yields no overrides instead of failing the config.
+ */
+internal fun parseTextOverrides(json: JSONObject?): Map<String, Map<String, String>> {
+    if (json == null) return emptyMap()
+    val result = LinkedHashMap<String, Map<String, String>>()
+    var remaining = MaxTextOverrideEntries
+    for (locale in json.keys()) {
+        if (remaining <= 0) break
+        val tag = locale.trim().take(MaxTextOverrideLocaleLength)
+        if (tag.isBlank()) continue
+        val entries = json.optJSONObject(locale) ?: continue
+        val parsed = LinkedHashMap<String, String>()
+        for (key in entries.keys()) {
+            if (remaining <= 0) break
+            val cleanKey = key.trim()
+            if (cleanKey.isBlank() || cleanKey.length > MaxTextOverrideKeyLength) continue
+            val value = entries.optString(key)
+            if (value.isBlank() || value.length > MaxTextOverrideValueLength) continue
+            parsed[cleanKey] = value
+            remaining--
+        }
+        if (parsed.isNotEmpty()) result[tag] = parsed
+    }
+    return result
+}
+
+internal const val MaxTextOverrideEntries = 256
+internal const val MaxTextOverrideLocaleLength = 24
+internal const val MaxTextOverrideKeyLength = 120
+internal const val MaxTextOverrideValueLength = 400

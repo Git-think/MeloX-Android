@@ -47,4 +47,60 @@ class MeloXRemoteConfigModelsTest {
             """{"schemaVersion":2,"configVersion":1}""".toByteArray(),
         )
     }
+
+    @Test
+    fun textOverridesAreParsedPerLocale() {
+        val config = MeloXRemoteConfig.parse(
+            """
+            {
+              "schemaVersion": 1,
+              "configVersion": 9,
+              "issuedAtEpochSeconds": 1,
+              "minVersionCode": 1,
+              "maxVersionCode": 100,
+              "disabledCapabilities": [],
+              "strategies": {},
+              "crossProviderFallback": {
+                "enabled": true,
+                "order": ["qq_music", "kugou", "bilibili"],
+                "disabledProviders": [],
+                "timeoutMs": 6000
+              },
+              "textOverrides": {
+                "zh-CN": { "about.cat_title": "新的标题" },
+                "default": { "about.cat_body": "fallback body" }
+              }
+            }
+            """.trimIndent().toByteArray(),
+        )
+
+        assertEquals("新的标题", config.textOverrides["zh-CN"]?.get("about.cat_title"))
+        assertEquals("fallback body", config.textOverrides["default"]?.get("about.cat_body"))
+    }
+
+    @Test
+    fun oversizedTextOverridesAreDropped() {
+        val longValue = "x".repeat(MaxTextOverrideValueLength + 1)
+        val longKey = "k".repeat(MaxTextOverrideKeyLength + 1)
+        val parsed = parseTextOverrides(
+            org.json.JSONObject(
+                """
+                {
+                  "zh-CN": {
+                    "ok": "fine",
+                    "longkey$longKey": "v",
+                    "toobig": "$longValue"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+        val locale = parsed["zh-CN"].orEmpty()
+        assertEquals(setOf("ok"), locale.keys)
+    }
+
+    @Test
+    fun missingTextOverridesYieldEmptyMap() {
+        assertTrue(parseTextOverrides(null).isEmpty())
+    }
 }
