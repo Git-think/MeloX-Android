@@ -1363,4 +1363,11 @@
     <string name="settings_lyrics_language_zh_hant">繁體中文</string>
     <string name="settings_lyrics_language_en">English</string>
     <string name="settings_lyrics_language_tr">Türkçe</string>
+    <string name="autosync_model_update">Update</string>
+    <string name="autosync_model_update_available">Update available · %1$s</string>
+    <string name="autosync_model_precision_title">Precision-first model</string>
+    <string name="autosync_model_precision_note">Larger download (%1$s); replaces the standard model on this device.</string>
+    <string name="autosync_model_precision_revert">Back to standard model</string>
+    <string name="autosync_model_variant_precision">precision-first</string>
+    <string name="autosync_model_g2p_unavailable">Japanese G2P is not bundled yet, so Japanese word timing cannot be generated on this device.</string>
 </resources>

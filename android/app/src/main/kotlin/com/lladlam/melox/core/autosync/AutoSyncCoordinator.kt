@@ -10,6 +10,7 @@ import com.lladlam.melox.core.lyrics.LyricQuality
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import java.io.File
 import kotlin.math.max
+import kotlin.math.roundToLong
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -40,11 +41,27 @@ internal object AutoSyncCoordinator {
      * @return the stored document upgraded with generated word timing, or
      *   `null` when nothing was cached for this exact lyric.
      */
-    fun applyStored(context: Context, document: LyricsDocument, trackKey: String): LyricsDocument? {
+    fun applyStored(
+        context: Context,
+        document: LyricsDocument,
+        trackKey: String,
+        audioKey: String? = null,
+    ): LyricsDocument? {
         if (!MeloXSettingsRuntime.autoSyncWordLyricsEnabled || document.lines.any { it.syllables.isNotEmpty() }) return null
         val stored = AutoSyncTimelineStore.load(context, trackKey) ?: return null
         if (stored.sourceHash != AutoSyncTimelineStore.sourceHash(document)) return null
-        if (stored.modelKey.isBlank() || stored.modelKey != AutoSyncModelStore.timelineModelKey(context, stored.language)) return null
+        // 音频被换掉（不同码率重下等）时旧时间轴不再适用；拿不到音频身份时按可用处理。
+        if (audioKey != null && stored.audioKey.isNotBlank() && stored.audioKey != audioKey) {
+            Log.i(TAG, "stored timeline ignored: audio identity changed")
+            return null
+        }
+        // 多语言时间轴的 language 形如 "en+zh"，按组合键校验，别把命中缓存误判为失效。
+        val storedLanguages = stored.language.split('+').filter { it.isNotBlank() }
+        if (stored.modelKey.isBlank() ||
+            stored.modelKey != AutoSyncModelStore.timelineModelKey(context, storedLanguages)
+        ) {
+            return null
+        }
         return merge(document, stored)
     }
 
@@ -62,7 +79,10 @@ internal object AutoSyncCoordinator {
         onProgress: ((Float) -> Unit)? = null,
     ): LyricsDocument? = generationLock.withLock {
         if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return@withLock null
-        applyStored(context, document, trackKey)?.let { return@withLock it }
+        val audioKey = runCatching { AutoSyncPlaybackBridge.audioResolver?.invoke(trackKey) }
+            .getOrNull()
+            ?.let { "${it.name}:${it.length()}" }
+        applyStored(context, document, trackKey, audioKey)?.let { return@withLock it }
         try {
             generateUncached(context, document, trackKey, onProgress)
         } finally {
@@ -72,6 +92,28 @@ internal object AutoSyncCoordinator {
             ZhAlignmentEngine.releaseAll()
             System.gc()
         }
+    }
+
+    /**
+     * Per-line language plan: which engine each line should go to.
+     *
+     * Mixed Chinese/English songs are the reason this exists: judging the whole
+     * document once used to send pure-English lines to the Chinese pack, where
+     * they were refused and silently stayed line-timed.
+     */
+    private fun buildAlignmentPlan(lines: List<LyricLine>): List<Pair<Int, AutoSyncLineLanguage>> {
+        val plan = ArrayList<Pair<Int, AutoSyncLineLanguage>>(lines.size)
+        lines.forEachIndexed { index, line ->
+            if (!AutoSyncText.isAlignable(line.text)) {
+                Log.i(TAG, "line $index skipped: not alignable (credits/instrumental)")
+                return@forEachIndexed
+            }
+            when (val language = AutoSyncText.detectLineLanguage(line.text)) {
+                AutoSyncLineLanguage.Unknown -> Log.i(TAG, "line $index skipped: no usable language in \"${line.text.take(24)}\"")
+                else -> plan += index to language
+            }
+        }
+        return plan
     }
 
     private suspend fun generateUncached(
@@ -84,19 +126,11 @@ internal object AutoSyncCoordinator {
         if (document.lines.isEmpty()) return null
         if (document.lines.any { it.syllables.isNotEmpty() }) return null
 
-        val language = AutoSyncText.detectLanguage(document.lines.map(LyricLine::text)) ?: return null
-        if (language == "ja") {
-            Log.i(TAG, "Japanese AutoSync unavailable: on-device G2P dependency is not installed")
+        val plan = buildAlignmentPlan(document.lines)
+        if (plan.isEmpty()) {
+            Log.i(TAG, "nothing to align for $trackKey")
             return null
         }
-        // Chinese is a monotonic-aligner/CIF pack, not CTC: a separate engine and
-        // a separate decoder, never the Viterbi path below.
-        if (language == "zh") return generateChinese(context, document, trackKey, onProgress)
-        val engine = OnnxCtcEngine.forLanguage(context, language) ?: run {
-            Log.i(TAG, "no usable AutoSync model for $language")
-            return null
-        }
-        val modelKey = AutoSyncModelStore.timelineModelKey(context, language) ?: return null
         val resolveStartedAt = android.os.SystemClock.elapsedRealtime()
         val audioFile = runCatching { AutoSyncPlaybackBridge.audioResolver?.invoke(trackKey) }
             .onFailure {
@@ -132,22 +166,32 @@ internal object AutoSyncCoordinator {
             if (it is CancellationException) throw it
             Log.w(TAG, "audio decode failed", it)
         }.getOrNull() ?: return null
+
         return pcm.use {
-            alignEnglish(context, document, trackKey, onProgress, engine, modelKey, language, pcm, range, startedAt)
+            alignRouted(
+                context, document, trackKey, onProgress, pcm, range, startedAt, plan,
+                audioKey = "${audioFile.name}:${audioFile.length()}",
+            )
         }
     }
 
-    private suspend fun alignEnglish(
+    /**
+     * Runs the plan one language at a time.
+     *
+     * Only one acoustic model is resident at any moment: the engines evict the
+     * other languages when a new one is loaded, so a mixed song costs a reload
+     * but never several models in RAM at once.
+     */
+    private suspend fun alignRouted(
         context: Context,
         document: LyricsDocument,
         trackKey: String,
         onProgress: ((Float) -> Unit)?,
-        engine: OnnxCtcEngine,
-        modelKey: String,
-        language: String,
         pcm: AutoSyncPcmFile,
         range: Pair<Long, Long>,
         startedAt: Long,
+        plan: List<Pair<Int, AutoSyncLineLanguage>>,
+        audioKey: String,
     ): LyricsDocument? {
         Log.i(
             TAG,
@@ -162,81 +206,111 @@ internal object AutoSyncCoordinator {
         var alignedUnits = 0
         var failedLines = 0
         var lastReported = -1
+        val languageModels = LinkedHashMap<String, String>()
+        var unitsPerLanguage = 0
 
-        document.lines.forEachIndexed { index, line ->
+        val groups = plan.groupBy({ it.second }, { it.first })
+            .entries.sortedBy { (_, indices) -> indices.first() }
+
+        groups.forEach { (language, indices) ->
             currentCoroutineContext().ensureActive()
             if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return null
-            onProgress?.let { report ->
-                val bucket = index * 100 / document.lines.size.coerceAtLeast(1)
-                if (bucket != lastReported) {
-                    lastReported = bucket
-                    report(bucket / 100f)
+
+            val engine = when (language) {
+                AutoSyncLineLanguage.Zh -> ZhAlignmentEngine.forLanguage(context, "zh")
+                    ?.let { ZhEngineHandle(it) }
+                AutoSyncLineLanguage.En -> OnnxCtcEngine.forLanguage(context, "en")
+                    ?.let { CtcEngineHandle(it) }
+                AutoSyncLineLanguage.Ja -> OnnxCtcEngine.forLanguage(context, "ja")
+                    ?.let { JaEngineHandle(it) }
+                AutoSyncLineLanguage.Unknown -> null
+            }
+            if (engine == null) {
+                val reason = if (language == AutoSyncLineLanguage.Ja) {
+                    "Japanese model unavailable (model not installed)"
+                } else {
+                    "no installed model for ${language.tag}"
                 }
+                Log.w(TAG, "language group ${language.tag} skipped: $reason (${indices.size} lines stay line-timed)")
+                failedLines += indices.size
+                return@forEach
             }
-            if (!AutoSyncText.isAlignable(line.text)) return@forEachIndexed
-            // The decoded buffer starts at the range, not at 0 ms.
-            if (windowFirst(document, index, line, totalMs, range.first) == null) return@forEachIndexed
-            val window = windowFor(document, index, line, totalMs) ?: return@forEachIndexed
-            val startSample = ((window.first - range.first) * SAMPLE_RATE / 1000L)
-                .toInt().coerceIn(0, pcm.sampleCount)
-            val endSample = ((window.second - range.first) * SAMPLE_RATE / 1000L)
-                .toInt().coerceIn(startSample, pcm.sampleCount)
-            if (endSample - startSample < SAMPLE_RATE / 10) return@forEachIndexed
-            val snippet = pcm.readWindow(startSample, endSample)
+            languageModels[language.tag] = engine.modelLabel
+            unitsPerLanguage = 0
 
-            val normalized = AutoSyncText.normalizeEn(line.text)
-            val tokenIds = AutoSyncText.tokenIds(normalized, engine.manifest)
-            if (tokenIds.isEmpty()) return@forEachIndexed
-
-            val inferenceAt = android.os.SystemClock.elapsedRealtime()
-            val alignment = runCatching { engine.alignWindow(snippet, tokenIds) }
-                .onFailure { Log.w(TAG, "inference failed on line $index", it) }
-                .getOrNull() ?: run { failedLines++; return@forEachIndexed }
-            if (!alignment.feasible) {
-                failedLines++
-                Log.i(TAG, "line $index not feasible: ${alignment.reasons}")
-                return@forEachIndexed
+            indices.forEach { index ->
+                currentCoroutineContext().ensureActive()
+                if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return null
+                val line = document.lines[index]
+                onProgress?.let { report ->
+                    val bucket = index * 100 / document.lines.size.coerceAtLeast(1)
+                    if (bucket != lastReported) {
+                        lastReported = bucket
+                        report(bucket / 100f)
+                    }
+                }
+                val window = windowFor(document, index, line, totalMs) ?: run {
+                    Log.i(TAG, "line $index skipped: window outside the decoded range")
+                    failedLines++
+                    return@forEach
+                }
+                val startSample = ((window.first - range.first) * SAMPLE_RATE / 1000L)
+                    .toInt().coerceIn(0, pcm.sampleCount)
+                val endSample = ((window.second - range.first) * SAMPLE_RATE / 1000L)
+                    .toInt().coerceIn(startSample, pcm.sampleCount)
+                if (endSample - startSample < SAMPLE_RATE / 10) {
+                    Log.i(TAG, "line $index skipped: window shorter than 100ms")
+                    failedLines++
+                    return@forEach
+                }
+                val snippet = pcm.readWindow(startSample, endSample)
+                val units = runCatching { engine.alignLine(line, snippet) }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        Log.w(TAG, "line $index (${language.tag}) inference failed", error)
+                    }
+                    .getOrNull()
+                if (units.isNullOrEmpty()) {
+                    failedLines++
+                    Log.i(TAG, "line $index (${language.tag}) not aligned; keeping line timing")
+                    return@forEach
+                }
+                val windowed = sanitize(units, snippet.size * 1000L / SAMPLE_RATE)
+                if (windowed.isEmpty()) {
+                    failedLines++
+                    Log.i(TAG, "line $index (${language.tag}) produced no usable spans")
+                    return@forEach
+                }
+                alignedUnits += windowed.size
+                unitsPerLanguage += windowed.size
+                timings.add(
+                    AutoSyncLineTiming(
+                        index = index,
+                        units = windowed.map { unit ->
+                            AutoSyncUnit(unit.text, window.first + unit.startMs, window.first + unit.endMs)
+                        },
+                        meanScore = 0.0,
+                    ),
+                )
             }
-
-            val units = AutoSyncText.groupWords(
-                originalText = line.text,
-                normalized = normalized,
-                tokenIds = tokenIds,
-                spans = alignment.spans,
-                manifest = engine.manifest,
-                frameHopSeconds = engine.manifest.frameHopSeconds,
-            ).let { sanitize(it, snippet.size * 1000L / SAMPLE_RATE) }
-            if (units.isEmpty()) {
-                failedLines++
-                return@forEachIndexed
-            }
-            alignedUnits += units.size
-            Log.i(TAG, "aligned line=$index/${document.lines.size} units=${units.size} " +
-                "inference=${android.os.SystemClock.elapsedRealtime() - inferenceAt}ms")
-            timings.add(
-                AutoSyncLineTiming(
-                    index = index,
-                    units = units.map { unit ->
-                        AutoSyncUnit(unit.text, window.first + unit.startMs, window.first + unit.endMs)
-                    },
-                    meanScore = alignment.meanScore,
-                ),
-            )
+            Log.i(TAG, "aligned language=${language.tag} lines=${indices.size} units=$unitsPerLanguage")
+            engine.close()
         }
 
         if (timings.isEmpty()) {
-            Log.i(TAG, "alignment produced nothing usable for $trackKey")
+            Log.i(TAG, "alignment produced nothing usable for $trackKey (failed=$failedLines)")
             return null
         }
-
+        val modelKey = languageModels.entries.joinToString("+") { "${it.key}:${it.value}" }
         val timeline = AutoSyncTimeline(
             trackKey = trackKey,
             sourceHash = AutoSyncTimelineStore.sourceHash(document),
-            language = language,
-            engine = engine.sourceModel,
+            language = languageModels.keys.sorted().joinToString("+"),
+            engine = modelKey,
             lines = timings,
             createdAtMs = System.currentTimeMillis(),
-            modelKey = modelKey,
+            modelKey = AutoSyncModelStore.timelineModelKey(context, languageModels.keys.sorted()) ?: modelKey,
+            audioKey = audioKey,
         )
         if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return null
         AutoSyncTimelineStore.save(context, timeline)
@@ -244,132 +318,105 @@ internal object AutoSyncCoordinator {
             TAG,
             "aligned $trackKey lines=${timings.size}/${document.lines.size} units=$alignedUnits " +
                 "failed=$failedLines decode=${decodeMs}ms total=" +
-                "${android.os.SystemClock.elapsedRealtime() - startedAt}ms model=${engine.modelSizeBytes}B " +
+                "${android.os.SystemClock.elapsedRealtime() - startedAt}ms models=$modelKey " +
                 "rss=${currentRssBytes()}B",
         )
         onProgress?.invoke(1f)
         return merge(document, timeline)
     }
 
-    /**
-     * Chinese pass: raw PCM + `token_num` into the monotonic aligner, then
-     * [ZhCifPostprocess] for per-character times.
-     *
-     * A line that leans on Latin script, whose characters cannot be mapped back
-     * to the original text, or whose output does not line up one-to-one with the
-     * tokens is **skipped entirely** and keeps its provider line timing.
-     */
-    private suspend fun generateChinese(
-        context: Context,
-        document: LyricsDocument,
-        trackKey: String,
-        onProgress: ((Float) -> Unit)?,
-    ): LyricsDocument? {
-        val engine = ZhAlignmentEngine.forLanguage(context, "zh") ?: return null
-        val modelKey = AutoSyncModelStore.timelineModelKey(context, "zh") ?: return null
-        val audioFile = AutoSyncPlaybackBridge.audioResolver?.invoke(trackKey) ?: return null
-        if (!audioFile.isFile || audioFile.length() == 0L) return null
-
-        val range = decodeRange(document)
-        val startedAt = android.os.SystemClock.elapsedRealtime()
-        val pcm = runCatching {
-            AutoSyncAudioDecoder.decode(
-                file = audioFile,
-                targetSampleRate = SAMPLE_RATE,
-                startMs = range.first,
-                endMs = range.second,
-                timeoutMs = (30_000L + (range.second - range.first) / 2).coerceAtMost(180_000L),
-                shouldContinue = {
-                    MeloXSettingsRuntime.autoSyncWordLyricsEnabled &&
-                        AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) != false
-                },
-            )
-        }.onFailure {
-            if (it is CancellationException) throw it
-            Log.w(TAG, "audio decode failed (zh)", it)
-        }.getOrNull() ?: return null
-        return pcm.use {
-            alignChinese(context, document, trackKey, onProgress, engine, modelKey, pcm, range, startedAt)
-        }
+    /** Uniform view over the two engines so the driver stays language agnostic. */
+    private interface LineEngine {
+        val modelLabel: String
+        /** Per-line units with window-relative milliseconds, or empty when refused. */
+        fun alignLine(line: LyricLine, snippet: FloatArray): List<AutoSyncUnit>
+        fun close()
     }
 
-    private suspend fun alignChinese(
-        context: Context,
-        document: LyricsDocument,
-        trackKey: String,
-        onProgress: ((Float) -> Unit)?,
-        engine: ZhAlignmentEngine,
-        modelKey: String,
-        pcm: AutoSyncPcmFile,
-        range: Pair<Long, Long>,
-        startedAt: Long,
-    ): LyricsDocument? {
-        Log.i(TAG, "decoded(zh) ${pcm.sampleCount} samples in ${android.os.SystemClock.elapsedRealtime() - startedAt}ms")
-        if (pcm.sampleCount * 1000L / SAMPLE_RATE < MIN_LINE_MS) return null
-        val totalMs = range.first + pcm.sampleCount * 1000L / SAMPLE_RATE
-
-        val timings = ArrayList<AutoSyncLineTiming>(document.lines.size)
-        var failedLines = 0
-
-        document.lines.forEachIndexed { index, line ->
-            currentCoroutineContext().ensureActive()
-            if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return null
-            onProgress?.invoke(index.toFloat() / document.lines.size.coerceAtLeast(1))
-            if (!ZhText.isAlignableForChinese(line.text)) return@forEachIndexed
-            // The decoded buffer starts at the range, not at 0 ms.
-            if (windowFirst(document, index, line, totalMs, range.first) == null) return@forEachIndexed
-            val window = windowFor(document, index, line, totalMs) ?: return@forEachIndexed
-            val startSample = ((window.first - range.first) * SAMPLE_RATE / 1000L)
-                .toInt().coerceIn(0, pcm.sampleCount)
-            val endSample = ((window.second - range.first) * SAMPLE_RATE / 1000L)
-                .toInt().coerceIn(startSample, pcm.sampleCount)
-            if (endSample - startSample < SAMPLE_RATE / 10) return@forEachIndexed
-            val snippet = pcm.readWindow(startSample, endSample)
-
-            val normalized = ZhText.normalize(line.text)
-            val tokenIds = ZhText.tokenIds(normalized, engine.manifest)
-            if (tokenIds.isEmpty()) return@forEachIndexed
-
-            val spans = runCatching { engine.alignWindow(snippet, tokenIds) }
-                .onFailure { Log.w(TAG, "Chinese inference failed on line $index", it) }
-                .getOrNull() ?: run { failedLines++; return@forEachIndexed }
-
-            val units = chineseUnits(line.text, normalized, engine.manifest, spans)
-                .let { sanitize(it, snippet.size * 1000L / SAMPLE_RATE) }
-            if (units.isEmpty()) {
-                failedLines++
-                return@forEachIndexed
+    private class CtcEngineHandle(private val engine: OnnxCtcEngine) : LineEngine {
+        override val modelLabel: String get() = engine.sourceModel
+        override fun alignLine(line: LyricLine, snippet: FloatArray): List<AutoSyncUnit> {
+            val normalized = AutoSyncText.normalizeEn(line.text)
+            val tokenIds = AutoSyncText.tokenIds(normalized, engine.manifest)
+            if (tokenIds.isEmpty()) return emptyList()
+            val alignment = engine.alignWindow(snippet, tokenIds)
+            if (!alignment.feasible) {
+                Log.i(TAG, "CTC alignment not feasible: ${alignment.reasons}")
+                return emptyList()
             }
-            timings.add(
-                AutoSyncLineTiming(
-                    index = index,
-                    units = units.map { unit ->
-                        AutoSyncUnit(unit.text, window.first + unit.startMs, window.first + unit.endMs)
-                    },
-                    meanScore = 0.0,
-                ),
+            return AutoSyncText.groupWords(
+                originalText = line.text,
+                normalized = normalized,
+                tokenIds = tokenIds,
+                spans = alignment.spans,
+                manifest = engine.manifest,
+                frameHopSeconds = engine.manifest.frameHopSeconds,
             )
         }
 
-        if (timings.isEmpty()) return null
-        val timeline = AutoSyncTimeline(
-            trackKey = trackKey,
-            sourceHash = AutoSyncTimelineStore.sourceHash(document),
-            language = "zh",
-            engine = engine.manifest.sourceModel,
-            lines = timings,
-            createdAtMs = System.currentTimeMillis(),
-            modelKey = modelKey,
-        )
-        if (AutoSyncPlaybackBridge.isCurrentTrack?.invoke(trackKey) == false) return null
-        AutoSyncTimelineStore.save(context, timeline)
-        Log.i(
-            TAG,
-            "aligned(zh) $trackKey lines=${timings.size}/${document.lines.size} " +
-                "failed=$failedLines total=${android.os.SystemClock.elapsedRealtime() - startedAt}ms",
-        )
-        onProgress?.invoke(1f)
-        return merge(document, timeline)
+        override fun close() = engine.close()
+    }
+
+    /**
+     * Japanese: HuBERT phoneme CTC over a kana-derived phoneme string.
+     *
+     * Kanji readings, the long-vowel mark and Latin words need OpenJTalk plus the
+     * NAIST dictionary; those lines are refused with an explicit reason instead
+     * of being approximated.
+     */
+    private class JaEngineHandle(private val engine: OnnxCtcEngine) : LineEngine {
+        override val modelLabel: String get() = engine.sourceModel
+
+        override fun alignLine(line: LyricLine, snippet: FloatArray): List<AutoSyncUnit> {
+            val units = JaG2p.units(line.text) ?: run {
+                Log.i(TAG, "Japanese line refused: needs OpenJTalk + NAIST dictionary (kanji, ー or Latin)")
+                return emptyList()
+            }
+            val manifest = engine.manifest
+            val lookup = HashMap<String, Int>(manifest.tokens.size * 2)
+            manifest.tokens.forEachIndexed { index, token -> lookup.putIfAbsent(token, index) }
+            val tokenIds = units.flatMap { unit -> unit.phonemes.map { lookup[it] ?: manifest.unkId } }
+            if (tokenIds.isEmpty()) return emptyList()
+            val alignment = engine.alignWindow(snippet, tokenIds)
+            if (!alignment.feasible) {
+                Log.i(TAG, "Japanese CTC alignment not feasible: ${alignment.reasons}")
+                return emptyList()
+            }
+            val hop = manifest.frameHopSeconds
+            val result = ArrayList<AutoSyncUnit>(units.size)
+            var cursor = 0
+            units.forEach { unit ->
+                val slice = alignment.spans.drop(cursor).take(unit.phonemes.size)
+                cursor += unit.phonemes.size
+                val first = slice.firstOrNull { it != null } ?: return@forEach
+                val last = slice.lastOrNull { it != null } ?: return@forEach
+                result += AutoSyncUnit(
+                    text = unit.text,
+                    startMs = (first.startFrame * hop * 1000.0).roundToLong(),
+                    endMs = ((last.endFrame + 1) * hop * 1000.0).roundToLong(),
+                )
+            }
+            return result
+        }
+
+        override fun close() = engine.close()
+    }
+
+    private class ZhEngineHandle(private val engine: ZhAlignmentEngine) : LineEngine {
+        override val modelLabel: String get() = engine.manifest.sourceModel
+        override fun alignLine(line: LyricLine, snippet: FloatArray): List<AutoSyncUnit> {
+            if (!ZhText.isAlignableForChinese(line.text)) {
+                Log.i(TAG, "Chinese line refused: mixed script or unsupported characters")
+                return emptyList()
+            }
+            val normalized = ZhText.normalize(line.text)
+            val tokenIds = ZhText.tokenIds(normalized, engine.manifest)
+            if (tokenIds.isEmpty()) return emptyList()
+            val spans = engine.alignWindow(snippet, tokenIds) ?: return emptyList()
+            return chineseUnits(line.text, normalized, engine.manifest, spans)
+        }
+
+        override fun close() = engine.close()
     }
 
     /**

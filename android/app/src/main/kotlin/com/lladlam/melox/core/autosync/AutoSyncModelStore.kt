@@ -39,13 +39,15 @@ object AutoSyncModelStore {
                 if (isAssetDirectory(context, "$ROOT/$name")) languages.add(name)
             }
         }
+        // Installed means "manifest plus the model file it names"; the release tag
+        // is deliberately not part of it, so a pack stays usable offline and after
+        // a version bump (it is only marked as having an update in the UI).
         return languages.filter { language ->
-            if (language == "ja") return@filter false // model downloaded is not G2P-ready
             val directory = languageDirectory(context, language) ?: return@filter false
-            runCatching {
-                JSONObject(File(directory, "manifest.json").readText())
-                    .optString("release_tag") == AutoSyncModelRepository.RELEASE_TAG && manifest(context, language) != null
-            }.getOrDefault(false)
+            val parsed = runCatching {
+                AutoSyncManifest.parse(File(directory, "manifest.json").readText())
+            }.getOrNull() ?: return@filter false
+            File(directory, parsed.modelFileName).isFile
         }
     }
 
@@ -56,6 +58,15 @@ object AutoSyncModelStore {
         return runCatching { AutoSyncManifest.parse(file.readText()) }
             .onFailure { Log.w(TAG, "manifest unreadable for $language", it) }
             .getOrNull()
+    }
+
+    /** Combined key for a document that may span several languages. */
+    fun timelineModelKey(context: Context, languages: Collection<String>): String? {
+        if (languages.isEmpty()) return null
+        val parts = languages.sorted().map { timelineModelKey(context, it) ?: return null }
+        return MessageDigest.getInstance("SHA-256")
+            .digest(parts.joinToString("|").toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 
     /** Includes installed pack metadata and the alignment pipeline revision. */

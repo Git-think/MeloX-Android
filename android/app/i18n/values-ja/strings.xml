@@ -1347,4 +1347,11 @@
     <string name="settings_lyrics_language_zh_hant">繁体字中国語</string>
     <string name="settings_lyrics_language_en">English</string>
     <string name="settings_lyrics_language_tr">Türkçe</string>
+    <string name="autosync_model_update">更新</string>
+    <string name="autosync_model_update_available">更新があります · %1$s</string>
+    <string name="autosync_model_precision_title">精度優先モデル</string>
+    <string name="autosync_model_precision_note">ダウンロード容量が大きくなります（%1$s）。インストールすると標準モデルを置き換えます。</string>
+    <string name="autosync_model_precision_revert">標準モデルに戻す</string>
+    <string name="autosync_model_variant_precision">精度優先</string>
+    <string name="autosync_model_g2p_unavailable">日本語 G2P は未同梱のため、この端末では日本語の文字単位タイミングを生成できません。</string>
 </resources>

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lladlam.melox.R
+import com.lladlam.melox.core.autosync.AutoSyncManifest
 import com.lladlam.melox.core.autosync.AutoSyncModelRepository
 import com.lladlam.melox.core.autosync.AutoSyncModelStore
 import com.lladlam.melox.core.network.MeloXGitHubRouting
@@ -54,6 +55,15 @@ internal fun AutoSyncModelPanel(context: Context) {
     var progress by remember { mutableFloatStateOf(0f) }
     var downloadJob by remember { mutableStateOf<Job?>(null) }
     var confirmLanguage by remember { mutableStateOf<String?>(null) }
+    var precisionLanguage by remember { mutableStateOf<String?>(null) }
+    var manifests by remember { mutableStateOf(emptyMap<String, AutoSyncManifest>()) }
+
+    fun reloadInstalled() {
+        installed = AutoSyncModelStore.installedLanguages(context)
+        manifests = installed.mapNotNull { language ->
+            AutoSyncModelStore.manifest(context, language)?.let { language to it }
+        }.toMap()
+    }
 
     DisposableEffect(Unit) { onDispose { downloadJob?.cancel() } }
 
@@ -67,7 +77,10 @@ internal fun AutoSyncModelPanel(context: Context) {
         }
     }
 
-    LaunchedEffect(repository) { refresh() }
+    LaunchedEffect(repository) {
+        reloadInstalled()
+        refresh()
+    }
 
     Column(Modifier.fillMaxWidth()) {
         Text(
@@ -84,12 +97,17 @@ internal fun AutoSyncModelPanel(context: Context) {
                 PanelButton(stringResource(R.string.autosync_models_retry)) { refresh() }
             }
             else -> packs.forEach { pack ->
+                val manifest = manifests[pack.language]
                 ModelRow(
                     pack = pack,
-                    installed = pack.language in installed,
+                    manifest = manifest,
+                    updateAvailable = manifest != null && !AutoSyncModelRepository.matchesIndex(manifest, pack),
                     busy = busyLanguage == pack.language,
                     confirming = confirmLanguage == pack.language,
                     progress = progress,
+                    precisionBusy = busyLanguage == "<prefix>" + pack.language,
+                    precisionConfirming = precisionLanguage == pack.language,
+                    precisionInstalled = manifest?.modelVariant == "precision",
                     onDownload = { confirmLanguage = pack.language },
                     onCancelConfirm = { confirmLanguage = null },
                     onConfirm = {
@@ -99,15 +117,43 @@ internal fun AutoSyncModelPanel(context: Context) {
                         progress = 0f
                         downloadJob = scope.launch {
                             repository.install(pack, snapshot) { fraction -> progress = fraction }
-                                .onSuccess { installed = AutoSyncModelStore.installedLanguages(context) }
+                                .onSuccess { reloadInstalled() }
+                                .onFailure { error = it.message }
+                            busyLanguage = null
+                        }
+                    },
+                    onPrecision = { precisionLanguage = pack.language },
+                    onCancelPrecision = { precisionLanguage = null },
+                    onPrecisionConfirm = {
+                        precisionLanguage = null
+                        val snapshot = index ?: return@ModelRow
+                        val variant = pack.optionalModel ?: return@ModelRow
+                        busyLanguage = "<prefix>" + pack.language
+                        progress = 0f
+                        downloadJob = scope.launch {
+                            repository.install(pack, snapshot, precision = variant) { fraction -> progress = fraction }
+                                .onSuccess { reloadInstalled() }
+                                .onFailure { error = it.message }
+                            busyLanguage = null
+                        }
+                    },
+                    onPrecisionDelete = {
+                        precisionLanguage = null
+                        val snapshot = index ?: return@ModelRow
+                        busyLanguage = "<prefix>" + pack.language
+                        progress = 0f
+                        downloadJob = scope.launch {
+                            repository.install(pack, snapshot) { fraction -> progress = fraction }
+                                .onSuccess { reloadInstalled() }
                                 .onFailure { error = it.message }
                             busyLanguage = null
                         }
                     },
                     onDelete = {
                         confirmLanguage = null
+                        precisionLanguage = null
                         repository.delete(pack.language)
-                        installed = AutoSyncModelStore.installedLanguages(context)
+                        reloadInstalled()
                     },
                 )
             }
@@ -128,13 +174,21 @@ private fun HintText(value: String) {
 @Composable
 private fun ModelRow(
     pack: AutoSyncModelRepository.Pack,
-    installed: Boolean,
+    manifest: AutoSyncManifest?,
+    updateAvailable: Boolean,
     busy: Boolean,
     confirming: Boolean,
     progress: Float,
+    precisionBusy: Boolean,
+    precisionConfirming: Boolean,
+    precisionInstalled: Boolean,
     onDownload: () -> Unit,
     onCancelConfirm: () -> Unit,
     onConfirm: () -> Unit,
+    onPrecision: () -> Unit,
+    onCancelPrecision: () -> Unit,
+    onPrecisionConfirm: () -> Unit,
+    onPrecisionDelete: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -146,15 +200,26 @@ private fun ModelRow(
             Column(Modifier.weight(1f)) {
                 Text(languageLabel(pack.language), fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Spacer(Modifier.height(2.dp))
+                val size = pack.optionalModel.takeIf { precisionInstalled }?.bytes ?: pack.totalBytes
                 Text(
                     when {
                         busy -> stringResource(R.string.autosync_model_downloading, (progress * 100).toInt())
-                        installed -> stringResource(R.string.autosync_model_installed, pack.packVersion)
+                        updateAvailable -> stringResource(R.string.autosync_model_update_available, pack.packVersion)
+                        manifest != null -> stringResource(R.string.autosync_model_installed, pack.packVersion)
                         else -> stringResource(R.string.autosync_model_not_installed)
-                    } + " · " + formatMegabytes(pack.totalBytes),
+                    } + " · " + formatMegabytes(size) +
+                        if (precisionInstalled) " · " + stringResource(R.string.autosync_model_variant_precision) else "",
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f),
                     fontSize = 12.sp,
                 )
+                if (pack.language == "ja") {
+                    Text(
+                        stringResource(R.string.autosync_model_g2p_unavailable),
+                        modifier = Modifier.padding(top = 2.dp),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = .8f),
+                        fontSize = 11.sp,
+                    )
+                }
             }
             when {
                 busy -> Text(
@@ -162,7 +227,8 @@ private fun ModelRow(
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = 13.sp,
                 )
-                installed -> PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDelete)
+                manifest != null && updateAvailable -> PanelButton(stringResource(R.string.autosync_model_update), onClick = onDownload)
+                manifest != null -> PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDelete)
                 else -> PanelButton(stringResource(R.string.autosync_model_download), onClick = onDownload)
             }
         }
@@ -176,6 +242,45 @@ private fun ModelRow(
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 PanelButton(stringResource(R.string.action_cancel), onClick = onCancelConfirm)
                 PanelButton(stringResource(R.string.autosync_model_download), onClick = onConfirm)
+            }
+        }
+        // 精度优先变体：只在发布方提供了可选模型时出现（目前是英文 292 MB）。
+        pack.optionalModel?.takeIf { manifest != null }?.let { variant ->
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.autosync_model_precision_title),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        stringResource(R.string.autosync_model_precision_note, formatMegabytes(variant.bytes)),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f),
+                        fontSize = 11.sp,
+                    )
+                }
+                when {
+                    precisionBusy -> Text(
+                        stringResource(R.string.autosync_model_downloading, (progress * 100).toInt()),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 13.sp,
+                    )
+                    precisionInstalled -> PanelButton(stringResource(R.string.autosync_model_precision_revert), onClick = onPrecisionDelete)
+                    else -> PanelButton(stringResource(R.string.autosync_model_download), onClick = onPrecision)
+                }
+            }
+            if (precisionConfirming && !precisionBusy) {
+                Text(
+                    stringResource(R.string.autosync_model_confirm, formatMegabytes(variant.bytes)),
+                    modifier = Modifier.padding(top = 6.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
+                    fontSize = 12.sp,
+                )
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PanelButton(stringResource(R.string.action_cancel), onClick = onCancelPrecision)
+                    PanelButton(stringResource(R.string.autosync_model_download), onClick = onPrecisionConfirm)
+                }
             }
         }
     }
