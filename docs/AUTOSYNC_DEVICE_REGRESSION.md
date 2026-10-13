@@ -68,3 +68,20 @@ adb shell am instrument --user 0 -w \
 - **未完成**：汉字读音、长音符 ー、拉丁词需要 OpenJTalk + NAIST 词典（JNI），
   且必须与参考实现对拍后才能启用。这些行会被明确拒绝并记录原因，界面也标注
   “日文 G2P 尚未打包”，不会用 ONNX 加载成功冒充生成成功。
+
+## 日文 G2P：OpenJTalk JNI（2026-10-13）
+
+- **实现**：把 Open JTalk 的文本前端（`text2mecab` → MeCab + NAIST 词典 → NJD 链 → JPCommon 标签）
+  编译为 Android 原生库 `libmelox_ja_g2p.so`（arm64-v8a 3.11 MB / armeabi-v7a 2.30 MB，NDK 29 + CMake），
+  JNI 暴露 `tokens / kana / phonemes`，与 `pyopenjtalk.g2p` 完全等价；**不含 HTS Engine/Voice**。
+- **Kotlin 侧**：`JapaneseG2pMapper` 按 `src/autosync/lyrics/ja_pronunciation.py` 1:1 移植
+  （NFKC、MeCab token 优先路径、DP 汉字 1..12 モーラ对齐、前缀音素计数、pau 定位、
+  `map_spans_to_char_units` 的最近边界补位与 uncertain 标记），原文可无损重建。
+- **主机对拍**：
+  - 原生前端 vs `pyopenjtalk.g2p`：18/18 音素、18/18 假名完全一致（含汉字、片假名、长音、
+    促音、拗音、助词、拉丁、数字、空格、符号）。
+  - Kotlin 映射器 + JNI vs `android_export/ja/g2p_reference.py` 链：**20/20 黄金向量逐字段一致**
+    （char / kana / phonemes / uncertain / reconstruct）。
+- **词典**：不打包、不内置；按需从固定 GitHub release 下载（23,646,843 B，
+  `fe6ba0e4…f382a`），解压约 102.3 MB，原子安装，失败/取消不破坏已装词典；含 NAIST 修改版 BSD 声明。
+- **仍未完成 / 未验证**：真机 arm64 上的实际加载与推理（ADB 不可用）。

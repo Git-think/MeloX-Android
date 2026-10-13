@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lladlam.melox.R
+import com.lladlam.melox.core.autosync.AutoSyncDictionaryRepository
 import com.lladlam.melox.core.autosync.AutoSyncManifest
 import com.lladlam.melox.core.autosync.AutoSyncModelRepository
 import com.lladlam.melox.core.autosync.AutoSyncModelStore
@@ -47,6 +48,9 @@ internal fun AutoSyncModelPanel(context: Context) {
     val repository = remember(context) {
         AutoSyncModelRepository(context.applicationContext, MeloXGitHubRouting(context.applicationContext))
     }
+    val dictionaryRepository = remember(context) {
+        AutoSyncDictionaryRepository(context.applicationContext, MeloXGitHubRouting(context.applicationContext))
+    }
     var index by remember { mutableStateOf<AutoSyncModelRepository.Index?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -57,8 +61,17 @@ internal fun AutoSyncModelPanel(context: Context) {
     var confirmLanguage by remember { mutableStateOf<String?>(null) }
     var precisionLanguage by remember { mutableStateOf<String?>(null) }
     var manifests by remember { mutableStateOf(emptyMap<String, AutoSyncManifest>()) }
+    var dictionaryInstalled by remember {
+        mutableStateOf(AutoSyncDictionaryRepository.dictionaryDirectory(context) != null)
+    }
+    var dictionarySize by remember { mutableStateOf(AutoSyncDictionaryRepository.installedBytes(context)) }
+    var dictionaryBusy by remember { mutableStateOf(false) }
+    var dictionaryConfirming by remember { mutableStateOf(false) }
+    var dictionaryNotice by remember { mutableStateOf<String?>(null) }
 
     fun reloadInstalled() {
+        dictionaryInstalled = AutoSyncDictionaryRepository.dictionaryDirectory(context) != null
+        dictionarySize = AutoSyncDictionaryRepository.installedBytes(context)
         installed = AutoSyncModelStore.installedLanguages(context)
         manifests = installed.mapNotNull { language ->
             AutoSyncModelStore.manifest(context, language)?.let { language to it }
@@ -155,6 +168,39 @@ internal fun AutoSyncModelPanel(context: Context) {
                         repository.delete(pack.language)
                         reloadInstalled()
                     },
+                    dictionaryInstalled = dictionaryInstalled,
+                    dictionarySize = dictionarySize,
+                    dictionaryBusy = dictionaryBusy,
+                    dictionaryConfirming = dictionaryConfirming,
+                    dictionaryNotice = dictionaryNotice,
+                    onDictionaryDownload = { dictionaryConfirming = true },
+                    onDictionaryCancel = { dictionaryConfirming = false },
+                    onDictionaryConfirm = {
+                        dictionaryConfirming = false
+                        dictionaryBusy = true
+                        progress = 0f
+                        error = null
+                        downloadJob = scope.launch {
+                            dictionaryRepository.install { fraction -> progress = fraction }
+                                .onSuccess {
+                                    dictionaryNotice = dictionaryRepository.licenseNotice()
+                                    reloadInstalled()
+                                }
+                                .onFailure { error = it.message }
+                            dictionaryBusy = false
+                        }
+                    },
+                    onDictionaryDelete = {
+                        dictionaryBusy = true
+                        downloadJob = scope.launch {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                dictionaryRepository.delete()
+                            }
+                            dictionaryNotice = null
+                            dictionaryBusy = false
+                            reloadInstalled()
+                        }
+                    },
                 )
             }
         }
@@ -190,6 +236,15 @@ private fun ModelRow(
     onPrecisionConfirm: () -> Unit,
     onPrecisionDelete: () -> Unit,
     onDelete: () -> Unit,
+    dictionaryInstalled: Boolean = false,
+    dictionarySize: Long = 0L,
+    dictionaryBusy: Boolean = false,
+    dictionaryConfirming: Boolean = false,
+    dictionaryNotice: String? = null,
+    onDictionaryDownload: () -> Unit = {},
+    onDictionaryCancel: () -> Unit = {},
+    onDictionaryConfirm: () -> Unit = {},
+    onDictionaryDelete: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(
@@ -214,9 +269,16 @@ private fun ModelRow(
                 )
                 if (pack.language == "ja") {
                     Text(
-                        stringResource(R.string.autosync_model_g2p_unavailable),
+                        when {
+                            dictionaryInstalled -> stringResource(R.string.autosync_dict_ready)
+                            else -> stringResource(R.string.autosync_model_g2p_unavailable)
+                        },
                         modifier = Modifier.padding(top = 2.dp),
-                        color = MaterialTheme.colorScheme.error.copy(alpha = .8f),
+                        color = if (dictionaryInstalled) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = .85f)
+                        } else {
+                            MaterialTheme.colorScheme.error.copy(alpha = .8f)
+                        },
                         fontSize = 11.sp,
                     )
                 }
@@ -242,6 +304,57 @@ private fun ModelRow(
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 PanelButton(stringResource(R.string.action_cancel), onClick = onCancelConfirm)
                 PanelButton(stringResource(R.string.autosync_model_download), onClick = onConfirm)
+            }
+        }
+        // 日文 G2P 词典（NAIST）：单独按需下载，不塞进 APK。
+        if (pack.language == "ja") {
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.autosync_dict_title),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        if (dictionaryInstalled) {
+                            stringResource(R.string.autosync_dict_installed, formatMegabytes(dictionarySize))
+                        } else {
+                            stringResource(R.string.autosync_dict_note)
+                        },
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f),
+                        fontSize = 11.sp,
+                    )
+                }
+                when {
+                    dictionaryBusy -> Text(
+                        stringResource(R.string.autosync_model_downloading, (progress * 100).toInt()),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 13.sp,
+                    )
+                    dictionaryInstalled -> PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDictionaryDelete)
+                    else -> PanelButton(stringResource(R.string.autosync_model_download), onClick = onDictionaryDownload)
+                }
+            }
+            if (dictionaryConfirming && !dictionaryBusy) {
+                Text(
+                    stringResource(R.string.autosync_dict_confirm),
+                    modifier = Modifier.padding(top = 6.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
+                    fontSize = 12.sp,
+                )
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PanelButton(stringResource(R.string.action_cancel), onClick = onDictionaryCancel)
+                    PanelButton(stringResource(R.string.autosync_model_download), onClick = onDictionaryConfirm)
+                }
+            }
+            dictionaryNotice?.let { notice ->
+                Text(
+                    stringResource(R.string.autosync_dict_license, "NAIST"),
+                    modifier = Modifier.padding(top = 4.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .46f),
+                    fontSize = 10.sp,
+                )
             }
         }
         // 精度优先变体：只在发布方提供了可选模型时出现（目前是英文 292 MB）。

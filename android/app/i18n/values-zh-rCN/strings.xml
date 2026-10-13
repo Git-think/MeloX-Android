@@ -1370,4 +1370,10 @@
     <string name="autosync_model_precision_revert">切回标准模型</string>
     <string name="autosync_model_variant_precision">精度优先</string>
     <string name="autosync_model_g2p_unavailable">日文 G2P 尚未打包，本机暂不能生成日文逐字时间。</string>
+    <string name="autosync_dict_title">NAIST 词典（OpenJTalk G2P）</string>
+    <string name="autosync_dict_note">日文汉字读音需要它：下载约 24 MB，解压后约 102 MB。</string>
+    <string name="autosync_dict_installed">已安装 · 磁盘占用 %1$s</string>
+    <string name="autosync_dict_confirm">现在下载词典？需要约 24 MB 流量与 102 MB 存储空间。</string>
+    <string name="autosync_dict_ready">日文模型与词典齐备</string>
+    <string name="autosync_dict_license">词典内含 %1$s 修改版 BSD 许可证。</string>
 </resources>

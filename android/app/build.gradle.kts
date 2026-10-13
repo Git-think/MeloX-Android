@@ -38,6 +38,10 @@ android {
     namespace = "com.lladlam.melox"
     compileSdk = 37
 
+    // OpenJTalk G2P frontend (Japanese AutoSync). Sources are vendored under
+    // app/src/main/cpp/third_party/open_jtalk (Modified BSD).
+    ndkVersion = "29.0.14206865"
+
     defaultConfig {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
@@ -51,6 +55,11 @@ android {
         // ships ~39 MB of native code per x86 ABI and no phone loads them.
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_static")
+            }
         }
         buildConfigField(
             "String",
@@ -187,6 +196,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 

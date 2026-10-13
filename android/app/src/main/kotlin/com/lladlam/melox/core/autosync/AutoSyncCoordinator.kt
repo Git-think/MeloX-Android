@@ -222,7 +222,7 @@ internal object AutoSyncCoordinator {
                 AutoSyncLineLanguage.En -> OnnxCtcEngine.forLanguage(context, "en")
                     ?.let { CtcEngineHandle(it) }
                 AutoSyncLineLanguage.Ja -> OnnxCtcEngine.forLanguage(context, "ja")
-                    ?.let { JaEngineHandle(it) }
+                    ?.let { JaEngineHandle(it, context) }
                 AutoSyncLineLanguage.Unknown -> null
             }
             if (engine == null) {
@@ -325,6 +325,83 @@ internal object AutoSyncCoordinator {
         return merge(document, timeline)
     }
 
+    /**
+     * Reference `map_spans_to_char_units`: every original character is kept; a
+     * character without a known phoneme gets a zero-width interval at its
+     * nearest known boundary and is reported as uncertain.
+     */
+    private fun mapSpansToCharUnits(
+        readings: List<JapaneseG2pMapper.CharReading>,
+        phonemes: List<String>,
+        spansByPhoneme: Map<Int, CtcForcedAligner.Span>,
+        frameSeconds: Double,
+    ): List<AutoSyncUnit>? {
+        val inner = readings.flatMap { it.phonemes }
+        val offset = locateInnerOffset(phonemes, inner) ?: return null
+        val resolved = arrayOfNulls<Pair<Double, Double>>(readings.size)
+        var cursor = offset
+        readings.forEachIndexed { index, reading ->
+            val count = reading.phonemes.size
+            var start: Double? = null
+            var end: Double = 0.0
+            for (k in 0 until count) {
+                val span = spansByPhoneme[cursor + k] ?: continue
+                val spanStart = span.startFrame * frameSeconds
+                val spanEnd = (span.endFrame + 1) * frameSeconds
+                if (start == null) start = spanStart
+                end = spanEnd
+            }
+            resolved[index] = start?.let { it to end }
+            cursor += count
+        }
+        // Nearest known boundaries for characters with no known phoneme.
+        val previousEnd = DoubleArray(resolved.size)
+        var running = 0.0
+        resolved.indices.forEach { index ->
+            previousEnd[index] = running
+            resolved[index]?.let { running = it.second }
+        }
+        val nextStart = arrayOfNulls<Double>(resolved.size)
+        var upcoming: Double? = null
+        for (index in resolved.indices.reversed()) {
+            resolved[index]?.let { upcoming = it.first }
+            nextStart[index] = upcoming
+        }
+        val previousKnown = BooleanArray(resolved.size)
+        var seen = false
+        resolved.indices.forEach { index ->
+            previousKnown[index] = seen
+            if (resolved[index] != null) seen = true
+        }
+        return readings.mapIndexed { index, reading ->
+            val value = resolved[index]
+            if (value != null) {
+                AutoSyncUnit(
+                    text = reading.char,
+                    startMs = (value.first * 1000.0).roundToLong(),
+                    endMs = (value.second * 1000.0).roundToLong(),
+                )
+            } else {
+                val position = when {
+                    previousKnown[index] -> previousEnd[index]
+                    nextStart[index] != null -> nextStart[index]!!
+                    else -> 0.0
+                }
+                val ms = (position * 1000.0).roundToLong()
+                AutoSyncUnit(text = reading.char, startMs = ms, endMs = ms)
+            }
+        }
+    }
+
+    /** Index of `inner` inside the `pau`-wrapped `full` sequence. */
+    private fun locateInnerOffset(full: List<String>, inner: List<String>): Int? {
+        if (inner.isEmpty()) return 0
+        for (offset in 0..(full.size - inner.size)) {
+            if (full.subList(offset, offset + inner.size) == inner) return offset
+        }
+        return null
+    }
+
     /** Uniform view over the two engines so the driver stays language agnostic. */
     private interface LineEngine {
         val modelLabel: String
@@ -358,45 +435,65 @@ internal object AutoSyncCoordinator {
     }
 
     /**
-     * Japanese: HuBERT phoneme CTC over a kana-derived phoneme string.
+     * Japanese: OpenJTalk G2P (kanji readings via the NAIST dictionary) →
+     * phoneme CTC → per-character spans.
      *
-     * Kanji readings, the long-vowel mark and Latin words need OpenJTalk plus the
-     * NAIST dictionary; those lines are refused with an explicit reason instead
-     * of being approximated.
+     * Ported 1:1 from the reference chain; the dictionary is downloaded
+     * separately, so a missing dictionary is reported instead of guessed.
      */
-    private class JaEngineHandle(private val engine: OnnxCtcEngine) : LineEngine {
+    private class JaEngineHandle(
+        private val engine: OnnxCtcEngine,
+        private val context: Context,
+    ) : LineEngine {
         override val modelLabel: String get() = engine.sourceModel
 
         override fun alignLine(line: LyricLine, snippet: FloatArray): List<AutoSyncUnit> {
-            val units = JaG2p.units(line.text) ?: run {
-                Log.i(TAG, "Japanese line refused: needs OpenJTalk + NAIST dictionary (kanji, ー or Latin)")
+            if (!JaOpenJtalk.ensureDictionaryInstalled(context)) {
+                Log.w(TAG, "Japanese G2P unavailable: NAIST dictionary is not installed")
+                return emptyList()
+            }
+            val mapping = runCatching { JapaneseG2pMapper.map(line.text) }
+                .onFailure { Log.w(TAG, "Japanese G2P failed", it) }
+                .getOrNull()
+            if (mapping == null || mapping.phonemes.isEmpty()) {
+                Log.i(TAG, "Japanese G2P produced no phonemes for this line")
                 return emptyList()
             }
             val manifest = engine.manifest
             val lookup = HashMap<String, Int>(manifest.tokens.size * 2)
             manifest.tokens.forEachIndexed { index, token -> lookup.putIfAbsent(token, index) }
-            val tokenIds = units.flatMap { unit -> unit.phonemes.map { lookup[it] ?: manifest.unkId } }
-            if (tokenIds.isEmpty()) return emptyList()
-            val alignment = engine.alignWindow(snippet, tokenIds)
+            // Phonemes outside the 48-token vocabulary are skipped, never UNK.
+            val ids = ArrayList<Int>(mapping.phonemes.size)
+            val keptIndices = ArrayList<Int>(mapping.phonemes.size)
+            mapping.phonemes.forEachIndexed { index, phoneme ->
+                lookup[phoneme]?.let { id ->
+                    ids += id
+                    keptIndices += index
+                }
+            }
+            if (ids.isEmpty()) {
+                Log.i(TAG, "Japanese line has no phoneme from the model vocabulary")
+                return emptyList()
+            }
+            val alignment = engine.alignWindow(snippet, ids)
             if (!alignment.feasible) {
                 Log.i(TAG, "Japanese CTC alignment not feasible: ${alignment.reasons}")
                 return emptyList()
             }
-            val hop = manifest.frameHopSeconds
-            val result = ArrayList<AutoSyncUnit>(units.size)
-            var cursor = 0
-            units.forEach { unit ->
-                val slice = alignment.spans.drop(cursor).take(unit.phonemes.size)
-                cursor += unit.phonemes.size
-                val first = slice.firstOrNull { it != null } ?: return@forEach
-                val last = slice.lastOrNull { it != null } ?: return@forEach
-                result += AutoSyncUnit(
-                    text = unit.text,
-                    startMs = (first.startFrame * hop * 1000.0).roundToLong(),
-                    endMs = ((last.endFrame + 1) * hop * 1000.0).roundToLong(),
-                )
+            val spansByPhoneme = HashMap<Int, CtcForcedAligner.Span>(alignment.spans.size)
+            alignment.spans.forEachIndexed { position, span ->
+                val phonemeIndex = keptIndices.getOrNull(position) ?: return@forEachIndexed
+                if (span != null) spansByPhoneme[phonemeIndex] = span
             }
-            return result
+            return mapSpansToCharUnits(
+                readings = mapping.readings,
+                phonemes = mapping.phonemes,
+                spansByPhoneme = spansByPhoneme,
+                frameSeconds = manifest.frameHopSeconds,
+            ) ?: run {
+                Log.i(TAG, "Japanese per-character mapping failed")
+                emptyList()
+            }
         }
 
         override fun close() = engine.close()

@@ -1370,4 +1370,10 @@
     <string name="autosync_model_precision_revert">Back to standard model</string>
     <string name="autosync_model_variant_precision">precision-first</string>
     <string name="autosync_model_g2p_unavailable">Japanese G2P is not bundled yet, so Japanese word timing cannot be generated on this device.</string>
+    <string name="autosync_dict_title">NAIST dictionary (OpenJTalk G2P)</string>
+    <string name="autosync_dict_note">Needed for Japanese kanji readings. About 24 MB to download, 102 MB on disk.</string>
+    <string name="autosync_dict_installed">Installed · %1$s on disk</string>
+    <string name="autosync_dict_confirm">Download the dictionary now? It needs about 24 MB of network and 102 MB of storage.</string>
+    <string name="autosync_dict_ready">Japanese model + dictionary ready</string>
+    <string name="autosync_dict_license">%1$s modified BSD licence is included with the dictionary and shown in Settings.</string>
 </resources>
