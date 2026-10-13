@@ -33,6 +33,25 @@ data class MeloXLyricPreference(
     val script: MeloXLyricScript,
 ) {
     companion object {
+        /** 设置项取值：`system` / `zh-Hans` / `zh-Hant` / 语言标签（en、tr…）。 */
+        fun fromSetting(value: String, locale: Locale = Locale.getDefault()): MeloXLyricPreference =
+            when (val tag = value.trim()) {
+                "", "system" -> system(locale)
+                "zh-Hans", "zh-CN", "zh-SG" -> MeloXLyricPreference(null, MeloXLyricScript.Simplified)
+                "zh-Hant", "zh-TW", "zh-HK", "zh-MO" -> MeloXLyricPreference(null, MeloXLyricScript.Traditional)
+                else -> {
+                    // 只按**基础语言**匹配（en-US 仍匹配 en 轨），无法识别的取值回落系统语言。
+                    val language = tag.lowercase(Locale.ROOT).substringBefore('-')
+                    if (language == "zh") {
+                        system(locale)
+                    } else if (language.length in 2..3 && language.all { it in 'a'..'z' }) {
+                        MeloXLyricPreference(language, MeloXLyricScript.Original)
+                    } else {
+                        system(locale)
+                    }
+                }
+            }
+
         fun system(locale: Locale = Locale.getDefault()): MeloXLyricPreference {
             val language = locale.language.lowercase(Locale.ROOT)
             if (language == "zh") return MeloXLyricPreference(null, MeloXLyricScript.fromSystem(locale))

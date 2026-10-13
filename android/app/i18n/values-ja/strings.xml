@@ -1342,4 +1342,23 @@
     <string name="settings_floating_requires_android_8">フローティング歌詞には Android 8.0 以降が必要です。この端末でも音楽の基本機能は利用できます。</string>
 
     <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
+    <string name="settings_lyrics_language">歌詞の翻訳言語</string>
+    <string name="settings_lyrics_language_system">システムに従う</string>
+    <string name="settings_lyrics_language_zh_hans">簡体字中国語</string>
+    <string name="settings_lyrics_language_zh_hant">繁体字中国語</string>
+    <string name="settings_lyrics_language_en">English</string>
+    <string name="settings_lyrics_language_tr">Türkçe</string>
+    <string name="autosync_model_update">更新</string>
+    <string name="autosync_model_update_available">更新があります · %1$s</string>
+    <string name="autosync_model_precision_title">精度優先モデル</string>
+    <string name="autosync_model_precision_note">ダウンロード容量が大きくなります（%1$s）。インストールすると標準モデルを置き換えます。</string>
+    <string name="autosync_model_precision_revert">標準モデルに戻す</string>
+    <string name="autosync_model_variant_precision">精度優先</string>
+    <string name="autosync_model_g2p_unavailable">日本語 G2P は未同梱のため、この端末では日本語の文字単位タイミングを生成できません。</string>
+    <string name="autosync_dict_title">NAIST 辞書（OpenJTalk G2P）</string>
+    <string name="autosync_dict_note">日本語の漢字読みに必要です。ダウンロード約 24 MB、展開後約 102 MB。</string>
+    <string name="autosync_dict_installed">インストール済み · ディスク %1$s</string>
+    <string name="autosync_dict_confirm">辞書をダウンロードしますか？ 通信約 24 MB、空き容量約 102 MB が必要です。</string>
+    <string name="autosync_dict_ready">日本語モデルと辞書が準備完了</string>
+    <string name="autosync_dict_license">辞書には %1$s 修正 BSD ライセンスが含まれます。</string>
 </resources>

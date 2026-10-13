@@ -41,3 +41,47 @@ adb shell am instrument --user 0 -w \
 ```
 
 不传 `songId` 可仅测解码及采样对比；音频必须与指定歌曲真实对应。成功输出 `AutoSync device regression passed`，包括耗时、采样差异及生成单词数。日志标签为 `MeloXAutoSync` 和 `MeloXLyricsAuto`。
+
+## beta.4（2026-10-13）
+
+- 模型索引固定为 `android-models-v0.1.0-beta.4`，索引 SHA-256
+  `4b7b54a6f436b4f74ac6028f3876477a2d7dffe13fba557f9649577354a0f0ed`（14 093 字节）。
+- en / zh 的模型字节未变（`1c821311…` / `c95f3615…`），安装时会**逐文件 SHA-256 校验后复用**，
+  不重复下载；ja 换成 beta.4 的 `aL8`（129 412 601 字节，`10cfcea4…`）。
+- 迁移策略：只有当已装文件与新索引逐字节匹配时才重写本地清单（只改元数据、不重下）；
+  不匹配的包**保持可用**并在设置里显示“有更新”，断网/取消/失败都不会破坏已装模型。
+- `extra_assets` 里的 292 MB 英文精度优先模型（`b52596cb…`）作为可选变体：安装后会替换标准模型，
+  时间轴缓存通过 modelKey（含清单文本与模型哈希）自动失效。
+
+## 自动歌词生成（本次改动）
+
+- **逐行语言路由**：`AutoSyncText.detectLineLanguage` 按行判定 zh/en/ja；中英混排的行判为
+  Unknown 并保留逐行时间（两套包都会丢字，不做近似）。
+- 单一时刻只驻留一个语言模型：按语言分组处理，组间切换时会话被释放。
+- 每一行失败都写出原因（不可对齐、窗口过短、模型拒绝、缺少模型、日文需要词典等），不再静默跳过。
+- 缓存绑定：歌词内容哈希 + 模型/管线 key + **音频身份**（文件名+长度）+ 多语言组合 key。
+
+## 日文（未完成，界面会如实显示）
+
+- 已实现并接线：`JaG2p`（假名 → 48 音素表，含拗音/促音 cl/拨音 N/片假名归一）与
+  日文 CTC 推理路径（音素跨度映射回原字符，保证可还原原文）。
+- **未完成**：汉字读音、长音符 ー、拉丁词需要 OpenJTalk + NAIST 词典（JNI），
+  且必须与参考实现对拍后才能启用。这些行会被明确拒绝并记录原因，界面也标注
+  “日文 G2P 尚未打包”，不会用 ONNX 加载成功冒充生成成功。
+
+## 日文 G2P：OpenJTalk JNI（2026-10-13）
+
+- **实现**：把 Open JTalk 的文本前端（`text2mecab` → MeCab + NAIST 词典 → NJD 链 → JPCommon 标签）
+  编译为 Android 原生库 `libmelox_ja_g2p.so`（arm64-v8a 3.11 MB / armeabi-v7a 2.30 MB，NDK 29 + CMake），
+  JNI 暴露 `tokens / kana / phonemes`，与 `pyopenjtalk.g2p` 完全等价；**不含 HTS Engine/Voice**。
+- **Kotlin 侧**：`JapaneseG2pMapper` 按 `src/autosync/lyrics/ja_pronunciation.py` 1:1 移植
+  （NFKC、MeCab token 优先路径、DP 汉字 1..12 モーラ对齐、前缀音素计数、pau 定位、
+  `map_spans_to_char_units` 的最近边界补位与 uncertain 标记），原文可无损重建。
+- **主机对拍**：
+  - 原生前端 vs `pyopenjtalk.g2p`：18/18 音素、18/18 假名完全一致（含汉字、片假名、长音、
+    促音、拗音、助词、拉丁、数字、空格、符号）。
+  - Kotlin 映射器 + JNI vs `android_export/ja/g2p_reference.py` 链：**20/20 黄金向量逐字段一致**
+    （char / kana / phonemes / uncertain / reconstruct）。
+- **词典**：不打包、不内置；按需从固定 GitHub release 下载（23,646,843 B，
+  `fe6ba0e4…f382a`），解压约 102.3 MB，原子安装，失败/取消不破坏已装词典；含 NAIST 修改版 BSD 声明。
+- **仍未完成 / 未验证**：真机 arm64 上的实际加载与推理（ADB 不可用）。

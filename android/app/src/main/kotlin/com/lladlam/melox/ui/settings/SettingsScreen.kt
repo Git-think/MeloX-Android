@@ -1589,6 +1589,23 @@ private fun LyricsSettings(context: android.content.Context) {
             onSelected = { MeloXSettingsPreferences.setString(context, "lyrics_rendering_quality", it.name) },
             grouped = true,
         )
+        var lyricLanguage by remember { mutableStateOf(MeloXSettingsRuntime.lyricLanguage) }
+        MeloXSettingsDropdown(
+            title = stringResource(R.string.settings_lyrics_language),
+            selected = lyricLanguage,
+            items = listOf(
+                "system" to stringResource(R.string.settings_lyrics_language_system),
+                "zh-Hans" to stringResource(R.string.settings_lyrics_language_zh_hans),
+                "zh-Hant" to stringResource(R.string.settings_lyrics_language_zh_hant),
+                "en" to stringResource(R.string.settings_lyrics_language_en),
+                "tr" to stringResource(R.string.settings_lyrics_language_tr),
+            ),
+            onSelected = {
+                lyricLanguage = it
+                MeloXSettingsPreferences.setString(context, "lyric_language", it)
+            },
+            grouped = true,
+        )
         SettingsToggleRow(context, stringResource(R.string.settings_lyrics_auto_select), "lyrics_auto_select", true, grouped = true)
         SettingsToggleRow(context, stringResource(R.string.settings_lyrics_word_by_word), "lyrics_word_by_word", true, grouped = true)
         SettingsToggleRow(context, stringResource(R.string.settings_lyrics_pseudo_timing), "lyrics_pseudo_timing", true, stringResource(R.string.settings_lyrics_pseudo_timing_note), grouped = true)

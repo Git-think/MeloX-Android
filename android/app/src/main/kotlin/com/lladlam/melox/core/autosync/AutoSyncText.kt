@@ -108,6 +108,31 @@ internal object AutoSyncText {
     }
 
     /**
+     * Language of a single lyric line, used to route it to the matching engine.
+     *
+     * A line that mixes scripts is deliberately [Unknown]: both packs would drop
+     * part of it, so it keeps its provider line timing instead of pretending.
+     */
+    fun detectLineLanguage(text: String): AutoSyncLineLanguage {
+        var latin = 0
+        var han = 0
+        var kana = 0
+        for (character in text) {
+            val code = character.code
+            when {
+                character in 'A'..'Z' || character in 'a'..'z' -> latin++
+                code in 0x3040..0x30FF -> kana++
+                code in 0x4E00..0x9FFF -> han++
+            }
+        }
+        if (kana > 0) return AutoSyncLineLanguage.Ja
+        if (latin > 0 && han > 0) return AutoSyncLineLanguage.Unknown
+        if (latin > 0) return AutoSyncLineLanguage.En
+        if (han > 0) return AutoSyncLineLanguage.Zh
+        return AutoSyncLineLanguage.Unknown
+    }
+
+    /**
      * Picks an implemented engine. Kana-bearing Japanese lyrics stay line-timed
      * until the Japanese G2P path is implemented.
      */

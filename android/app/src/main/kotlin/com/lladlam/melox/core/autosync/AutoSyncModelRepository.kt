@@ -62,6 +62,8 @@ internal class AutoSyncModelRepository(
         val accuracyStatus: String,
         val postprocess: JSONObject?,
         val files: List<FileSpec>,
+        /** Published "precision first" model for this language, when one exists. */
+        val optionalModel: FileSpec? = null,
     ) {
         val requiredFiles: List<FileSpec> get() = files.filter { it.required }
         val totalBytes: Long get() = requiredFiles.sumOf { it.bytes }
@@ -74,6 +76,13 @@ internal class AutoSyncModelRepository(
         val minBackendProtocol: Int,
         val accuracyNotice: String,
         val packs: Map<String, Pack>,
+        /**
+         * Optional "precision first" models published next to the packs, keyed by
+         * the language their file name starts with (`en-…`). They are never
+         * installed implicitly: the user picks one, and the base model is then
+         * replaced so only one copy is kept on disk.
+         */
+        val optionalModels: Map<String, FileSpec>,
     )
 
     /**
@@ -104,6 +113,7 @@ internal class AutoSyncModelRepository(
     suspend fun install(
         pack: Pack,
         knownIndex: Index,
+        precision: FileSpec? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -120,7 +130,7 @@ internal class AutoSyncModelRepository(
             staging.deleteRecursively()
             check(staging.mkdirs()) { "cannot create staging directory" }
             try {
-                val total = pack.totalBytes.coerceAtLeast(1L)
+                val total = (pack.totalBytes + (precision?.bytes ?: 0L)).coerceAtLeast(1L)
                 var done = 0L
                 val tokens = LinkedHashMap<String, String>()
                 val candidates = routing.candidates()
@@ -136,8 +146,24 @@ internal class AutoSyncModelRepository(
                     onProgress?.invoke(done.toFloat().coerceAtMost(total.toFloat()) / total)
                     if (spec.name == pack.tokensFile) readTokens(target, tokens)
                 }
+                precision?.let { spec ->
+                    currentCoroutineContext().ensureActive()
+                    val target = File(staging, spec.name)
+                    val reusable = existingVerifiedFile(pack.language, spec)
+                    if (reusable != null) reusable.copyTo(target, overwrite = true)
+                    else downloadVerified(spec, target, candidates) { written ->
+                        onProgress?.invoke(((done + written).coerceAtMost(total)).toFloat() / total)
+                    }
+                    done += spec.bytes
+                    onProgress?.invoke(done.toFloat().coerceAtMost(total.toFloat()) / total)
+                    // Only one model variant is kept on disk: the larger one replaces
+                    // the quantised file instead of living next to it.
+                    pack.files.filter { it.role == "model" && it.name != spec.name }.forEach { stale ->
+                        File(staging, stale.name).delete()
+                    }
+                }
                 File(staging, "manifest.json").writeText(
-                    localManifest(pack, knownIndex.releaseTag, tokens).toString(),
+                    localManifest(pack, knownIndex.releaseTag, tokens, precision).toString(),
                 )
                 publish(pack.language, staging)
                 onProgress?.invoke(1f)
@@ -148,6 +174,7 @@ internal class AutoSyncModelRepository(
             }
         }.onFailure { Log.w(TAG, "install failed for ${pack.language}", it) }
     }
+
 
     /** Removes an installed pack; the feature simply becomes unavailable. */
     fun delete(language: String) {
@@ -258,11 +285,12 @@ internal class AutoSyncModelRepository(
         for (pack in index.packs.values) {
             currentCoroutineContext().ensureActive()
             if (!File(File(base, pack.language), "manifest.json").isFile) continue
+            // A pack whose bytes no longer match the published index (for example
+            // the beta.2 Japanese model) is left installed and usable: it is only
+            // replaced when the user explicitly updates, so a flaky network can
+            // never take a working model away.
             val verified = pack.requiredFiles.map { spec -> spec to existingVerifiedFile(pack.language, spec) }
-            if (verified.any { it.second == null }) {
-                if (pack.language == "ja") File(base, "ja").deleteRecursively()
-                continue
-            }
+            if (verified.any { it.second == null }) continue
             val staging = File(base, "${pack.language}.staging")
             staging.deleteRecursively()
             check(staging.mkdirs()) { "cannot create migration staging directory" }
@@ -318,7 +346,12 @@ internal class AutoSyncModelRepository(
      * engine already understands, embedding the token list so inference needs
      * no extra file lookup.
      */
-    private fun localManifest(pack: Pack, releaseTag: String, tokens: Map<String, String>): JSONObject {
+    private fun localManifest(
+        pack: Pack,
+        releaseTag: String,
+        tokens: Map<String, String>,
+        precision: FileSpec? = null,
+    ): JSONObject {
         val tokenArray = JSONArray()
         tokens.entries.sortedBy { it.value.toIntOrNull() ?: Int.MAX_VALUE }
             .forEach { tokenArray.put(it.key) }
@@ -349,10 +382,28 @@ internal class AutoSyncModelRepository(
                 pack.postprocess?.let { put("postprocess", it) }
                 put("accuracy_status", pack.accuracyStatus)
                 val files = JSONObject()
-                pack.files.firstOrNull { it.role == "model" }?.let { model ->
+                val base = pack.files.firstOrNull { it.role == "model" }
+                base?.let { model ->
                     files.put("int8", JSONObject().put("name", model.name).put("bytes", model.bytes)
                         .put("sha256", model.sha256))
                 }
+                precision?.let { model ->
+                    files.put("precision", JSONObject().put("name", model.name).put("bytes", model.bytes)
+                        .put("sha256", model.sha256))
+                }
+                files.put("variant", if (precision != null) "precision" else "int8")
+                // Required runtime files actually on disk, for cheap update checks.
+                val required = JSONArray()
+                val active = precision ?: base
+                active?.let { model ->
+                    required.put(JSONObject().put("name", model.name).put("bytes", model.bytes)
+                        .put("sha256", model.sha256))
+                }
+                pack.files.filter { it.required && it.role != "model" }.forEach { spec ->
+                    required.put(JSONObject().put("name", spec.name).put("bytes", spec.bytes)
+                        .put("sha256", spec.sha256))
+                }
+                files.put("required", required)
                 put("g2p_available", pack.language != "ja")
                 put("files", files)
                 put("tokens", tokenArray)
@@ -391,17 +442,17 @@ internal class AutoSyncModelRepository(
          * Pinned release. The index itself is verified by SHA-256 against
          * [INDEX_SHA256] so a moved tag cannot silently swap the payload.
          */
-        const val RELEASE_TAG = "android-models-v0.1.0-beta.2"
+        const val RELEASE_TAG = "android-models-v0.1.0-beta.4"
         const val RELEASE_PREFIX =
-            "https://github.com/lladlam/MeloX-AutoSync/releases/download/android-models-v0.1.0-beta.2/"
+            "https://github.com/lladlam/MeloX-AutoSync/releases/download/android-models-v0.1.0-beta.4/"
         const val INDEX_URL = RELEASE_PREFIX + "android-models.json"
 
         /**
          * Pinned hash of the published index (`android-models.json`,
-         * 12 973 bytes). A moved or rewritten tag therefore cannot silently
+         * 14 093 bytes). A moved or rewritten tag therefore cannot silently
          * change which weights this build is willing to install.
          */
-        const val INDEX_SHA256 = "ffcc9b5db19dff668b9994aae7d2e49e6810564131f51039bc49e7c779f475d4"
+        const val INDEX_SHA256 = "4b7b54a6f436b4f74ac6028f3876477a2d7dffe13fba557f9649577354a0f0ed"
         private const val MAX_INDEX_BYTES = 1L shl 20
 
         /**
@@ -421,10 +472,47 @@ internal class AutoSyncModelRepository(
             }
         }
 
+    /**
+     * Cheap update check: compares the digests recorded at install time with the
+     * published index. No file is hashed, so it is safe to call from the UI.
+     */
+        fun matchesIndex(manifest: AutoSyncManifest, pack: Pack): Boolean {
+        val expected = buildList {
+            val active = if (manifest.modelVariant == "precision") pack.optionalModel else null
+            val base = pack.files.firstOrNull { it.role == "model" }
+            (active ?: base)?.let { add(AutoSyncFileDigest(it.name, it.bytes, it.sha256.lowercase())) }
+            pack.files.filter { it.required && it.role != "model" }
+                .forEach { add(AutoSyncFileDigest(it.name, it.bytes, it.sha256.lowercase())) }
+        }
+        if (manifest.requiredFiles.isEmpty()) return false
+        return manifest.requiredFiles.map { it.copy(sha256 = it.sha256.lowercase()) }.toSet() == expected.toSet()
+    }
+
         fun parseIndex(text: String): Index {
             val root = JSONObject(text)
             val languages = root.optJSONObject("languages") ?: JSONObject()
             val packs = LinkedHashMap<String, Pack>()
+            val optionalModels = LinkedHashMap<String, FileSpec>()
+            root.optJSONArray("extra_assets")?.let { array ->
+                for (index in 0 until array.length()) {
+                    val file = array.optJSONObject(index) ?: continue
+                    val spec = FileSpec(
+                        name = file.optString("name"),
+                        role = file.optString("role", "optional-model"),
+                        url = file.optString("download_url"),
+                        bytes = file.optLong("bytes"),
+                        sha256 = file.optString("sha256"),
+                        note = file.optString("note"),
+                    )
+                    if (spec.name.isBlank() || spec.url.isBlank()) continue
+                    val language = languages.keys().asSequence()
+                        .firstOrNull { spec.name.startsWith("$it-") } ?: continue
+                    runCatching { requireTrusted(spec, language) }.getOrNull()?.let {
+                        optionalModels[language] = spec
+                    }
+                }
+            }
+
             languages.keys().forEach { language ->
                 val pack = languages.optJSONObject(language) ?: return@forEach
                 val inputNames = ArrayList<String>()
@@ -487,6 +575,7 @@ internal class AutoSyncModelRepository(
                     accuracyStatus = pack.optJSONObject("accuracy")?.optString("status").orEmpty(),
                     postprocess = pack.optJSONObject("postprocess"),
                     files = files.filter { it.name.isNotBlank() && it.url.isNotBlank() },
+                    optionalModel = optionalModels[language],
                 )
             }
             return Index(
@@ -496,6 +585,7 @@ internal class AutoSyncModelRepository(
                 minBackendProtocol = root.optInt("min_backend_protocol", 1),
                 accuracyNotice = root.optString("accuracy_notice"),
                 packs = packs,
+                optionalModels = optionalModels,
             )
         }
 

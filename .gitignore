@@ -12,3 +12,6 @@ build/
 .pr_worktree/
 keystore.properties
 .melox-build-count
+
+# CMake/native build output
+android/app/.cxx/

@@ -10,6 +10,13 @@ import org.json.JSONObject
  * `docs/ANDROID_ONNX_EXPORT_PROMPT.md`); the device only reads it. Every field
  * has a defensive default so a future manifest revision cannot crash playback.
  */
+/** One runtime file recorded in the local manifest, used to detect updates. */
+data class AutoSyncFileDigest(
+    val name: String,
+    val bytes: Long,
+    val sha256: String,
+)
+
 data class AutoSyncManifest(
     val language: String,
     val sourceModel: String,
@@ -25,6 +32,11 @@ data class AutoSyncManifest(
     val unkId: Int,
     val tokens: List<String>,
     val modelFileName: String,
+    /** `int8` (default) or `precision` when the larger variant is installed. */
+    val modelVariant: String = "int8",
+    val precisionModelFileName: String? = null,
+    /** Required runtime files as installed; compared with the published index. */
+    val requiredFiles: List<AutoSyncFileDigest> = emptyList(),
 ) {
     val frameHopMs: Long get() = (frameHopSeconds * 1000.0).toLong()
 
@@ -71,8 +83,30 @@ data class AutoSyncManifest(
                     ?.takeIf { it.isFinite() && it > 0.0 }?.div(1000.0))
                 ?: 0.02
             val files = root.optJSONObject("files")
-            val modelFileName = files?.optJSONObject("int8")?.optString("name").orEmpty()
-                .ifBlank { "model-int8.onnx" }
+            val variant = files?.optString("variant").orEmpty().ifBlank { "int8" }
+            val int8 = files?.optJSONObject("int8")
+            val precision = files?.optJSONObject("precision")
+            val chosen = when (variant) {
+                "precision" -> precision ?: int8
+                else -> int8 ?: precision
+            }
+            val modelFileName = chosen?.optString("name").orEmpty().ifBlank { "model-int8.onnx" }
+            val requiredFiles = files?.optJSONArray("required")?.let { array ->
+                buildList {
+                    for (index in 0 until array.length()) {
+                        val entry = array.optJSONObject(index) ?: continue
+                        val name = entry.optString("name")
+                        if (name.isBlank()) continue
+                        add(
+                            AutoSyncFileDigest(
+                                name = name,
+                                bytes = entry.optLong("bytes", -1L),
+                                sha256 = entry.optString("sha256").lowercase(),
+                            ),
+                        )
+                    }
+                }
+            }.orEmpty()
 
             return AutoSyncManifest(
                 language = root.optString("language", "en"),
@@ -93,9 +127,20 @@ data class AutoSyncManifest(
                 unkId = unkId,
                 tokens = tokens,
                 modelFileName = modelFileName,
+                modelVariant = if (variant == "precision" && precision != null) "precision" else "int8",
+                precisionModelFileName = precision?.optString("name")?.takeIf(String::isNotBlank),
+                requiredFiles = requiredFiles,
             )
         }
     }
+}
+
+/** Language routed per lyric line, so mixed songs use the right engine per line. */
+enum class AutoSyncLineLanguage(val tag: String) {
+    Zh("zh"),
+    En("en"),
+    Ja("ja"),
+    Unknown("und"),
 }
 
 /** One generated display unit (English: a word) in absolute song time. */
@@ -122,6 +167,8 @@ data class AutoSyncTimeline(
     val lines: List<AutoSyncLineTiming>,
     val createdAtMs: Long,
     val modelKey: String = "",
+    /** Identity of the cached audio the timeline was generated from. */
+    val audioKey: String = "",
 ) {
     fun toJson(): JSONObject {
         val linesJson = JSONArray()
