@@ -59,6 +59,37 @@ class AutoSyncModelIndexTest {
     )
 
     @Test
+    fun pinnedIndexHashMatchesThePublishedBetaFourFile() {
+        val bytes = javaClass.classLoader!!
+            .getResourceAsStream("autosync/android-models-beta4.json")!!
+            .readBytes()
+        val actual = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+        assertEquals(AutoSyncModelRepository.INDEX_SHA256, actual)
+
+        val published = AutoSyncModelRepository.parseIndex(bytes.decodeToString())
+        assertEquals("android-models-v0.1.0-beta.4", published.releaseTag)
+        assertEquals(
+            129_412_601L,
+            published.packs.getValue("ja").files.first { it.role == "model" }.bytes,
+        )
+        assertEquals(
+            "10cfcea41d6db285004229360dbbf3d7ce826d67490e8b8c4bd66ccd7f38057d",
+            published.packs.getValue("ja").files.first { it.role == "model" }.sha256,
+        )
+        // en / zh 的模型字节未变，可直接复用已下载文件
+        assertEquals(
+            "1c8213118da7f555e4b68c0e08e85a4c471ea2a3e0fdf5620d27412800babd3f",
+            published.packs.getValue("en").files.first { it.role == "model" }.sha256,
+        )
+        assertEquals(
+            "c95f3615503a23776e18da9b303598eb11972cc4acf1f55791b630979775ddce",
+            published.packs.getValue("zh").files.first { it.role == "model" }.sha256,
+        )
+        assertEquals(292_044_035L, published.packs.getValue("en").optionalModel?.bytes)
+    }
+
+    @Test
     fun optionalPrecisionModelIsAttachedToItsLanguage() {
         assertEquals(
             "en-wav2vec2-base-960h-int8-acc.onnx",
