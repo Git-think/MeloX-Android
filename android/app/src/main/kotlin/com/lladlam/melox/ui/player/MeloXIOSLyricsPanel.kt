@@ -944,7 +944,15 @@ private fun MeloXAppleMusicLyricsPanel(
 
             val baseDurationMs = sourceFocusAnimationDurationMs(nextIndex, lines)
             val skippedLineCount = (nextIndex - previousIndex).coerceAtLeast(1)
-            val isAdjacentForward = skippedLineCount == 1
+            // Overlapping cues keep the focus on the earliest line. When they
+            // end together, the next cue is only one visual step away even if
+            // its index skipped the lines that were already on screen.
+            val overlappingStep = previousIndex < nextIndex &&
+                (previousIndex until nextIndex).all { index ->
+                    sourceLineActivationTimeMs(lines[index + 1]) -
+                        sourceLineActivationTimeMs(lines[index]) <= 280L
+                }
+            val isAdjacentForward = skippedLineCount == 1 || overlappingStep
             val effectivePosition = renderedPositionState.longValue + lyricAdvanceMs
             val remainingMs = sourceRemainingFocusDurationMs(nextIndex, effectivePosition, lines)
 
@@ -1428,7 +1436,7 @@ private fun MeloXUpstreamLyricLine(
         horizontalAlignment = lineAlignment,
     ) {
         accompanimentBefore.forEach { vocal ->
-            MeloXTimedAccompaniment(vocal, playbackTimeProvider, fontScale, reduceMotion, focusProgress, renderingQuality, effectiveBlur)
+            MeloXTimedAccompaniment(vocal, playbackTimeProvider, fontScale, reduceMotion, renderingQuality, effectiveBlur)
         }
         if (showRomanization) {
             MeloXRubyLyricText(
@@ -1462,7 +1470,7 @@ private fun MeloXUpstreamLyricLine(
         }
 
         accompanimentAfter.forEach { vocal ->
-            MeloXTimedAccompaniment(vocal, playbackTimeProvider, fontScale, reduceMotion, focusProgress, renderingQuality, effectiveBlur)
+            MeloXTimedAccompaniment(vocal, playbackTimeProvider, fontScale, reduceMotion, renderingQuality, effectiveBlur)
         }
 
         val romanSize = max(UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricRomanizationFontScale, 13f)
@@ -1506,7 +1514,6 @@ private fun MeloXTimedAccompaniment(
     playbackTimeProvider: () -> Long,
     fontScale: Float,
     reduceMotion: Boolean,
-    focusProgress: Float,
     renderingQuality: MeloXLyricsRenderingQuality,
     softBlurDp: Float,
 ) {
@@ -1520,13 +1527,16 @@ private fun MeloXTimedAccompaniment(
         exit = fadeOut(tween(600)) + slideOutVertically(tween(600)) { it / 2 } + shrinkVertically(tween(600)),
     ) {
         val vocalLine = LyricLine(vocal.timeMs, vocal.durationMs, vocal.text, vocal.syllables, agent = vocal.agent)
+        // Lead vocals stay on the line clock. Accompaniment keeps its own
+        // syllable times, so only the words already reached light up.
         MeloXGlyphLyricText(
             line = vocalLine,
             playbackTimeProvider = playbackTimeProvider,
             supportsTimedLyrics = vocal.syllables.isNotEmpty(),
             fontScale = fontScale * .68f,
             reduceMotion = reduceMotion,
-            timingEffectsStrength = focusProgress,
+            timingEffectsStrength = 1f,
+            followOwnTiming = true,
             renderingQuality = renderingQuality,
             softBlurDp = softBlurDp,
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).graphicsLayer { alpha = .72f },
@@ -1805,6 +1815,7 @@ private fun MeloXGlyphLyricText(
     reduceMotion: Boolean,
     timingEffectsStrength: Float,
     unplayedAlpha: Float = MeloXSettingsRuntime.lyricInactiveOpacity,
+    followOwnTiming: Boolean = false,
     renderingQuality: MeloXLyricsRenderingQuality,
     softBlurDp: Float = 0f,
     modifier: Modifier = Modifier,
@@ -1927,11 +1938,15 @@ private fun MeloXGlyphLyricText(
 
         Canvas(Modifier.fillMaxWidth().height(height)) {
             val playbackTimeMs = playbackTimeProvider()
-            val effectsStrength = sourceTimingEffectsStrength(
-                line = line,
-                playbackTimeMs = playbackTimeMs,
-                focusProgress = timingEffectsStrength,
-            )
+            val effectsStrength = if (followOwnTiming) {
+                timingEffectsStrength.coerceIn(0f, 1f)
+            } else {
+                sourceTimingEffectsStrength(
+                    line = line,
+                    playbackTimeMs = playbackTimeMs,
+                    focusProgress = timingEffectsStrength,
+                )
+            }
             if (effectsStrength <= 0.0001f) {
                 drawText(
                     layout,
