@@ -312,12 +312,6 @@ fun MeloXIOSNowPlayingSharedHost(
     ) { visibility ->
         if (visibility == EnterExitState.Visible) 1f else 0f
     }
-    // ⚠⚠ 临时实证探针（2026-10-04）：把内容层进度按墙钟写进 `mxdiag.txt`，与
-    //   `MeloXPlayerSinkDiag.frame` 记录的 bounds 自身进度 `f` 对齐，用来判定
-    //   「master 弹簧 + 几何 AppleEasing」是否真的**双层串联**。
-    //   未 bind（release / 非本页）时是空操作。验完即删。
-    MeloXPlayerSinkDiag.progress(expansionProgress)
-
     // Let the shared artwork establish the transition first. The background
     // and scene then take over on the same master timeline, which prevents a
     // black first frame from winning the z-order over MiniPlay.

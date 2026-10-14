@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.lerp
 import java.io.File
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.exp
 import com.lladlam.melox.ui.animation.MeloXSystemScale
@@ -387,12 +388,23 @@ internal object MeloXPlayerSinkDiag {
     private var file: File? = null
     private val buf = StringBuilder()
 
+    /**
+     * 落盘线程。⚠ 2026-10-14：**所有磁盘写入必须离开主线程**——
+     * 展开/收起期间 `frame`（bounds 动画回调）与 `progress` 每帧都在追加缓冲，
+     * 而 `File.appendText` 是一次 open+write+close；挂在主线程上会让**每次展开
+     * 都掉帧**（0.6.2 尚无本诊断器，后来加回来时把 I/O 留在了主线程）。
+     * 单线程保证顺序：`bind()` 的截断一定先于任何 append 执行。
+     */
+    private val io = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "mxdiag-io").apply { isDaemon = true }
+    }
+
     fun bind(context: Context) {
         runCatching {
             val dir = context.getExternalFilesDir(null) ?: return
             if (!dir.exists()) dir.mkdirs()
             val f = File(dir, "mxdiag.txt")
-            f.writeText("")
+            io.execute { runCatching { f.writeText("") } }
             file = f
             // ⚠⚠ 2026-10-06 修漏记（`mini.shown` 凭空消失就是它）：
             //   去重表必须与文件同一生命周期被重置 —— 否则 `bind()` 之前采过的值，
@@ -457,14 +469,20 @@ internal object MeloXPlayerSinkDiag {
 
     private fun append(line: String) {
         if (file == null) return
-        buf.append(line).append('\n')
-        if (buf.length > 400) flush()
+        val full = synchronized(buf) {
+            buf.append(line).append('\n')
+            buf.length > 400
+        }
+        if (full) flush()
     }
 
     private fun flush() {
         val f = file ?: return
-        runCatching { f.appendText(buf.toString()) }
-        buf.setLength(0)
+        val payload = synchronized(buf) {
+            if (buf.isEmpty()) return
+            buf.toString().also { buf.setLength(0) }
+        }
+        io.execute { runCatching { f.appendText(payload) } }
     }
 }
 
