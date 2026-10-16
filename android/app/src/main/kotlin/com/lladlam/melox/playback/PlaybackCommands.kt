@@ -390,7 +390,23 @@ object PlaybackCommands {
     private fun reorderFutureInPlace(player: Player, desiredFuture: List<MediaItem>) {
         val start = player.currentMediaItemIndex + 1
         if (start < 0 || desiredFuture.isEmpty()) return
-        val simulated = MutableList(player.mediaItemCount) { player.getMediaItemAt(it) }
+        val count = player.mediaItemCount
+        val current = List(count) { player.getMediaItemAt(it) }
+        // 快路径：目标顺序已与当前一致 -> 无操作，零扰动。
+        if (desiredFuture.size == count - start &&
+            (start until count).all { current[it] === desiredFuture[it - start] }
+        ) {
+            return
+        }
+        // 快路径：目标顺序覆盖整个未来区间 -> 一条批量 replaceMediaItems 命令
+        //（单次时间线更新）替代至多 N 条 moveMediaItem——后者每条都是一次
+        // O(N) 更新 + 事件派发，累计 O(N²) 命令风暴（随机/循环连点卡顿根因）。
+        if (desiredFuture.size == count - start) {
+            player.replaceMediaItems(start, count, desiredFuture)
+            return
+        }
+        // 部分区间兜底：按模拟出的目标顺序逐条 move。
+        val simulated = MutableList(count) { player.getMediaItemAt(it) }
         desiredFuture.forEachIndexed { offset, wanted ->
             val target = start + offset
             if (target !in simulated.indices) return@forEachIndexed
