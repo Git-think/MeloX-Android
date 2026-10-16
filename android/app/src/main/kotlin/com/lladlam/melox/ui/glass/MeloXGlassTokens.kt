@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +53,16 @@ object MeloXTypography {
     val subheadline = TextStyle(fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 20.sp)
     val caption = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp)
 }
+
+/**
+ * Glass styles intentionally carry no fontFamily. Passing them straight to
+ * `Text(style = …)` REPLACES the ambient style instead of merging, so a null
+ * family falls back to the platform default and never follows the system-font
+ * scope. Merging into [LocalTextStyle] restores the inheritance from
+ * MaterialTheme typography (whose family follows the scope).
+ */
+@Composable
+fun TextStyle.inheritAmbientFamily(): TextStyle = LocalTextStyle.current.merge(this)
 
 enum class MeloXGlassButtonStyle {
     Bordered,

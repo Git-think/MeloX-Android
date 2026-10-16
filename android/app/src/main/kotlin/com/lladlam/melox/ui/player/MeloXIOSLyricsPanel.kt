@@ -101,6 +101,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextAlign
@@ -120,7 +121,7 @@ import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.meloXEdgeOverscrollHaptic
 import com.lladlam.melox.MeloXAppVisibility
 import com.lladlam.melox.ui.settings.MeloXLyricsStyle
-import com.lladlam.melox.ui.theme.LocalMeloXFontFamily
+import com.lladlam.melox.ui.theme.MeloXLanTingProFontFamily
 import com.lladlam.melox.R
 import androidx.core.content.res.ResourcesCompat
 import com.lladlam.melox.ui.settings.MeloXLyricsRenderingQuality
@@ -669,17 +670,27 @@ private fun MeloXAppleMusicLyricsPanel(
     val latestInterfaceHidden = rememberUpdatedState(isInterfaceHidden)
     val latestVisibilityCallback = rememberUpdatedState(onInterfaceVisibilityChange)
     val latestInteractionCallback = rememberUpdatedState(onInterfaceInteraction)
-    var lastCanScrollForward by remember(document) { mutableStateOf(true) }
-    var lastCanScrollBackward by remember(document) { mutableStateOf(true) }
+    // ★ 2026-10-15：初值改 `null` = "还没观测到过任何状态"，**跳过首次发射**。
+    //   旧实现把初值写死 `true`，于是「true→false」这个判据在**零交互的挂载瞬间**就成立：
+    //   歌词面板刚组合时列表必然停在 (index=0, offset=0)，`canScrollBackward` 一上来就是
+    //   `false` ⇒ 凭空震一记 `LongPress`。用户长期把这记误触发当成了「打开播放页的反馈」
+    //   （在旧口径下面板于转场开始即组合 ⇒ 它恰好落在点击瞬间）。
+    //   ⚠ 这条误触发在 2026-10-15「常驻重层延后组合」后被动后移，暴露成了「打开完之后才有」；
+    //     现在打开那记已由 `MeloXApp` 的 `playerOpenThump` 显式承担，这里必须去掉误触发，
+    //     否则会在展开落定后多震一记。
+    //   改成 `null` 后语义收窄为：**先观测到一次真实状态、之后才发生 true→false** 才震
+    //   （播放自动滚到歌词末尾 / 用户拖到底等），挂载与换歌时的误触发随之消失。
+    var lastCanScrollForward by remember(document) { mutableStateOf<Boolean?>(null) }
+    var lastCanScrollBackward by remember(document) { mutableStateOf<Boolean?>(null) }
     var initialLyricsPositioned by remember(renderedDocument) { mutableStateOf(lines.isEmpty()) }
     LaunchedEffect(document) {
         snapshotFlow { listState.canScrollForward to listState.canScrollBackward }
             .collect { (canForward, canBackward) ->
                 if (com.lladlam.melox.ui.settings.MeloXSettingsRuntime.hapticFeedbackEnabled) {
-                    if (lastCanScrollForward && !canForward) {
+                    if (lastCanScrollForward == true && !canForward) {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     }
-                    if (lastCanScrollBackward && !canBackward) {
+                    if (lastCanScrollBackward == true && !canBackward) {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     }
                 }
@@ -1825,7 +1836,7 @@ private fun MeloXGlyphLyricText(
     val context = LocalContext.current
     val density = LocalDensity.current
     val lyricWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight
-    val useSystemFont = MeloXSettingsRuntime.systemFontEnabled
+    val useSystemFont = MeloXSettingsRuntime.lyricSystemFontEnabled
     val fontTypeface = remember(useSystemFont) {
         if (useSystemFont) Typeface.DEFAULT
         else ResourcesCompat.getFont(context, R.font.mi_lan_pro) ?: Typeface.DEFAULT
@@ -1835,7 +1846,7 @@ private fun MeloXGlyphLyricText(
         val widthPx = with(density) { maxWidth.roundToPx().coerceAtLeast(1) }
         val style = TextStyle(
             color = Color.White,
-            fontFamily = LocalMeloXFontFamily.current,
+            fontFamily = if (useSystemFont) FontFamily.Default else MeloXLanTingProFontFamily,
             fontSize = (UpstreamLyrics.FONT_SIZE_SP * fontScale).sp,
             lineHeight = (UpstreamLyrics.LINE_HEIGHT_SP * fontScale).sp,
             fontWeight = lyricWeight,

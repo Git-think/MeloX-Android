@@ -1,5 +1,6 @@
 package com.lladlam.melox.ui.player
 
+import android.content.res.Resources
 import android.os.Build
 import android.view.RoundedCorner
 import android.view.View
@@ -18,18 +19,45 @@ import androidx.core.view.ViewCompat
 import com.lladlam.melox.ui.layout.rememberMeloXWindowInfo
 import kotlinx.coroutines.delay
 
+/** 轮询上限：组合期首读常为 null（insets 未派发），最多 20 × 50ms = 1s。 */
+private const val MELOX_CORNER_POLL_ATTEMPTS = 20
+private const val MELOX_CORNER_POLL_DELAY_MS = 50L
+
 /**
- * 系统屏幕圆角半径（px）。取四角最大值；读不到（API < 31 / 机型不上报）返回 null。
- *
- * ⚠ 只在组合期调用一次、**不注册 insets 监听**：`ViewCompat.setOnApplyWindowInsetsListener`
- *   是**覆盖式**的，再注册一个会把 `meloXPlayerStatusBarsPadding` 里那个监听顶掉
- *   （播放页状态栏内边距会失效）。刷新靠 [rememberMeloXDisplayCornerPx] 的 key。
- *
- * 真值参考（iQOO 15）：`adb shell dumpsys window | grep mRoundedCorners` →
- * `RoundedCorner{position=TopLeft, radius=184, center=Point(184,184)}`（四角同值，= 46dp）。
+ * 框架 dimen 候选（AOSP `DisplayUtils.getCornerRadiusTop()` 同源）：
+ * OEM 三者里定义哪个都有可能，取最大正值。`rounded_corner_radius` 是 AOSP 默认项，
+ * top/bottom 是上下圆角不同的机型分别定义的项。
  */
-internal fun meloXDisplayCornerRadiusPx(view: View): Float? =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) meloXDisplayCornerRadiusPxS(view) else null
+private val FRAMEWORK_CORNER_DIMENS = listOf(
+    "rounded_corner_radius_top" to "dimen:top",
+    "rounded_corner_radius_bottom" to "dimen:bottom",
+    "rounded_corner_radius" to "dimen:default",
+)
+
+/**
+ * 系统屏幕圆角半径（px）+ 来源标签。**多源回退**，全部落空返回 null。
+ *
+ * 源 1（API 31+）`WindowInsets.getRoundedCorner`：官方入口。ROM 把圆角上报进窗口 insets
+ *   时最权威（Pixel / 一加等 AOSP 血统）。取四角最大值（个别机型上下圆角不同）。
+ * 源 2（所有 API）框架 dimen `android:dimen/rounded_corner_radius_*`：
+ *   `Resources.getSystem().getIdentifier(name, "dimen", "android")` —— AOSP `DisplayUtils`
+ *   与小米 HyperOS 官方适配文档同款取法。大量 OEM（含**不在 WindowInsets 上报圆角**的
+ *   ROM）都靠它暴露屏幕圆角；SystemUI 画圆角遮罩读的也是这批值（framework-res + RRO）。
+ *   多显示器机型（`config_roundedCornerRadiusArray` 非空）走数组成员，取最大项兜底。
+ *
+ * ⚠ 2026-10-16 用户报障「根本没有正确获取圆角，用的都是硬编码」的根因：旧实现**只有源 1**，
+ *   而本机（OriginOS）不把圆角填进 App 窗口 insets ⇒ 永远读不到 ⇒ 永远回落 46dp 硬编码。
+ *   补上源 2 后本机可经 dimen 拿到真值；Pixel 等走源 1。两者皆失才落硬编码兜底。
+ */
+internal fun meloXSystemCornerRadiusPx(view: View): Pair<Float, String>? {
+    // 源 1：WindowInsets（API 31+ 官方入口）
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val fromInsets = meloXDisplayCornerRadiusPxS(view)
+        if (fromInsets != null && fromInsets > 0f) return fromInsets to "insets"
+    }
+    // 源 2：框架 dimen（所有 API 可用）
+    return frameworkCornerRadiusPx()
+}
 
 @RequiresApi(Build.VERSION_CODES.S)
 private fun meloXDisplayCornerRadiusPxS(view: View): Float? {
@@ -44,23 +72,67 @@ private fun meloXDisplayCornerRadiusPxS(view: View): Float? {
 }
 
 /**
- * 取系统屏幕圆角的结果，**运行时原值 + 实际采用值都暴露出来**，
+ * 框架 dimen 取屏幕圆角（px）。`Resources.getSystem()` 反映 framework-res 及其 RRO 覆盖，
+ * 即 SystemUI 画圆角遮罩时读的同一批值。取 dimen 三者 + `config_roundedCornerRadiusArray`
+ * 的最大正值；一个都没定义返回 null。
+ */
+private fun frameworkCornerRadiusPx(): Pair<Float, String>? {
+    val res = Resources.getSystem()
+    var bestPx = 0
+    var bestLabel = ""
+    for ((name, label) in FRAMEWORK_CORNER_DIMENS) {
+        val id = runCatching { res.getIdentifier(name, "dimen", "android") }.getOrDefault(0)
+        if (id == 0) continue
+        val px = runCatching { res.getDimensionPixelSize(id) }.getOrDefault(0)
+        if (px > bestPx) {
+            bestPx = px
+            bestLabel = label
+        }
+    }
+    // 多显示器机型：`config_roundedCornerRadiusArray` 按 `config_displayUniqueIdArray` 索引
+    // （AOSP `RoundedCorners.loadRoundedCornerRadii` 同源）。拿不到 display unique id 时
+    // 取最大项 —— 内屏前台场景的保守近似（角半径跨显示器不会差出量级）。
+    val arrayId = runCatching {
+        res.getIdentifier("config_roundedCornerRadiusArray", "array", "android")
+    }.getOrDefault(0)
+    if (arrayId != 0) {
+        val maxPx = runCatching { res.getIntArray(arrayId).maxOrNull() ?: 0 }.getOrDefault(0)
+        if (maxPx > bestPx) {
+            bestPx = maxPx
+            bestLabel = "dimen:array"
+        }
+    }
+    return if (bestPx > 0) bestPx.toFloat() to bestLabel else null
+}
+
+/**
+ * 取系统屏幕圆角的结果，**运行时原值 + 实际采用值 + 来源**都暴露出来，
  * 供 debug 包在屏幕上打读数用（用户口径：「再次确认获取系统圆角」）。
  *
- * @param runtimePx `WindowInsets` 原始读数（null = 没读到 → 用兜底）
+ * @param runtimePx 运行时原始读数（null = 没读到 → 用兜底）
  * @param usedPx    最终渲染采用的值（px）
+ * @param source    来源标签：`insets` / `dimen:top|bottom|default|array` / `fallback` / `tablet`
  */
-internal data class MeloXDisplayCornerInfo(val runtimePx: Float?, val usedPx: Float)
+internal data class MeloXDisplayCornerInfo(
+    val runtimePx: Float?,
+    val usedPx: Float,
+    val source: String = "fallback",
+)
 
 /**
  * 取系统屏幕圆角（px），**轮询到拿到为止**。
  *
  * ⚠ 组合期读一次多半拿到 null（insets 还没派发）⇒ 会一直停在兜底值上，等于「根本没取到」
  *   （用户 2026-09-28 真机报障「你现在系统圆角都获取不到」就是这么来的）。
- *   这里最多试 20 次（每次间隔 50ms），拿到**落在合理区间**（屏宽的 8%~20%）的值才采用；
- *   超时/不合理则用 [MeloXPlayerRecedeCompatFallbackDp]（46dp，与 iQOO 15 的系统真值等值）。
+ *   这里最多试 [MELOX_CORNER_POLL_ATTEMPTS] 次（每次间隔 [MELOX_CORNER_POLL_DELAY_MS]），
+ *   任一来源拿到**落在物理合理区间**的值才采用；超时/不合理则用
+ *   [MeloXPlayerRecedeCompatFallbackDp]（46dp，与 iQOO 15 的系统真值等值）。
  *   **平板档（[MeloXWindowInfo.supportsPlayerTwoPane]）不走这套手机比例判据**，
  *   直接采用 [MeloXTabletDisplayCornerDp]，理由见该常量。
+ *
+ * ⚠ 合理性判据只做**物理边界**（0 < r ≤ 屏幕短边一半）。旧实现用「屏宽 8%~20%」的手机专属
+ *   比例带，会把合法真值误杀（Pixel ≈7.6%、异形/平板屏更低；显示大小缩放也会改屏宽）⇒
+ *   又掉回硬编码，是同类事故源，2026-10-16 一并拆除。
  *
  * 播放器页面（`MeloXApp` 的下沉背板）和外壳卡片（`MeloXIOSNowPlayingSharedHost`）
  * **必须用同一个值** —— 否则同一屏里两个圆角差一点点，肉眼就是「对不上」。
@@ -74,6 +146,8 @@ internal fun rememberMeloXDisplayCornerInfo(): MeloXDisplayCornerInfo {
     val tablet = rememberMeloXWindowInfo().supportsPlayerTwoPane
     val fallbackPx = with(density) { MeloXPlayerRecedeCompatFallbackDp.dp.toPx() }
     val tabletPx = with(density) { MeloXTabletDisplayCornerDp.dp.toPx() }
+    val widthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val heightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
     var info by remember(
         view,
         configuration.screenWidthDp,
@@ -81,35 +155,50 @@ internal fun rememberMeloXDisplayCornerInfo(): MeloXDisplayCornerInfo {
         tablet,
     ) {
         mutableStateOf(
-            MeloXDisplayCornerInfo(runtimePx = null, usedPx = if (tablet) tabletPx else fallbackPx),
+            MeloXDisplayCornerInfo(
+                runtimePx = null,
+                usedPx = if (tablet) tabletPx else fallbackPx,
+                source = if (tablet) "tablet" else "fallback",
+            ),
         )
     }
     LaunchedEffect(view, configuration.screenWidthDp, configuration.screenHeightDp, tablet) {
         if (tablet) {
             // 平板档：**不参与**手机比例判据（见 [MeloXTabletDisplayCornerDp]），
-            // 但仍把 WindowInsets 原值轮询出来，供 debug HUD 对照。
+            // 但仍把系统真值轮询出来，供 debug HUD 对照。
             var runtime: Float? = null
-            for (attempt in 0 until 20) {
-                runtime = meloXDisplayCornerRadiusPx(view)
-                if (runtime != null) break
-                delay(50L)
+            var source = "tablet"
+            for (attempt in 1..MELOX_CORNER_POLL_ATTEMPTS) {
+                val hit = meloXSystemCornerRadiusPx(view)
+                if (hit != null) {
+                    runtime = hit.first
+                    source = hit.second
+                    break
+                }
+                delay(MELOX_CORNER_POLL_DELAY_MS)
             }
-            info = MeloXDisplayCornerInfo(runtimePx = runtime, usedPx = tabletPx)
+            info = MeloXDisplayCornerInfo(runtimePx = runtime, usedPx = tabletPx, source = source)
             return@LaunchedEffect
         }
-        val widthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-        repeat(20) {
-            val runtime = meloXDisplayCornerRadiusPx(view)
-            if (runtime != null) {
-                info = if (runtime >= widthPx * 0.08f && runtime <= widthPx * 0.20f) {
-                    MeloXDisplayCornerInfo(runtimePx = runtime, usedPx = runtime)
+        repeat(MELOX_CORNER_POLL_ATTEMPTS) {
+            val hit = meloXSystemCornerRadiusPx(view)
+            if (hit != null) {
+                val radius = hit.first
+                val source = hit.second
+                // 物理边界校验：圆角不可能超过屏幕短边的一半（个别 ROM 会把别的量当 radius 报）。
+                val maxValid = minOf(widthPx, heightPx) * 0.5f
+                info = if (radius > 0.5f && radius <= maxValid) {
+                    MeloXDisplayCornerInfo(runtimePx = radius, usedPx = radius, source = source)
                 } else {
-                    // 读到了但落在不合理区间（个别 ROM 会把别的量当 radius 报）
-                    MeloXDisplayCornerInfo(runtimePx = runtime, usedPx = fallbackPx)
+                    MeloXDisplayCornerInfo(
+                        runtimePx = radius,
+                        usedPx = fallbackPx,
+                        source = "fallback",
+                    )
                 }
                 return@LaunchedEffect
             }
-            delay(50L)
+            delay(MELOX_CORNER_POLL_DELAY_MS)
         }
     }
     return info
@@ -132,6 +221,8 @@ internal const val MeloXPlayerRecedeCompatFallbackDp = 46f
  *   ⇒ **平板套着一个手机尺寸的圆角**（2026-10-07 用户报障：「对手机比例操纵的圆角」）。
  *   而平板自己的屏圆角在 dp 上本来就是**小**的：iPad 12.9" = 18pt / 1024pt 宽 = 1.8%，
  *   折算到 800dp 短边 ≈ 18dp。⇒ 平板档直接吃这个小圆角，不再走手机的比例判据。
+ *   （2026-10-16 注：比例判据已拆，但平板档**采用值**仍保持本常量 —— 那是刻意的设计决策，
+ *   见上；运行时真值会经 HUD 的 `runtime=`/`src=` 显示，不影响采用值。）
  *
  * ⚠ 只挂在 [com.lladlam.melox.ui.layout.MeloXWindowInfo.supportsPlayerTwoPane]
  *   （宽 ≥ 840dp 且高 ≥ 600dp）上 —— 平板**竖屏**仍是手机档，符合「竖屏不改」。

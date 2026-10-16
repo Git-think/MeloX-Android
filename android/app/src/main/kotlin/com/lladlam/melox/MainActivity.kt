@@ -3,11 +3,8 @@ package com.lladlam.melox
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
-import android.hardware.SensorManager
 import android.os.Bundle
 import android.view.KeyEvent
-import android.view.OrientationEventListener
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -56,54 +53,9 @@ class MainActivity : ComponentActivity() {
     private var clipboardScanJob: Job? = null
     private var handledRemoteConfigForegroundSession = -1L
 
-    // ⚠ 传感器提前升帧（2026-10-09）：onConfigurationChanged 触发时旋转动画已开始，
-    //   VRR 升帧赶不上动画开头几帧（录屏实测 frame 58-59 间隔 21.7/11.7ms，
-    //   后续才归正到 7-8ms）= 用户报的「一顿一顿」。用 OrientationEventListener
-    //   监听传感器角度变化（UI 延迟 ~50ms），比配置变更早 50-100ms 触发
-    //   markActive ⇒ 旋转动画全程 120Hz。
-    // ⚠ 不能在类字段初始化中创建（会引用 applicationContext，而 ContextWrapper
-    //   此时尚未完全构造 → NPE 崩溃 178 版重现）。改在 onCreate 里建。
-    private var orientationSensor: OrientationEventListener? = null
-
-    // ⚠ 可变刷新率**不再**在这里挂载：已由 `MeloXApplication` 注册的 `MeloXFrameRateHost`
-    //   统一接管全部 8 个 Activity（见该类注释）。此处若再建一个 controller，
-    //   两个实例会同时向同一窗口重复下发帧率请求。
-
-    // ⚠ 旋转升帧（2026-10-09）：旋转是传感器触发、无触摸事件，高刷窗口可能早已过期。
-    //   方向变化时手动 markActive()，让旋转动画全程高刷。否则「旋转飞入」会掉帧卡顿。
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        com.lladlam.melox.core.display.MeloXFrameRateHost.onConfigurationChanged(this)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // 传感器监听器在此处创建（不能在类字段初始化时建 —— ContextWrapper
-        // 尚未完全构造，applicationContext 返回 null ⇒ 178 版重现的 NPE 崩溃）。
-        orientationSensor = object : OrientationEventListener(
-            applicationContext, SensorManager.SENSOR_DELAY_UI
-        ) {
-            private var lastAngle = ORIENTATION_UNKNOWN
-            override fun onOrientationChanged(angle: Int) {
-                if (angle == ORIENTATION_UNKNOWN) {
-                    lastAngle = ORIENTATION_UNKNOWN
-                    return
-                }
-                val prev = lastAngle
-                lastAngle = angle
-                // 角度突变 >45°：手机正被旋转。UI 延迟事件可能拆成两次小突变，
-                // 阈值 45 既过滤手抖又能捕捉 90°/180° 的真实旋转。
-                if (prev != ORIENTATION_UNKNOWN && Math.abs(angle - prev) > 45) {
-                    com.lladlam.melox.core.display.MeloXFrameRateHost.onConfigurationChanged(
-                        this@MainActivity
-                    )
-                }
-            }
-        }
-        // ⚠ 不在此处禁系统旋转动画（2026-10-09）：JUMPCUT 确实去掉了「系统旋转 + App
-        //   orientTransition」双动画叠加，但代价是整个「旋转飞入」观感也一起没了。
-        //   卡顿的真凶不是动画叠加，而是旋转时无触摸事件 ⇒ 高刷窗口过期（见
-        //   MeloXFrameRateHost.onActivityConfigurationChanged 的 markActive）。
         val coldStart = savedInstanceState == null
         val returnFromBackground = coldStart &&
             System.currentTimeMillis() - MeloXAppVisibility.lastBackgroundedAtMs(this) <= RETURN_FROM_BACKGROUND_WINDOW_MS
@@ -222,10 +174,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 传感器可用性检查后启用。无重力/方向传感器设备（极少数车机/模拟器）
-        // enable 会抛 IllegalStateException，需先 try/catch 一下。不用 isDetectable()
-        // 是因为 Kotlin 对匿名 object 表达式上这个 Java is 前缀方法解析不稳（unresolved）。
-        orientationSensor?.let { runCatching { it.enable() } }
         val foregroundSession = MeloXAppVisibility.foregroundSessionId
         if (foregroundSession != handledRemoteConfigForegroundSession) {
             handledRemoteConfigForegroundSession = foregroundSession
@@ -274,8 +222,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        // 后台不再监听旋转传感器：传感器事件本身有能耗，后台监听只耗电不提效。
-        orientationSensor?.disable()
         super.onPause()
     }
 
@@ -286,7 +232,9 @@ class MainActivity : ComponentActivity() {
                 if (decorView.viewTreeObserver.isAlive) {
                     decorView.viewTreeObserver.removeOnPreDrawListener(this)
                 }
-                decorView.post { firstDraw.complete(Unit) }
+                decorView.post {
+                    firstDraw.complete(Unit)
+                }
                 return true
             }
         }

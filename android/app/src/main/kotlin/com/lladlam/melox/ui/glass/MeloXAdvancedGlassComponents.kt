@@ -45,8 +45,8 @@ fun MeloXGlassSlider(
 ) {
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(title, style = MeloXTypography.subheadline)
-            Text(valueLabel(value), style = MeloXTypography.subheadline, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f))
+            Text(title, style = MeloXTypography.subheadline.inheritAmbientFamily())
+            Text(valueLabel(value), style = MeloXTypography.subheadline.inheritAmbientFamily(), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f))
         }
         MeloXLiquidSlider(
             value = value,
@@ -71,7 +71,7 @@ fun MeloXGlassStepper(
         modifier = modifier.fillMaxWidth().heightIn(min = 52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, modifier = Modifier.weight(1f), style = MeloXTypography.body)
+        Text(title, modifier = Modifier.weight(1f), style = MeloXTypography.body.inheritAmbientFamily())
         Text(value.toString(), modifier = Modifier.width(38.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f))
         MeloXGlassIconButton(
             symbol = MeloXSymbol.Xmark,
@@ -157,7 +157,7 @@ fun MeloXGlassActionSheet(
     onDismiss: () -> Unit,
 ) {
     MeloXGlassSheet(visible = visible, onDismiss = onDismiss) {
-        Text(title, modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp), style = MeloXTypography.title2)
+        Text(title, modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp), style = MeloXTypography.title2.inheritAmbientFamily())
         actions.forEach { action ->
             Row(
                 Modifier
@@ -185,7 +185,7 @@ fun MeloXGlassAlert(
     onFieldValueChange: ((String) -> Unit)? = null,
 ) {
     MeloXGlassDialog(visible = visible, onDismiss = onDismiss) {
-        Text(title, style = MeloXTypography.title2, fontWeight = FontWeight.Bold)
+        Text(title, style = MeloXTypography.title2.inheritAmbientFamily(), fontWeight = FontWeight.Bold)
         Text(message, modifier = Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f))
         if (fieldValue != null && onFieldValueChange != null) {
             MeloXGlassTextField(fieldValue, onFieldValueChange, Modifier.fillMaxWidth().padding(top = 14.dp))

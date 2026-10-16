@@ -117,17 +117,32 @@ internal fun Modifier.meloXPageSlideGeometry(
  *   因此故意用普通字段而不是 `mutableStateOf`（在那里写状态是非法且会引入额外失效）。
  *   每个调用点各自 `remember` 一个实例，不存在跨图层串用。
  */
-private class MeloXSlideShapeCache {
+internal class MeloXSlideShapeCache {
     private var cachedRadius = Float.NaN
-    private var cachedScale = Float.NaN
+    private var cachedScaleX = Float.NaN
+    private var cachedScaleY = Float.NaN
     private var cachedShape: Shape? = null
 
-    fun of(radiusPx: Float, scale: Float): Shape {
+    fun of(radiusPx: Float, scale: Float): Shape = ofXY(radiusPx, scale, scale)
+
+    /**
+     * **分轴版**：页面退让层（`MeloXApp` 里 recede 的 `graphicsLayer`）挂的是
+     * **sx ≠ sy 的非等比缩放**（见那边的 `sx` / `syFull` 推导），进不了单轴入口。
+     *
+     * ⚠ 为什么这里必须也走缓存：同一个坑在两个调用点都存在 —— 早前只有推入/退回
+     *   这一条是被认真优化过的（`of` + [meloXQuantizedScale]），而播放页打开时
+     *   **外壳 morph 与后方页面退让是同时跑的**（两边的 master fraction 严格同拍），
+     *   漏掉的那一边照样每帧喂一个新 shape ⇒ 一边便宜一边贵，总成本并没降下来。
+     */
+    fun ofXY(radiusPx: Float, scaleX: Float, scaleY: Float): Shape {
         val hit = cachedShape
-        if (hit != null && cachedRadius == radiusPx && cachedScale == scale) return hit
-        return MeloSmoothCornerShape(radiusPx, scale, scale).also {
+        if (hit != null && cachedRadius == radiusPx && cachedScaleX == scaleX && cachedScaleY == scaleY) {
+            return hit
+        }
+        return MeloSmoothCornerShape(radiusPx, scaleX, scaleY).also {
             cachedRadius = radiusPx
-            cachedScale = scale
+            cachedScaleX = scaleX
+            cachedScaleY = scaleY
             cachedShape = it
         }
     }
@@ -146,7 +161,7 @@ private const val MeloXPageSlideScaleDrop = 0.08f
  *
  * 代价：可见半径误差 ≤ 0.85%（184px → ±1.6px），肉眼不可辨；观感与不吸附等价。
  */
-private fun meloXQuantizedScale(scale: Float): Float =
+internal fun meloXQuantizedScale(scale: Float): Float =
     if (!scale.isFinite()) 1f else (scale * 64f).roundToInt() / 64f
 
 /**
@@ -258,7 +273,7 @@ private const val MeloXPageRecedeParallax = 1f / 3f
  *
  * ### ⚠⚠ 「推入期间不要组合重内容」= 调用方的义务（2026-10-09，修播客页一顿一顿）
  * 本容器只负责把内容**推入**，管不了内容有多重。而推入期的目标帧率是 **120fps（8.3ms/帧）**
- * （见 `core/display/MeloXFrameRateController`）：子页只要在推入那几帧里组合自己的重脚手架，
+ * 子页只要在推入那几帧里组合自己的重脚手架，
  * 就会和滑动/下层退让抢 UI 线程，帧一顶过 16.7ms 就被肉眼读成「一顿一顿」。
  *
  * 已知的重脚手架（按代价排序）：
