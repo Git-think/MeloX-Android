@@ -1560,6 +1560,25 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
             grouped = true,
         )
     }
+    Spacer(Modifier.height(10.dp))
+    SettingsGlassGroup {
+        SettingsToggleRow(
+            context,
+            "隐藏歌单搜索栏",
+            "library_playlist_search_hidden",
+            false,
+            "开启后，固定搜索栏隐藏，并在顶部滑动拉出。关闭则恢复原始样式。",
+            grouped = true,
+        )
+        SettingsToggleRow(
+            context,
+            "歌单展示封面",
+            "library_playlist_show_artwork",
+            false,
+            "开启后，歌单内的歌曲展示微小封面而不是数字序号。关闭则全部展示数字。",
+            grouped = true,
+        )
+    }
 }
 
 @Composable

@@ -15,6 +15,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -51,6 +52,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -95,6 +97,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import coil3.compose.AsyncImage
 import com.lladlam.melox.R
 import com.lladlam.melox.core.account.NeteaseSessionStore
@@ -2217,6 +2232,99 @@ private fun MeloXPlaylistDetailScreen(
         }
     }
 
+    // ==========================================
+    // 1. 下拉懸停搜索欄：核心物理阻力與動畫狀態
+    // ==========================================
+    val density = LocalDensity.current
+    val searchBarMaxHeightPx = with(density) { 64.dp.toPx() }
+    val searchOffset = remember { Animatable(0f) }
+
+    val searchScrollConnection = remember(searchBarMaxHeightPx) {
+        object : NestedScrollConnection {
+            // 新增：追蹤手勢狀態，實現「硬停頓 (Hard Stop)」
+            private var lastEventTime = 0L
+            private var hasScrolledListInGesture = false
+
+            private fun checkResetGesture() {
+                val now = System.currentTimeMillis()
+                // 如果距離上次接收到滑動事件超過 200 毫秒 (手指鬆開重新按下)，重置手勢狀態
+                if (now - lastEventTime > 200L) {
+                    hasScrolledListInGesture = false
+                }
+                lastEventTime = now
+            }
+
+            override fun onPreScroll(
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                checkResetGesture()
+
+                // 1. 手指上滑時：絕對優先收起搜索欄
+                if (available.y < 0 && searchOffset.value > 0f) {
+                    val currentOffset = searchOffset.value
+                    val newVal = currentOffset + available.y // available.y 是負數
+
+                    if (newVal >= 0f) {
+                        scope.launch { searchOffset.snapTo(newVal) }
+                        return Offset(0f, available.y)
+                    } else {
+                        scope.launch { searchOffset.snapTo(0f) }
+                        return Offset(0f, -currentOffset)
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                checkResetGesture()
+
+                // 核心攔截邏輯：只要這個手勢曾經讓列表滾動過 (consumed.y != 0)，就立刻標記
+                if (consumed.y != 0f) {
+                    hasScrolledListInGesture = true
+                }
+
+                // 2. 下拉拉出搜尋欄：必須滿足「非慣性滑動」且「本次手勢完全沒有滾動過列表」
+                if (available.y > 0 && !source.toString().contains("Fling")) {
+                    if (!hasScrolledListInGesture) {
+                        val currentOffset = searchOffset.value
+
+                        if (currentOffset < searchBarMaxHeightPx) {
+                            val effectiveDrag = available.y * 0.5f
+                            val newVal = currentOffset + effectiveDrag
+
+                            if (newVal <= searchBarMaxHeightPx) {
+                                scope.launch { searchOffset.snapTo(newVal) }
+                                return Offset(0f, available.y)
+                            } else {
+                                scope.launch { searchOffset.snapTo(searchBarMaxHeightPx) }
+                                val consumedActualDrag = (searchBarMaxHeightPx - currentOffset) / 0.5f
+                                return Offset(0f, consumedActualDrag)
+                            }
+                        }
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (searchOffset.value > 0f && searchOffset.value < searchBarMaxHeightPx) {
+                    if (searchOffset.value > searchBarMaxHeightPx / 2 || available.y > 500f) {
+                        searchOffset.animateTo(searchBarMaxHeightPx, tween(250))
+                    } else {
+                        searchOffset.animateTo(0f, tween(250))
+                    }
+                    return available
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
     // Intercept the system / predictive back gesture so leaving the detail
     // returns to the previous screen instead of falling through to the OS
     // (which would drop the user to the launcher). Modal overlays declared
@@ -2252,57 +2360,127 @@ private fun MeloXPlaylistDetailScreen(
                 ),
         )
 
-        Column(
+        // 【核心修改】：替换原本割裂的 Column，改用 Box 叠加布局，实现真正的全屏边缘沉浸感 (Edge-to-Edge)
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 // ⚠ 用**稳定**的状态栏高度，不用 `statusBarsPadding()`：后者吃「可见值」，
                 //   沉浸 `hide()` 时归 0、退出 `show()` 时弹回真实高度 ⇒ 页面跟着上下跳。
                 //   改吃稳定值 ⇒ 位置恒定、不再跳。
-                //   （innerPadding 实测恒为 0，故此处不会与其重复叠加 —— 见
-                //    `rememberMeloXStableStatusBarHeight` 的注释。）
-                .padding(top = rememberMeloXStableStatusBarHeight()),
+                .padding(top = rememberMeloXStableStatusBarHeight())
+                .let {
+                    if (MeloXSettingsRuntime.playlistSearchBarHidden) it.nestedScroll(searchScrollConnection)
+                    else it
+                },
         ) {
-            MeloXPlaylistToolbar(
-                foreground = foreground,
-                onBack = onBack,
-                onShare = {
-                    if (providerAlbum != null) {
-                        shareProviderAlbum(context, providerAlbum)
-                    } else if (isAlbum) {
-                        MeloXNeteaseResourceShareActivity.launch(
-                            context,
-                            "album",
-                            displayed.id,
-                            displayed.name,
-                            "https://music.163.com/album?id=${displayed.id}",
-                        )
-                    } else {
-                        sharePlaylistFromDetail(context, displayed)
-                    }
-                },
-                showMore = (!isAlbum && !isProviderCollection) || (providerSync != null && !isAlbum),
-                onMore = {
-                    if (providerSync != null) showProviderRename = true else showPlaylistActions = true
-                },
-            )
-            MeloXPlaylistSearchField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                foreground = foreground,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-            )
+            // 1. 顶部悬浮层：利用 zIndex(1f) 确保 Toolbar 和搜索栏永远盖在列表最上方
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+            ) {
+                MeloXPlaylistToolbar(
+                    foreground = foreground,
+                    onBack = onBack,
+                    onShare = {
+                        if (providerAlbum != null) {
+                            shareProviderAlbum(context, providerAlbum)
+                        } else if (isAlbum) {
+                            MeloXNeteaseResourceShareActivity.launch(
+                                context,
+                                "album",
+                                displayed.id,
+                                displayed.name,
+                                "https://music.163.com/album?id=${displayed.id}",
+                            )
+                        } else {
+                            sharePlaylistFromDetail(context, displayed)
+                        }
+                    },
+                    showMore = (!isAlbum && !isProviderCollection) || (providerSync != null && !isAlbum),
+                    onMore = {
+                        if (providerSync != null) showProviderRename = true else showPlaylistActions = true
+                    },
+                )
 
+                if (MeloXSettingsRuntime.playlistSearchBarHidden) {
+                    // 【隐藏式搜索栏】：利用动态 Height 实现完全折叠与展开
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { searchOffset.value.toDp() })
+                            .clipToBounds(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        MeloXPlaylistSearchField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            foreground = foreground,
+                            modifier = Modifier
+                                .padding(start = 18.dp, end = 18.dp, bottom = 10.dp)
+                                .height(44.dp)
+                        )
+                    }
+                } else {
+                    MeloXPlaylistSearchField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        foreground = foreground,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                    )
+                }
+            } // 悬浮层 Column 结束
+
+            // 2. 原始的歌曲列表：利用 zIndex(0f) 放在底层，满铺全屏幕，滑动时内容自然穿透到悬浮层底部
             LazyVerticalGrid(
                 columns = GridCells.Fixed(if (detailWindow.supportsTwoPane) 2 else 1),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(0f)
+                    .let {
+                        if (MeloXSettingsRuntime.playlistSearchBarHidden) {
+                            it.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                              .drawWithContent {
+                                  drawContent()
+                                  val topFadePx = 58.dp.toPx() + (64.dp.toPx() - searchOffset.value)
+                                  val fadeFraction = (topFadePx / size.height).coerceIn(0f, 1f)
+                                  drawRect(
+                                      brush = Brush.verticalGradient(
+                                          0.0f to Color.Transparent,
+                                          fadeFraction to Color.Black,
+                                          1.0f to Color.Black
+                                      ),
+                                      blendMode = BlendMode.DstIn
+                                  )
+                              }
+                              .layout { measurable, constraints ->
+                                  val searchBarMaxPx = 64.dp.toPx()
+                                  val extraHeight = searchBarMaxPx.roundToInt()
+                                  val collapseAmount = (searchBarMaxPx - searchOffset.value).roundToInt()
+                                  val placeable = measurable.measure(
+                                      constraints.copy(
+                                          minHeight = constraints.minHeight + extraHeight,
+                                          maxHeight = constraints.maxHeight + extraHeight
+                                      )
+                                  )
+                                  layout(placeable.width, placeable.height - extraHeight) {
+                                      placeable.place(0, -collapseAmount)
+                                  }
+                              }
+                        } else {
+                            // Classic Mode: Restrict the drawing bounds of the list to be exactly below the header.
+                            it.padding(top = 122.dp)
+                        }
+                    },
                 state = rememberLazyGridState(),
                 contentPadding = PaddingValues(
                     start = if (detailWindow.supportsTwoPane) detailWindow.gutter else 0.dp,
                     end = if (detailWindow.supportsTwoPane) detailWindow.gutter else 0.dp,
-                    bottom = MeloXBottomContentClearance,
+                    top = if (MeloXSettingsRuntime.playlistSearchBarHidden) 122.dp else 0.dp,
+                    bottom = MeloXBottomContentClearance + if (MeloXSettingsRuntime.playlistSearchBarHidden) 64.dp else 0.dp,
                 ),
             ) {
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     MeloXStandardPlaylistHero(
                         playlist = displayed,
                         tracks = filteredSongs,
@@ -2453,6 +2631,7 @@ private fun MeloXPlaylistDetailScreen(
                             index = index,
                             foreground = foreground,
                             showMore = providerSync != null || !isProviderCollection,
+                            isAlbum = isAlbum,
                             onClick = {
                                 PlaybackCommands.playQueue(
                                     context = context,
@@ -2959,6 +3138,7 @@ private fun MeloXPlaylistTrackRow(
     index: Int,
     foreground: Color,
     showMore: Boolean = true,
+    isAlbum: Boolean = false,
     onClick: () -> Unit,
     onMore: () -> Unit,
     onPlayNext: () -> Unit,
@@ -2980,13 +3160,11 @@ private fun MeloXPlaylistTrackRow(
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp, top = 11.dp, bottom = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            // 【核心逻辑分流】
+            if (isAlbum || !MeloXSettingsRuntime.playlistShowArtwork) {
+                // ➔ 分支 1：如果是专辑或用户关闭了歌单封面，完美还原以前的“大数字 + 歌曲名”排版
                 Text(
                     text = "${index + 1}",
                     modifier = Modifier.width(40.dp),
@@ -3004,6 +3182,38 @@ private fun MeloXPlaylistTrackRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+            } else {
+                // ➔ 分支 2：如果是歌单，采用“封面 + 歌名/歌手”的现代排版
+                AsyncImage(
+                    // 【性能救星】：套用 optimized160Artwork，强制要求服务器只给 5KB 的极小缩略图！
+                    model = optimized160Artwork(song.artworkUrl),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = song.name,
+                        color = foreground,
+                        fontSize = 17.sp,
+                        lineHeight = 22.sp,
+                        maxLines = 1, // 性能优化：强制单行
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = song.artists,
+                        color = foreground.copy(alpha = 0.48f),
+                        fontSize = 13.sp,
+                        lineHeight = 16.sp,
+                        maxLines = 1, // 性能优化：强制单行
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -3012,7 +3222,7 @@ private fun MeloXPlaylistTrackRow(
 @Composable
 private fun MeloXGlassCircleButton(
     foreground: Color,
-    size: androidx.compose.ui.unit.Dp,
+    size: Dp,
     enabled: Boolean = true,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
