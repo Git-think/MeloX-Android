@@ -158,7 +158,7 @@ internal object MeloXSprings {
  *
  * ⚠ **纵向比例由横向内缩反推**（不写死 PageScaleY）：
  *   `sy = 1 − (1 − PageScaleX) · 屏宽 / 屏高` ⇒ 可见内缩在 x/y 上相等
- *   （360×792dp：横向 19.8dp / 纵向 19.8dp），顺带解掉「上下空隙天生是左右 2.2 倍」。
+ *   （360×792dp：横向 30.6dp / 纵向 30.6dp），顺带解掉「上下空隙天生是左右 2.2 倍」。
  *
  * ⚠ 同步：缩放**不套任何 smoothStep 窗口**（[ScaleStart]=0 / [ScaleEnd]=1）——
  *   它与外壳 morph 是同一条 `meloXPlayerRecedeSpec()`（打开 iOS present / 关闭
@@ -168,11 +168,33 @@ internal object MeloXSprings {
  *   sharedBounds 源，祖先 graphicsLayer 一缩，morph 几何就和目标对不上。
  */
 internal object MeloXPlayerRecede {
-    /** 横向缩小目标比例 ⇒ 单边内缩 `(1−0.89)·360/2 = 19.8dp`。 */
-    const val PageScaleX = 0.89f
+    /** 横向缩小目标比例 ⇒ 单边内缩 `(1−0.83)·360/2 = 30.6dp`。 */
+    const val PageScaleX = 0.83f
 
-    /** 额外下沉位移（dp）。取 0 保证上下内缩与左右一致（黑边等宽）。 */
-    const val PageLiftDp = 0f
+    /**
+     * 背景页**向下沉降**位移（dp，正值 = 向下）。Apple Music 口径：背景除了同心
+     * 内缩，还会整体下滑 —— aplus.rs 对 iOS card deck 的补充是「与卡片严格同步、
+     * 只 dim 不 blur、spring 几乎无过冲」。
+     *
+     * 数值沿革（公开渠道无 AM 该位移的实测值，按真机反馈逐档调）：
+     * · 13f（首版）：15pt@414pt 深度单位折算 360dp —— 太保守，用户报「没 iOS AM 感觉」。
+     * · 25f：约 2 倍。f=1 时上下黑边 5.6 / 55.6dp，背景下半截滑进底栏
+     *   （chrome 不随页面缩放/沉降， AM 同款「页面沉到 tab 栏底下」的物理感）。
+     * · **30f（现状）**：用户「再激进」口径。f=1 时上黑边仅剩 0.6dp、下黑边 60.6dp
+     *   —— 背景上缘几乎贴住屏幕顶，整页肉眼呈「被卡片整个压下去」。
+     * 觉得深/浅改这里即可（单个常量，横纵缩放与它互不依赖）。
+     *
+     * 同步机制（"严格同步"的结构保证，不是"保持相等"）：
+     * `MeloXApp` 的 recede `graphicsLayer` 里，缩放与 `translationY` 读的是
+     * **同一个** `recedeFraction()`（master fraction，与播放器外壳 morph 共用
+     * `meloXPlayerRecedeSpec` 同一条曲线），且在同一個 lambda、同一帧、同一
+     * RenderNode 里求值 ⇒ 背景的缩/沉与卡片推进**天然同拍**，不存在两条 spec
+     * 错拍的可能（本对象上方历史注释里被废弃的两条路正是错在这）。
+     *
+     * 副作用（刻意为之）：f=1 时上下黑边不再等宽。AM 的观感正是「背景被卡片
+     * 压下去」，等宽反而不是那个味道。
+     */
+    const val PageSinkDp = 30f
 
     /** 压暗 alpha（只罩被缩小的页面本身）。 */
     const val PageScrimAlpha = 0.24f

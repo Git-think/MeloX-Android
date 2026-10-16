@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -77,7 +78,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.core.content.res.ResourcesCompat
+import com.lladlam.melox.ui.glass.MeloSfTypefaceCache
 import com.lladlam.melox.R
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -98,6 +99,7 @@ import com.lladlam.melox.playback.PlaybackTrackIdentity
 import com.lladlam.melox.playback.CrossProviderPlaybackRuntime
 import com.lladlam.melox.playback.ProviderPlaybackQualityRuntime
 import com.lladlam.melox.ui.glass.meloXLiquidButton
+import com.lladlam.melox.ui.glass.MeloXPlaybackModeGlyph
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
 import com.lladlam.melox.platform.MeloXVolumeKeyBridge
@@ -1260,10 +1262,13 @@ internal fun ScenePageSelector(
                 page != MeloXNowPlayingPage.Queue &&
                 (state.shuffleEnabled || state.repeatMode != 0)
             ) {
-                val badgeSize = if (compact) 18.dp else 20.dp
+                // 基座直径较原值缩 5%（20→19dp / 18→17.1dp），并整体朝右上挪 1.5dp，
+                // 让徽标与列表按钮本体的图标/触控气泡脱开、不再相贴（2026-10-15 用户要求）。
+                val badgeSize = (if (compact) 18.dp else 20.dp) * 0.95f
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
+                        .offset(x = 1.5.dp, y = (-1.5).dp)
                         .size(badgeSize)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.42f)),
@@ -1272,7 +1277,8 @@ internal fun ScenePageSelector(
                     ScenePlaybackModeBadge(
                         shuffle = state.shuffleEnabled,
                         repeatMode = state.repeatMode,
-                        modifier = Modifier.size(badgeSize * 0.72f),
+                        size = badgeSize * 0.72f,
+                        modifier = Modifier,
                         color = Color.White.copy(alpha = 0.92f),
                     )
                 }
@@ -1281,97 +1287,29 @@ internal fun ScenePageSelector(
     }
 }
 
+
 /**
- * 当前歌单播放形式的徽标图形：随机播放 = 交叉箭头；循环 = 带箭头的闭环
- * （单曲循环在环心叠一个「1」）。全部内置矢量，随 [color] 着色。
+ * 当前歌单播放形式的徽标图形：随机 = 交叉箭头；循环 = 带箭头的开环；
+ * 单曲循环 = 同一环 + 右上角的「1」。
+ *
+ * 字形来源统一在 [com.lladlam.melox.ui.glass.MeloXPlaybackModeGlyph]（1:1 复刻
+ * SF Symbols 真实轮廓，实现见 `ui/glass/MeloXSymbol.kt`）—— 与队列面板顶部模式开关
+ * 里的「列表循环 / 单曲循环」图标共用同一份几何（用户 2026-10-15 要求两处「同款」）。
  */
 @Composable
 private fun ScenePlaybackModeBadge(
     shuffle: Boolean,
     repeatMode: Int,
+    size: Dp,
     modifier: Modifier,
     color: Color,
 ) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val min = size.minDimension
-        val stroke = (min * 0.13f).coerceAtLeast(1.1f)
-
-        fun arrowHead(tip: Offset, dir: Offset) {
-            val head = min * 0.24f
-            val nx = -dir.y
-            val ny = dir.x
-            val back = Offset(tip.x - dir.x * head, tip.y - dir.y * head)
-            drawLine(
-                color = color,
-                start = back,
-                end = Offset(back.x + nx * head * 0.8f, back.y + ny * head * 0.8f),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = back,
-                end = Offset(back.x - nx * head * 0.8f, back.y - ny * head * 0.8f),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(back.x + nx * head * 0.8f, back.y + ny * head * 0.8f),
-                end = tip,
-                strokeWidth = stroke,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(back.x - nx * head * 0.8f, back.y - ny * head * 0.8f),
-                end = tip,
-                strokeWidth = stroke,
-                cap = StrokeCap.Round,
-            )
-        }
-
-        if (shuffle) {
-            // 两条交叉弧线，右上端各带箭头。
-            val p1 = Path().apply {
-                moveTo(w * 0.06f, h * 0.26f)
-                cubicTo(w * 0.42f, h * 0.26f, w * 0.58f, h * 0.74f, w * 0.90f, h * 0.74f)
-            }
-            val p2 = Path().apply {
-                moveTo(w * 0.06f, h * 0.74f)
-                cubicTo(w * 0.42f, h * 0.74f, w * 0.58f, h * 0.26f, w * 0.90f, h * 0.26f)
-            }
-            drawPath(p1, color, style = Stroke(width = stroke, cap = StrokeCap.Round))
-            drawPath(p2, color, style = Stroke(width = stroke, cap = StrokeCap.Round))
-            arrowHead(Offset(w * 0.96f, h * 0.74f), Offset(1f, 0f))
-            arrowHead(Offset(w * 0.96f, h * 0.26f), Offset(1f, 0f))
-        } else {
-            val cx = w * 0.5f
-            val cy = h * 0.5f
-            val r = min * 0.36f
-            drawArc(
-                color = color,
-                startAngle = -60f,
-                sweepAngle = 300f,
-                useCenter = false,
-                topLeft = Offset(cx - r, cy - r),
-                size = Size(2f * r, 2f * r),
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-            arrowHead(Offset(cx + r * 0.5f, cy - r * 0.86f), Offset(0.86f, -0.5f))
-            if (repeatMode == 1) {
-                drawLine(
-                    color = color,
-                    start = Offset(cx, cy - r * 0.34f),
-                    end = Offset(cx, cy + r * 0.34f),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-            }
-        }
+    val symbol = when {
+        shuffle -> MeloXSymbol.Shuffle
+        repeatMode == 1 -> MeloXSymbol.RepeatOne
+        else -> MeloXSymbol.Repeat
     }
+    MeloXPlaybackModeGlyph(symbol = symbol, size = size, modifier = modifier, color = color)
 }
 
 private fun showSystemAudioOutputSwitcher(context: Context) {
@@ -1462,9 +1400,9 @@ private fun ScenePageButton(
         val context = LocalContext.current
         val density = LocalDensity.current
         val lyricsHolePath = remember(context, density, glyphSize, discSize) {
-            val tf = ResourcesCompat.getFont(context, R.font.sf_pro_subset)?.let {
-                android.graphics.Typeface.create(it, android.graphics.Typeface.NORMAL)
-            }
+            // 2026-10-14 卡顿修复：改走进程级缓存（MeloSfTypefaceCache），
+            // 播放页展开首帧不再重复同步加载 sf_pro_subset。
+            val tf = MeloSfTypefaceCache.obtain(context, android.graphics.Typeface.NORMAL)
             if (tf == null) {
                 null
             } else {

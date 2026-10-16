@@ -131,6 +131,15 @@ internal fun MeloXIOSNowPlayingScene(
     onLyricsInterfaceHiddenChange: (Boolean) -> Unit = {},
     grabberDragModifier: Modifier = Modifier,
     lyricsActive: Boolean = true,
+    // ★★ 2026-10-15（打开播放页流畅度）：两棵**常驻重层**（歌词 LazyColumn / 队列列表）是否可以
+    //   参与组合。由 `MeloXIOSNowPlayingSharedHost` 在展开动画**落定后**置真（单向 latch，
+    //   原因见那里的长注释）。默认 `true` = 逐像素回退到旧行为（Classic 外壳等其它调用点不受影响）。
+    //
+    //   为什么可以延后：封面页（打开播放页时的初始页）这两层的 `alpha` 恒 0 ⇒ 一个像素都看不见，
+    //   但 `graphicsLayer{alpha=0}` 并不会让 Compose 跳过子树，它们照常组合/测量/布局/绘制。
+    //   延后 ⇒ 「打开」这条时间线上不再为看不见的内容付电；落定后立刻组合 ⇒ 之后滑到歌词页
+    //   时早已就绪，**不会**把卡顿转移到切页。
+    residentLayersReady: Boolean = true,
     orientTransition: Transition<Boolean>,
     // ★ 平板双栏「玩家卡片居中」进度 0→1（0 = 左右分栏，1 = 左列滑到屏幕正中）。
     //   ⚠ 由 `MeloXIOSNowPlayingSharedHost` **单一计算后透传**（那里是唯一时钟），本层只消费：
@@ -160,6 +169,10 @@ internal fun MeloXIOSNowPlayingScene(
     val artworkVisible = page == MeloXNowPlayingPage.Artwork
     val lyricsVisible = page == MeloXNowPlayingPage.Lyrics
     val queueVisible = page == MeloXNowPlayingPage.Queue
+    // ★ 常驻重层（歌词 / 队列）本次组合是否参与：见 [residentLayersReady] 形参的说明。
+    //   旁路：**当前页不是封面页**时立刻组合 —— 冷启动直接进歌词页 / 程序化切页等情形
+    //   本来就需要它们在场，绝不能延后（那是可视回归，不是优化）。
+    val showResidentLayers = residentLayersReady || !artworkVisible
     var showsLyricsControls by remember(state.mediaId) { mutableStateOf(true) }
     var lyricsControlsActivityGeneration by remember(state.mediaId) { mutableIntStateOf(0) }
 
@@ -298,78 +311,86 @@ internal fun MeloXIOSNowPlayingScene(
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(sharedTransitionScope.npMorphElement("np-lyrics", avScope))
-                    .zIndex(if (lyricsVisible) 2f else 0f)
-                    .graphicsLayer {
-                        alpha = lyricsAlpha
-                        translationY = lyricsOffset.toPx()
-                        scaleX = lyricsScale
-                        scaleY = lyricsScale
-                    }
-                    .padding(top = 88.dp),
-            ) {
-                // 竖屏歌词底部渐隐的**归零点**：随底部控件条的显隐在「控件条顶沿(279dp) ↔
-                // 视口底(0)」之间过渡。控件条显示时上移以防白色歌词从 8% 黑模糊底板渗出；
-                // 控件条自动隐藏（沉浸）时归零，把整块空间还给歌词。tween 平滑避免跳变。
-                val lyricsFadeTerminal by animateDpAsState(
-                    targetValue = if (showsLyricsControls) MeloXNowPlayingControlsHeight.dp else 0.dp,
-                    animationSpec = tween(durationMillis = 220),
-                    label = "portraitLyricsFadeTerminal",
-                )
-                MeloXIOSLyricsPanel(
-                    state = state,
-                    modifier = Modifier.fillMaxSize(),
-                    isInterfaceHidden = !showsLyricsControls,
-                    onInterfaceInteraction = { setLyricsControlsVisible(true) },
-                    onInterfaceVisibilityChange = { setLyricsControlsVisible(it) },
-                    active = lyricsActive,
-                    // ★ 底部渐隐（同横屏的 Apple container edge fade，取代"靠遮挡"）。
-                    //   竖屏歌词面板铺满到 Column 底、**没有底部让位**，那一截由底部控件条
-                    //   盖住；但控件条只有 `meloXBackdropBlur`（`Black 8%` + 24dp 模糊），
-                    //   白色高亮歌词会透出（真机截图：进度条一带能看到下层 `(4665,777)`
-                    //   虚影、三控件下方还有整行）——即用户报的「本该被下半操作区遮挡的
-                    //   歌词出现了」，转屏后遮挡层重建的那几帧尤其明显。
-                    //   ⇒ 归零点抬到控件条**顶沿**（两侧都按屏幕底量，故正好 = 控件条高），
-                    //   控件条区域内歌词恒透明 ⇒ 不再依赖那层模糊底板去挡。
-                    //   ⚠⚠ 但控件条 3 秒无操作会**自动隐藏**（沉浸模式）。若归零点恒钉在
-                    //   顶沿，隐藏后下方 279dp（占视口 ~40%）就成了"既没控件、也没歌词"的
-                    //   空白（用户报的「控件隐藏了，下面的歌词不出来，白白浪费下面的空间」）。
-                    //   ⇒ 归零点**跟随控件条显隐**：显示 → 顶沿（防渗出）；隐藏 → 0（把空间
-                    //   还给歌词）。用 tween 平滑，避免控件条淡出瞬间歌词"跳"出来。
-                    //   `edgeBlurMax = 0.dp`：竖屏只要渐隐、不要边缘模糊。
-                    edgeFadeBottom = MeloXPortraitLyricsFadeBottom,
-                    edgeFadeBottomTerminal = lyricsFadeTerminal,
-                    edgeBlurMax = 0.dp,
-                )
+            // ★ 延后组合（`showResidentLayers`）：封面页展开动画期间这层恒不可见（alpha=0），
+            //   **Box / npMorphElement 节点本身保留** —— 空 Box 不绘制、也不占测量成本，
+            //   共享元素配对关系（与迷你栏、与队列页）都不受影响；被推后的只有那棵 LazyColumn。
+            if (showResidentLayers) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(sharedTransitionScope.npMorphElement("np-lyrics", avScope))
+                        .zIndex(if (lyricsVisible) 2f else 0f)
+                        .graphicsLayer {
+                            alpha = lyricsAlpha
+                            translationY = lyricsOffset.toPx()
+                            scaleX = lyricsScale
+                            scaleY = lyricsScale
+                        }
+                        .padding(top = 88.dp),
+                ) {
+                    // 竖屏歌词底部渐隐的**归零点**：随底部控件条的显隐在「控件条顶沿(279dp) ↔
+                    // 视口底(0)」之间过渡。控件条显示时上移以防白色歌词从 8% 黑模糊底板渗出；
+                    // 控件条自动隐藏（沉浸）时归零，把整块空间还给歌词。tween 平滑避免跳变。
+                    val lyricsFadeTerminal by animateDpAsState(
+                        targetValue = if (showsLyricsControls) MeloXNowPlayingControlsHeight.dp else 0.dp,
+                        animationSpec = tween(durationMillis = 220),
+                        label = "portraitLyricsFadeTerminal",
+                    )
+                    MeloXIOSLyricsPanel(
+                        state = state,
+                        modifier = Modifier.fillMaxSize(),
+                        isInterfaceHidden = !showsLyricsControls,
+                        onInterfaceInteraction = { setLyricsControlsVisible(true) },
+                        onInterfaceVisibilityChange = { setLyricsControlsVisible(it) },
+                        active = lyricsActive,
+                        // ★ 底部渐隐（同横屏的 Apple container edge fade，取代"靠遮挡"）。
+                        //   竖屏歌词面板铺满到 Column 底、**没有底部让位**，那一截由底部控件条
+                        //   盖住；但控件条只有 `meloXBackdropBlur`（`Black 8%` + 24dp 模糊），
+                        //   白色高亮歌词会透出（真机截图：进度条一带能看到下层 `(4665,777)`
+                        //   虚影、三控件下方还有整行）——即用户报的「本该被下半操作区遮挡的
+                        //   歌词出现了」，转屏后遮挡层重建的那几帧尤其明显。
+                        //   ⇒ 归零点抬到控件条**顶沿**（两侧都按屏幕底量，故正好 = 控件条高），
+                        //   控件条区域内歌词恒透明 ⇒ 不再依赖那层模糊底板去挡。
+                        //   ⚠⚠ 但控件条 3 秒无操作会**自动隐藏**（沉浸模式）。若归零点恒钉在
+                        //   顶沿，隐藏后下方 279dp（占视口 ~40%）就成了"既没控件、也没歌词"的
+                        //   空白（用户报的「控件隐藏了，下面的歌词不出来，白白浪费下面的空间」）。
+                        //   ⇒ 归零点**跟随控件条显隐**：显示 → 顶沿（防渗出）；隐藏 → 0（把空间
+                        //   还给歌词）。用 tween 平滑，避免控件条淡出瞬间歌词"跳"出来。
+                        //   `edgeBlurMax = 0.dp`：竖屏只要渐隐、不要边缘模糊。
+                        edgeFadeBottom = MeloXPortraitLyricsFadeBottom,
+                        edgeFadeBottomTerminal = lyricsFadeTerminal,
+                        edgeBlurMax = 0.dp,
+                    )
+                }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(sharedTransitionScope.npMorphElement("np-queue", avScope))
-                    .zIndex(if (queueVisible) 2f else 0f)
-                    .graphicsLayer {
-                        alpha = queueAlpha
-                        translationY = queueOffset.toPx()
-                        scaleX = queueScale
-                        scaleY = queueScale
-                    }
-                    // Queue rows end above the persistent playback controls;
-                    // none of the list is hidden beneath the blurred control zone.
-                    .padding(
-                        top = 80.dp,
-                        bottom = MeloXNowPlayingControlsHeight.dp,
-                    ),
-            ) {
-                MeloXQueuePanel(
-                    state = state,
-                    modifier = Modifier.fillMaxSize(),
-                    showSongHeader = false,
-                    interactive = queueVisible,
-                )
+            // ★ 同上（`showResidentLayers`）：队列列表同一处理。
+            if (showResidentLayers) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(sharedTransitionScope.npMorphElement("np-queue", avScope))
+                        .zIndex(if (queueVisible) 2f else 0f)
+                        .graphicsLayer {
+                            alpha = queueAlpha
+                            translationY = queueOffset.toPx()
+                            scaleX = queueScale
+                            scaleY = queueScale
+                        }
+                        // 队列行止于常驻播放控制区上方；
+                        // 列表不会有任何部分被模糊控制区遮住。
+                        .padding(
+                            top = 80.dp,
+                            bottom = MeloXNowPlayingControlsHeight.dp,
+                        ),
+                ) {
+                    MeloXQueuePanel(
+                        state = state,
+                        modifier = Modifier.fillMaxSize(),
+                        showSongHeader = false,
+                        interactive = queueVisible,
+                    )
+                }
             }
 
             val songHeaderShape = RoundedCornerShape(20.dp)
