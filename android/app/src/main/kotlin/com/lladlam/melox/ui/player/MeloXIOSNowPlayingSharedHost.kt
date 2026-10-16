@@ -15,6 +15,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -55,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -419,7 +421,6 @@ fun MeloXIOSNowPlayingSharedHost(
     // ★ 关闭尾段「下沉 → 回弹」由**共享元素 bounds 几何**提供（见
     //   `meloXPlayerSharedBoundsTransform`）：host 侧与迷你栏侧**必须用同一个
     //   `sinkPeakPx`**，两个 overlay 才会沉同样的量、封面不错位。
-    val sinkPeakPx = with(LocalDensity.current) { MeloXPlayerSinkPeakDp.dp.toPx() }
     // 关闭方向判定（本次推进**确定**走向收起）。外壳 / 封面 / 迷你栏三处必须逐字同义。
     // ⚠⚠⚠ 2026-10-06：判据**只认 `closingIntent`**，不再用
     //   `transition.targetState == PostExit` 兜底 —— 手势**拖拽**期间
@@ -432,18 +433,13 @@ fun MeloXIOSNowPlayingSharedHost(
     //   intent 打开=false / onSeekCollapse=false / onSettleCollapse=collapse）。
     // ⚠ 方向以 **lambda** 传入、`remember` 的 key **不含方向**（见 `meloXPlayerSharedBoundsTransform`
     //   的说明）：否则手势越阈值时实例被重建、回弹丢失。
-    val isHostExiting = closingIntent
-    val hostExitingState = rememberUpdatedState(isHostExiting)
-    val sinkBoundsTransform = remember(sinkPeakPx) {
-        meloXPlayerSharedBoundsTransform(sinkPeakPx) { hostExitingState.value }
-    }
     val sharedShellModifier = with(sharedTransitionScope) {
         Modifier.sharedBounds(
             sharedContentState = rememberSharedContentState(key = sharedPlayerShellKey()),
             animatedVisibilityScope = animatedVisibilityScope,
             enter = EnterTransition.None,
             exit = ExitTransition.None,
-            boundsTransform = sinkBoundsTransform,
+            boundsTransform = MeloXPlayerShellBoundsTransform,
             resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
         )
     }
@@ -932,8 +928,8 @@ private fun SharedArtworkDestination(
     //   旧实现这里是 `elevation = 26.dp / 14.dp` 喂给平台 `.shadow()`；平台 elevation 阴影
     //   在 vivo/iQOO 上几乎不可见且不可控（RenderNode 离屏缓存 + 厂商 ambient/spot 差异），
     //   已于 2026-10-07 换成「封面自身的模糊副本」，这个动画保留下来驱动副本的 alpha。
-    val artworkShadowStrength by animateFloatAsState(
-        targetValue = if (state.isPlaying) 1f else 0.86f,
+    val shadowElevation by animateDpAsState(
+        targetValue = if (state.isPlaying) 26.dp else 14.dp,
         animationSpec = spring(
             dampingRatio = 0.92f,
             stiffness = 320f,
@@ -960,7 +956,6 @@ private fun SharedArtworkDestination(
         //   缩略图与场景 header 行同为 72dp ⇒ 同 top 即天然对齐（缩略图与歌名/按钮同一条水平带）。
         //   之前沿用 `contentTop(30dp)` ⇒ 缩略图比 header 行低 8dp（grabber 由 30dp 改到 22dp 的遗留）。
         //   ⚠ 改 `SceneGrabber` 高度时**必须同步这里**。
-        val compactFrameTop = 22.dp
         val portraitContentHeight = (maxHeight - contentTop - MeloXNowPlayingControlsHeight.dp)
             .coerceAtLeast(1.dp)
         // ★ 统一主时间线：封面尺寸/位置由**同一条 orientation Transition** 驱动
@@ -1082,46 +1077,17 @@ private fun SharedArtworkDestination(
         // ★ 修「打开动画瞬间封面变小」：morph 期间 targetSize 必须保持 fullArtworkSize，
         //   不受 pageFrameProgress 影响。pageFrameProgress 只在 morph 结束后接管
         //   （让封面从全屏缩到 72dp 缩略图）。
-        val morphFreeze = expansionProgress > 0.01f && expansionProgress < 0.99f
-        val targetSize = if (morphFreeze) fullArtworkSize else lerpDp(fullArtworkSize, 72.dp, pageFrameProgress)
+        val targetSize = lerpDp(fullArtworkSize, 72.dp, pageFrameProgress)
         val targetX = lerpDp(fullX, 0.dp, pageFrameProgress)
-        val targetY = lerpDp(fullY, compactFrameTop, pageFrameProgress)
-        // ★ 圆角从迷你侧 6dp 连续长到 12dp。封面 sharedElement 带
-        //   `renderInOverlayDuringTransition = true` ⇒ 过渡期间由本函数这份副本渲染，
-        //   源侧 clip 不参与。
-        //
-        //   ⚠⚠ 这里**必须直接用 `expansionProgress`，不做任何重映射/系数**
-        //     （用户连续报障：23:19「值对了但还是突变」、23:25「手拖下滑圆角是直接变的」）。
-        //     踩过的两条弯路，都源于试图"补偿"几何与 master 的时长差：
-        //       ① 叠 `smoothStep` 二次缓动 → p 本身已是 S 曲线，中段被压得更急
-        //          （每 30ms 增量 1.324 → 1.768dp），适得其反；
-        //       ② 乘 `360/300 = 1.2` 对齐几何 → 只对**点击**（经 transitionSpec 缓动）
-        //          有效；**手拖**是 `seekTo` 线性跟手、不过缓动，×1.2 立刻被 clamp
-        //          ⇒ 拖前 17~40% 行程圆角冻在 12dp 不动、之后突降 = 「直接变」。
-        //
-        //   ⇒ 根治：已把 `MeloXArtworkBoundsTransform` 的时长从 300ms 改成与 master
-        //     相同的 `meloXPlayerTransitionDurationMillis`（见该文件注释），
-        //     **几何与圆角同源同速** ⇒ 这里直接用 `p` 即严格同步。
-        //     同时点击路径与手拖路径**共用同一个表达式**，切换时零跳变。
-        val targetRadius = lerpDp(6.dp, 12.dp, expansionProgress.coerceIn(0f, 1f))
-        // ⚠ 必须与外壳 / 迷你栏侧用**同一个** `sinkPeakPx`（同一个下沉量），
-        //   否则封面那个独立 overlay 会与外壳沉不同的量 ⇒ 封面在栏内错位。
-        val artworkSinkPeakPx = with(LocalDensity.current) { MeloXPlayerSinkPeakDp.dp.toPx() }
-        // ⚠ 与外壳同一条纪律：方向走 lambda、实例 key 不含方向（手势越阈值不重建）。
-        //   ⚠⚠ 判据必须与外壳**逐字同义**（只认 `closingIntent`，不含 `targetState` 兜底，
-        //   原因见上方 `isHostExiting` 的 2026-10-06 说明）—— 外壳与封面必须**同时沉 /
-        //   同时不沉**，否则封面会在迷你栏内错位。
-        val artworkSinkEnabledState = rememberUpdatedState(closingIntent)
-        val artworkBoundsTransform = remember(artworkSinkPeakPx) {
-            meloXPlayerSharedBoundsTransform(artworkSinkPeakPx) { artworkSinkEnabledState.value }
-        }
+        val targetY = lerpDp(fullY, contentTop, pageFrameProgress)
+        val targetRadius = 12.dp
         val sharedArtworkModifier = with(sharedTransitionScope) {
             Modifier.sharedElement(
                 sharedContentState = rememberSharedContentState(
                     key = sharedPlayerArtworkKey(state.mediaId),
                 ),
                 animatedVisibilityScope = animatedVisibilityScope,
-                boundsTransform = artworkBoundsTransform,
+                boundsTransform = MeloXArtworkBoundsTransform,
                 renderInOverlayDuringTransition = true,
                 zIndexInOverlay = 100f,
             )
@@ -1220,24 +1186,21 @@ private fun SharedArtworkDestination(
                 //     ⇒ 相对关系不变、不会重复或错位。
                 // ⚠ 阴影层**不再自带 lift**：本体抬起时阴影必须跟着抬，
                 //   「阴影留在原地」这种拟物偏移在跟随架构下就是错的（那正是露馅的来源）。
-                meloXArtworkShadowLayer(
-                    url = state.artworkUrl,
-                    model = fullArtworkModel,
-                    // 稳态 = 1；切页 / 转屏途中按 pageFrameProgress 淡出；
-                    // 「播放中」比「暂停」略强，与 AM 的呼吸感一致。
-                    strength = fullScreenScaleBlend *
-                        (1f - pageFrameProgress * 0.8f) *
-                        artworkShadowStrength,
-                    transform = artworkTransform,
-                    edge = targetSize,
-                    cornerRadius = targetRadius,
-                )
                 Artwork(
                     url = state.artworkUrl,
                     model = fullArtworkModel,
                     modifier = Modifier
                         .fillMaxSize()
                         .then(artworkTransform)
+                        .shadow(
+                            elevation = shadowElevation *
+                                fullScreenScaleBlend *
+                                (1f - pageFrameProgress * 0.55f),
+                            shape = RoundedCornerShape(targetRadius),
+                            clip = false,
+                            ambientColor = Color.Black.copy(alpha = 0.28f),
+                            spotColor = Color.Black.copy(alpha = 0.28f),
+                        )
                         .clip(RoundedCornerShape(targetRadius)),
                 )
             }

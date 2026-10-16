@@ -228,11 +228,6 @@ fun MeloXIOSMiniPlayer(
     //
     //   ⚠ 传 **lambda** 且 `remember` 的 key **不得含方向**（同 host 侧的警告）：手势下滑
     //     越过阈值那一刻若实例被重建 ⇒ Compose 重新推导 bounds spec ⇒ **回弹被丢掉**。
-    val closingIntentState = rememberUpdatedState(closingIntent)
-    val sinkPeakPx = with(LocalDensity.current) { MeloXPlayerSinkPeakDp.dp.toPx() }
-    val sharedSinkBoundsTransform = remember(sinkPeakPx) {
-        meloXPlayerSharedBoundsTransform(sinkPeakPx) { closingIntentState.value }
-    }
     val sharedShellModifier =
         if (sharedTransitionScope != null && animatedVisibilityScope != null) {
             with(sharedTransitionScope) {
@@ -241,7 +236,7 @@ fun MeloXIOSMiniPlayer(
                     animatedVisibilityScope = animatedVisibilityScope,
                     enter = EnterTransition.None,
                     exit = ExitTransition.None,
-                    boundsTransform = sharedSinkBoundsTransform,
+                    boundsTransform = MeloXPlayerShellBoundsTransform,
                     resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
                     // ⚠⚠⚠ 2026-10-06 **必须为正**：本迷你栏侧（含**液态玻璃**）在 overlay 内
                     //   要浮在目标端（播放页，默认 `0f`）**之上**。
@@ -613,7 +608,7 @@ fun MeloXIOSMiniPlayer(
                                     key = sharedPlayerArtworkKey(shownMediaId),
                                 ),
                                 animatedVisibilityScope = animatedVisibilityScope,
-                                boundsTransform = sharedSinkBoundsTransform,
+                                boundsTransform = MeloXArtworkBoundsTransform,
                                 renderInOverlayDuringTransition = true,
                                 // ⚠ 与上面 shell 同理（2026-10-06 下沉加固）：源端封面必须排在
                                 //   目标端封面（host 侧同为 overlay 层，`100f`）**之下**，

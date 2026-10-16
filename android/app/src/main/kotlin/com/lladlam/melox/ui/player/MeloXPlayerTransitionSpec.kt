@@ -112,8 +112,8 @@ internal val MeloXPlayerShellBoundsTransform = BoundsTransform { _, _ ->
 // ⚠⚠ 2026-10-03 回退记录：本函数曾被临时改成 `LinearEasing`（把形状统一上移到 fraction），
 //   用户实测「反而比上版本效果差」⇒ **已回退**。缓动留在这一层（几何/圆角/内容/recede 同源）。
 internal fun meloXPlayerLinearFloatSpec() = tween<Float>(
-    durationMillis = meloXPlayerTweenDurationMillis(),
-    easing = MeloXPlayerAppleEasing,
+    durationMillis = meloXPlayerTransitionDurationMillis,
+    easing = FastOutSlowInEasing,
 )
 
 // ══ Apple Music 主曲线（2026-10-03，按参考视频逐帧拟合）═════════════════════
