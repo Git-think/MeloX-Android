@@ -114,7 +114,7 @@ fun MeloXPinnedListPage(
                             .blur(6.dp * collapseProgress)
                             .offset(y = (-8).dp)
                             .padding(vertical = 8.dp),
-                        style = MeloXTypography.largeTitle,
+                        style = MeloXTypography.largeTitle.inheritAmbientFamily(),
                         fontWeight = FontWeight.Bold,
                     )
                 }

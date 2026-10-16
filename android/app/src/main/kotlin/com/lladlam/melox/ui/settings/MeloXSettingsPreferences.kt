@@ -366,8 +366,10 @@ object MeloXSettingsRuntime {
         internal set
     var showPlayerQualityTip by mutableStateOf(true)
         internal set
-    var systemFontEnabled by mutableStateOf(true)
+    var systemFontScope by mutableStateOf("off")
         internal set
+    val systemFontEnabled: Boolean get() = systemFontScope == "nonlyrics" || systemFontScope == "all"
+    val lyricSystemFontEnabled: Boolean get() = systemFontScope == "all"
     var smartQueueEnabled by mutableStateOf(false)
         internal set
     var transitionUiEnabled by mutableStateOf(false)
@@ -396,7 +398,7 @@ object MeloXSettingsRuntime {
         rememberLibraryPage = MeloXSettingsPreferences.boolean(app, "library_remember_page", true)
         defaultLibraryPage = MeloXSettingsPreferences.string(app, "library_default_page", "Songs")
         clipboardLinksEnabled = MeloXSettingsPreferences.boolean(app, "general_clipboard_links", true)
-        systemFontEnabled = MeloXSettingsPreferences.boolean(app, "system_font", true)
+        systemFontScope = MeloXSettingsPreferences.string(app, "system_font_scope", "off")
     }
 
     fun initialize(context: Context, force: Boolean = false) {
@@ -465,7 +467,7 @@ object MeloXSettingsRuntime {
         }.getOrDefault(MeloXScreenAwakeMode.Disabled)
         immersivePlaybackEnabled = MeloXSettingsPreferences.boolean(app, "immersive_playback", false)
         showPlayerQualityTip = MeloXSettingsPreferences.boolean(app, "player_show_quality_tip", true)
-        systemFontEnabled = MeloXSettingsPreferences.boolean(app, "system_font", true)
+        systemFontScope = MeloXSettingsPreferences.string(app, "system_font_scope", "off")
         smartQueueEnabled = MeloXPlaybackModePreferences.smartQueue(app)
         transitionUiEnabled = MeloXSettingsPreferences.boolean(app, "transition_ui_enabled", false)
         showLyricTranslation = MeloXSettingsPreferences.boolean(app, "lyrics_translation", true)
@@ -820,7 +822,6 @@ object MeloXSettingsPreferences {
             "playback_heart_mode_on_launch" -> MeloXSettingsRuntime.startsHeartModeOnLaunch = value
             "immersive_playback" -> MeloXSettingsRuntime.immersivePlaybackEnabled = value
             "player_show_quality_tip" -> MeloXSettingsRuntime.showPlayerQualityTip = value
-            "system_font" -> MeloXSettingsRuntime.systemFontEnabled = value
         }
     }
 
@@ -910,6 +911,7 @@ object MeloXSettingsPreferences {
                 .filter { it in setOf("QuickActions", "Playlists", "NewSongs") }.distinct()
                 .let { order -> (order + listOf("QuickActions", "Playlists", "NewSongs")).distinct() }
             "general_default_tab" -> MeloXSettingsRuntime.defaultTab = value
+            "system_font_scope" -> MeloXSettingsRuntime.systemFontScope = value
             "general_swipe_full_action" -> MeloXSettingsRuntime.swipeFullAction = runCatching {
                 MeloXSwipeFullAction.valueOf(value)
             }.getOrDefault(MeloXSwipeFullAction.PlayNext)
