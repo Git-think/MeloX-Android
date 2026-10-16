@@ -64,7 +64,7 @@ fun MeloXIosTopBar(
                 Text(
                     text = title,
                     modifier = Modifier.weight(1f).padding(start = 8.dp),
-                    style = titleStyle,
+                    style = titleStyle.inheritAmbientFamily(),
                     color = MaterialTheme.colorScheme.onBackground,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -81,7 +81,7 @@ fun MeloXIosTopBar(
             }
             Text(
                 text = title,
-                style = titleStyle,
+                style = titleStyle.inheritAmbientFamily(),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -90,7 +90,7 @@ fun MeloXIosTopBar(
         subtitle?.let {
             Text(
                 text = it,
-                style = MeloXTypography.subheadline,
+                style = MeloXTypography.subheadline.inheritAmbientFamily(),
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.56f),
             )
         }
@@ -159,11 +159,11 @@ fun MeloXIosListRow(
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MeloXTypography.body, color = MaterialTheme.colorScheme.onBackground)
+            Text(title, style = MeloXTypography.body.inheritAmbientFamily(), color = MaterialTheme.colorScheme.onBackground)
             subtitle?.let {
                 Text(
                     it,
-                    style = MeloXTypography.subheadline,
+                    style = MeloXTypography.subheadline.inheritAmbientFamily(),
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -173,7 +173,7 @@ fun MeloXIosListRow(
         detail?.let {
             Text(
                 it,
-                style = MeloXTypography.subheadline,
+                style = MeloXTypography.subheadline.inheritAmbientFamily(),
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.52f),
             )
         }

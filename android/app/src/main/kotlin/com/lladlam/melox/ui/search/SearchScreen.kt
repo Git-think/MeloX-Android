@@ -542,7 +542,7 @@ fun SearchScreen(
     // ── 「推入动画期间不组合重子页面」闸门（2026-10-09，修「搜索-浏览类别-播客」一顿一顿）──
     //
     // ⚠⚠ 根因：推入动画与子页面首屏**抢同一个 UI 线程**。动画期间本轮的目标帧率是 120fps
-    //   （8.3ms/帧，见 `core/display/MeloXFrameRateController`），只要有一项重活落在动画窗口里，
+    //   （8.3ms/帧预算），只要有一项重活落在动画窗口里，
     //   帧就掉到 16.7ms+ 并被读成顿挫。播客首屏恰好带三样重的**脚手架**：
     //     ① 自己一层**嵌套** `SharedTransitionLayout`（本页已在外层 search 的 STL 里，
     //        再套一层 = 每帧多跑一次 lookahead）；
@@ -1493,7 +1493,7 @@ private fun SearchMediaResults(
  * **整页子页在「推入动画期间」的轻量占位。**
  *
  * ### 为什么需要它（2026-10-09，修「搜索-浏览类别-播客」一顿一顿）
- * 推入动画的目标帧率是 120fps（8.3ms/帧，见 `core/display/MeloXFrameRateController`）——
+ * 推入动画的目标帧率是 120fps（8.3ms/帧预算）——
  * 任何重脚手架只要落在动画窗口里就会把帧顶到 16.7ms+，读成顿挫。而播客首屏自带
  * **嵌套 `SharedTransitionLayout` + `PullToRefreshBox` + 无限进度动画**，一组合就占住 UI 线程。
  * 占位里**只有**一个（宿主已画的）背板 + 一个进度指示器 ⇒ 逐帧成本可忽略。

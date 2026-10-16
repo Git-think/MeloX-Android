@@ -1,8 +1,13 @@
 package com.lladlam.melox.ui.player
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,24 +26,33 @@ import com.lladlam.melox.ui.meloXEdgeOverscrollHaptic
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.media3.common.Player
 import com.lladlam.melox.ui.glass.meloXBackdropBlur
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
+import com.lladlam.melox.ui.meloXHaptic
 
 @Composable
 fun MeloXQueuePanel(
@@ -147,10 +161,43 @@ private fun QueueModeControlsSurface(state: MeloXPlaybackUiState, interactive: B
             .padding(8.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            QueueModeButton(MeloXSymbol.Shuffle, state.shuffleEnabled, enabled = interactive, onClick = state::toggleShuffle, modifier = Modifier.weight(1f))
-            QueueModeButton(if (state.repeatMode == Player.REPEAT_MODE_ONE) MeloXSymbol.RepeatOne else MeloXSymbol.Repeat, state.repeatMode != Player.REPEAT_MODE_OFF, enabled = interactive, onClick = state::cycleRepeatMode, modifier = Modifier.weight(1f))
-            QueueModeButton(MeloXSymbol.Infinity, state.autoplayEnabled, enabled = interactive, onClick = state::toggleAutoplay, modifier = Modifier.weight(1f))
-            QueueModeButton(MeloXSymbol.AutoMix, state.autoMixEnabled, enabled = interactive, onClick = state::toggleAutoMix, modifier = Modifier.weight(1f))
+            // 长按不松手 = 气泡显示当前档位的简略介绍（随状态变化），松手即消失。
+            QueueModeButton(
+                MeloXSymbol.Shuffle,
+                state.shuffleEnabled,
+                enabled = interactive,
+                hint = if (state.shuffleEnabled) "随机播放已开：歌单乱序播放" else "随机播放已关：按歌单顺序播放",
+                onClick = state::toggleShuffle,
+                modifier = Modifier.weight(1f),
+            )
+            QueueModeButton(
+                if (state.repeatMode == Player.REPEAT_MODE_ONE) MeloXSymbol.RepeatOne else MeloXSymbol.Repeat,
+                state.repeatMode != Player.REPEAT_MODE_OFF,
+                enabled = interactive,
+                hint = when (state.repeatMode) {
+                    Player.REPEAT_MODE_ONE -> "单曲循环：反复播放当前歌曲"
+                    Player.REPEAT_MODE_ALL -> "列表循环：播完歌单从头再放"
+                    else -> "循环已关：播完歌单即停"
+                },
+                onClick = state::cycleRepeatMode,
+                modifier = Modifier.weight(1f),
+            )
+            QueueModeButton(
+                MeloXSymbol.Infinity,
+                state.autoplayEnabled,
+                enabled = interactive,
+                hint = if (state.autoplayEnabled) "无尽播放已开：播完自动续播相似歌曲" else "无尽播放已关：队列播完即停",
+                onClick = state::toggleAutoplay,
+                modifier = Modifier.weight(1f),
+            )
+            QueueModeButton(
+                MeloXSymbol.AutoMix,
+                state.autoMixEnabled,
+                enabled = interactive,
+                hint = if (state.autoMixEnabled) "自动过渡已开：歌曲间平滑衔接" else "自动过渡已关：歌曲间直接切换",
+                onClick = state::toggleAutoMix,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -226,20 +273,42 @@ private fun QueueRow(entry: MeloXQueueEntry, state: MeloXPlaybackUiState, intera
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QueueModeButton(
     symbol: MeloXSymbol,
     selected: Boolean,
     enabled: Boolean = true,
+    hint: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    var showHint by remember { mutableStateOf(false) }
+    val haptic = meloXHaptic()
+    val density = LocalDensity.current
+    // 松手（或按钮被禁用/离开按住态）即收气泡；长按触发时才亮起。
+    LaunchedEffect(pressed) {
+        if (!pressed) showHint = false
+    }
     Box(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(22.dp))
             .background(Color.White.copy(alpha = if (selected) .70f else .12f))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .combinedClickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = onClick,
+                // 长按只亮气泡，**不**触发切换（松手也不会补发 onClick）。
+                onLongClick = {
+                    showHint = true
+                    haptic(HapticFeedbackType.LongPress)
+                },
+            )
             .semantics { this.selected = selected },
         contentAlignment = Alignment.Center,
     ) {
@@ -261,5 +330,29 @@ private fun QueueModeButton(
                 else -> null
             },
         )
+        if (showHint) {
+            Popup(
+                alignment = Alignment.TopStart,
+                // 气泡悬在按钮上方：按钮 48dp 高，气泡单行约 34dp，再留 8dp 间距。
+                offset = IntOffset(0, with(density) { -(42).dp.roundToPx() }),
+                onDismissRequest = { showHint = false },
+                properties = PopupProperties(focusable = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1C1C1E).copy(alpha = 0.88f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        hint,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
     }
 }

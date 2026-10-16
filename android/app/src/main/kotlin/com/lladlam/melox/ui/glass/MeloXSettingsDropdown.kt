@@ -109,7 +109,11 @@ fun <T> MeloXSettingsDropdown(
     showTopSeparator: Boolean = false,
 ) {
     val groupRowIndex = LocalSettingsGroupRowIndex.current
-    val effectiveSeparator = if (grouped) groupRowIndex.intValue++.let { it > 0 } else showTopSeparator
+    // 行位次是静态的：只在首个组合作业时读计数器。直接 `intValue++` 会在后续重组里
+    // 反复写共享状态 → 组内所有行级联重组且计数漂移 → 卡片顶部凭空多出分割线。
+    val effectiveSeparator = remember(grouped, showTopSeparator) {
+        if (grouped) groupRowIndex.intValue++.let { it > 0 } else showTopSeparator
+    }
     val selectedLabel = items.firstOrNull { it.first == selected }?.second.orEmpty()
     val row = @Composable {
         MeloXIosListRow(
@@ -179,7 +183,7 @@ private fun <T> MeloXPopupSelector(
                 .padding(horizontal = 2.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-                Text(value, style = MeloXTypography.body, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(value, style = MeloXTypography.body.inheritAmbientFamily(), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 MeloXSymbolIcon(
                     MeloXSymbol.ChevronUpDown,
                     Modifier.size(15.dp).padding(start = 7.dp),
@@ -341,7 +345,7 @@ private fun MeloXPopupMenuItem(title: String, checked: Boolean, enabled: Boolean
         Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
             if (checked) MeloXSymbolIcon(MeloXSymbol.Check, Modifier.size(17.dp), MeloXSystemColors.Red)
         }
-        Text(title, style = MeloXTypography.body, modifier = Modifier.weight(1f).padding(start = 8.dp))
+        Text(title, style = MeloXTypography.body.inheritAmbientFamily(), modifier = Modifier.weight(1f).padding(start = 8.dp))
     }
 }
 

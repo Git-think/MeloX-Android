@@ -145,8 +145,7 @@ android {
         // 覆盖安装替换掉卡顿的 debug 包，不用卸载、不丢数据。
         //   构建：./gradlew :app:assembleDebugPerf --offline --no-daemon
         //   装机：adb install -r app/build/outputs/apk/debugPerf/app-debugPerf.apk
-        // 桌面应用名与 debug 同为「MeloX 测试版」（用户 2026-10-08 指定）：见
-        // app/src/debugPerf/res/*/strings.xml。
+        // 桌面应用名：沿用 @string/app_name（多语言资源）。
         // ⚠ AGP sourceSet 不随 initWith 继承，目录名就是 buildType 名。
         create("debugPerf") {
             initWith(getByName("debug"))
