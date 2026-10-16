@@ -100,7 +100,7 @@ internal class MeloSmoothCornerShape(
         val h = size.height
         val path = Path()
 
-        // 每个角 32 段直线逼近（222px 角上弦误差 < 0.05px，肉眼读不出）
+        // 每个角 [Steps] 段直线逼近（弦误差量级见 [Steps] 的注释）。
         fun corner(cx: Float, cy: Float, dirX: Float, dirY: Float, tFrom: Double, tTo: Double) {
             for (i in 0..Steps) {
                 val t = tFrom + (tTo - tFrom) * i / Steps
@@ -135,7 +135,32 @@ internal class MeloSmoothCornerShape(
     }
 
     private companion object {
-        const val Steps = 32
+        /**
+         * 每个角的直线逼近段数（性能旋钮）。
+         *
+         * ⚠⚠ **为什么它不是 32**：本 Shape 的 outline 是 `Outline.Generic`（多点路径），
+         * `clip(shape)`／`graphicsLayer{shape=…}` 落到 `RenderNode.setOutline` 时，
+         * Android 对 Generic outline 走**路径裁剪重栅格化**（stencil/mask），
+         * 而不是 `roundRect` 的硬件快路径 —— 成本随点数线性增长，且**层越大越贵**。
+         *
+         * 而播放页打开 morph 期间，外壳容器每帧被 `sharedBounds` 的
+         * `RemeasureToBounds` 重新测量（尺寸从迷你栏 48dp 插值到全屏）⇒
+         * `createOutline` **每帧被调用** ⇒ 这张路径**每帧重建 + 每帧重栅格化**，
+         * 而且是全屏最大、带背景/玻璃的那一层。这就是「中端机打开播放页超级卡顿」
+         * 的成本来源之一（`MeloXPageTransitions` 里同一位作者对 `.clip` 做了
+         * 实例缓存，恰恰说明他清楚"每帧新 outline ⇒ 裁剪每帧重建"这个坑，
+         * 但播放页外壳这条最热的路径当时没有覆盖到）。
+         *
+         * 精度核算（弦误差 ≈ `r·(1 − cos(π / (4·n)))`，取全屏角 r ≈ 222px）：
+         *
+         * | 段数 | 弦误差 | 路径点数 | 肉眼 |
+         * |---|---|---|---|
+         * | 32（原） | 0.05px | 132 | 精度超所需 ~2 个数量级 |
+         * | **16（现）** | **0.27px ≈ 0.07dp @density 4** | **68** | **远低于可辨阈（人眼 ~0.5 物理像素）** |
+         *
+         * ⇒ 点数砍掉 48%，视觉等价。
+         */
+        const val Steps = 16
 
         /**
          * 「角已吃满半高」的判定容差（px）。见 `createOutline` 里 ⓪ 的说明：

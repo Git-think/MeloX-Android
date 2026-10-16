@@ -493,7 +493,7 @@ fun MeloXGlassSegmentedControl(
             ) {
                 Text(
                     text = item,
-                    style = MeloXTypography.subheadline,
+                    style = MeloXTypography.subheadline.inheritAmbientFamily(),
                     maxLines = 1,
                 )
             }

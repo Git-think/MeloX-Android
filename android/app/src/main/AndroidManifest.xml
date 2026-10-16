@@ -71,19 +71,28 @@
              `Theme.MeloX.Page`（**不透明窗口**）。半透明窗口在系统里拿不到 ROM 原生的
              Activity 转场（新页自右侧滑入 + 旧页视差），只能靠 App 在 Compose 里自研一遍；
              改成不透明 + 不覆盖 `windowAnimationStyle` 后，转场完全由 WindowManager 驱动
-             ⇒ 天然位置/速度连续（可连续打断）、天然带系统屏幕圆角、天然支持预测式返回。 -->
-        <activity android:name=".ui.account.MeloXAccountActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" />
-        <activity android:name=".ui.account.MeloXNeteaseLoginActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" />
-        <activity android:name=".ui.provider.MeloXProviderServicesActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" />
-        <activity android:name=".ui.settings.MeloXSettingsDetailActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" />
+             ⇒ 天然位置/速度连续（可连续打断）、天然带系统屏幕圆角、天然支持预测式返回。
+
+             ⚠⚠ 2026-10-14 卡顿修复：这批 Activity 原先**不声明 configChanges** —— 任何
+             配置/尺寸变更都会销毁重建。第三方真机日志（官方包 0.6.4 / OPPO PLD110 /
+             ColorOS V16）实证：MeloXSettingsDetailActivity 推入后窗口尺寸
+             1080×2400→1272×2592（双轴 +192px）触发整页重建 + surface 重建 + Activity
+             二次启动（checkFinished=false 4），空窗 ≥3s。现与 MainActivity 对齐补齐
+             （另加 density|fontScale，覆盖系统字体缩放/浮窗密度变更）。
+             ⚠ **故意不含 uiMode|locale**：深浅色 / 语言切换仍走销毁重建路径，
+             让 `prepareMeloXPageWindow()` 按新主题重设窗口底色。 -->
+        <activity android:name=".ui.account.MeloXAccountActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale" />
+        <activity android:name=".ui.account.MeloXNeteaseLoginActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale" />
+        <activity android:name=".ui.provider.MeloXProviderServicesActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale" />
+        <activity android:name=".ui.settings.MeloXSettingsDetailActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale" />
         <!-- SpotifyCallbackActivity 已随上游 0.6.2 移除：登录改走 loopback
              （bed4a62 已删除 SpotifyCallbackActivity.kt，此处声明必须一并去掉）。 -->
-        <activity android:name=".ui.collection.MeloXCollectionDetailActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" />
-        <activity android:name=".ui.song.MeloXSongWikiActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" />
+        <activity android:name=".ui.collection.MeloXCollectionDetailActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale" />
+        <activity android:name=".ui.song.MeloXSongWikiActivity" android:exported="false" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale" />
         <!-- 对话框式 Activity（整屏只弹一个 AlertDialog、页面本体为空）⇒ 必须半透明让下层
              App 透出来当背景，保持 TransparentActivity；不要跟着上面那批换 Page 主题。 -->
         <activity android:name=".ui.player.MeloXListenTogetherInviteActivity" android:exported="false" android:theme="@style/Theme.MeloX.TransparentActivity" />
-        <activity android:name=".ui.sharing.MeloXNeteaseResourceShareActivity" android:exported="true" android:theme="@style/Theme.MeloX.Page">
+        <activity android:name=".ui.sharing.MeloXNeteaseResourceShareActivity" android:exported="true" android:theme="@style/Theme.MeloX.Page" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

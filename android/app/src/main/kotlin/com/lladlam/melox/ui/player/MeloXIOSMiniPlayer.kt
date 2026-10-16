@@ -37,6 +37,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,12 +45,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
@@ -63,7 +67,10 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.exp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -99,6 +106,9 @@ fun MeloXIOSMiniPlayer(
      * `playerClosingIntent`（与 host 侧同源）。仅用于下沉回弹的方向判据。
      */
     closingIntent: Boolean = false,
+    // ★ 2026-10-15 修「打断动画期间点底栏误触抢回」：上报本 mini 播放器在 window 中的命中矩形，
+    //   host overlay 的全屏 pointerInput 据此把 reopen 限定在 mini 区域，点底栏导航不再误入播放页。
+    miniPlayerHitRect: MutableState<Rect?> = mutableStateOf(null),
 ) {
     if (!state.hasMedia) return
 
@@ -228,6 +238,11 @@ fun MeloXIOSMiniPlayer(
     //
     //   ⚠ 传 **lambda** 且 `remember` 的 key **不得含方向**（同 host 侧的警告）：手势下滑
     //     越过阈值那一刻若实例被重建 ⇒ Compose 重新推导 bounds spec ⇒ **回弹被丢掉**。
+    val closingIntentState = rememberUpdatedState(closingIntent)
+    val sinkPeakPx = with(LocalDensity.current) { MeloXPlayerSinkPeakDp.dp.toPx() }
+    val sharedSinkBoundsTransform = remember(sinkPeakPx) {
+        meloXPlayerSharedBoundsTransform(sinkPeakPx) { closingIntentState.value }
+    }
     val sharedShellModifier =
         if (sharedTransitionScope != null && animatedVisibilityScope != null) {
             with(sharedTransitionScope) {
@@ -236,7 +251,7 @@ fun MeloXIOSMiniPlayer(
                     animatedVisibilityScope = animatedVisibilityScope,
                     enter = EnterTransition.None,
                     exit = ExitTransition.None,
-                    boundsTransform = MeloXPlayerShellBoundsTransform,
+                    boundsTransform = sharedSinkBoundsTransform,
                     resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds,
                     // ⚠⚠⚠ 2026-10-06 **必须为正**：本迷你栏侧（含**液态玻璃**）在 overlay 内
                     //   要浮在目标端（播放页，默认 `0f`）**之上**。
@@ -432,7 +447,14 @@ fun MeloXIOSMiniPlayer(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(miniHeight),
+            .height(miniHeight)
+            .onGloballyPositioned { coords ->
+                val tl = coords.localToWindow(Offset.Zero)
+                miniPlayerHitRect.value = Rect(
+                    tl.x, tl.y,
+                    tl.x + coords.size.width, tl.y + coords.size.height,
+                )
+            },
     ) {
         Box(
             modifier = Modifier
@@ -588,10 +610,14 @@ fun MeloXIOSMiniPlayer(
                         }
                         // ⚠ 过渡进行中（收回/展开）禁用整条点击 —— 修「返回过程中还能点到
                         //   播放器按钮」。稳态（`isTransitioning=false`）行为不变。
+                        // ★ 2026-10-15 转场可打断：**关闭方向不再禁用** —— `closingIntent` 为真时
+                        //   即使 `miniBounceClock` 还没到 0.98（关闭尾段 / 刚关闭那一小段）也允许
+                        //   点按抢回播放页（用户报障「完全关闭前不能再次点击打开」）。
+                        //   打开方向仍禁用（避免展开途中重复触发 open）；稳态恒可点。
                         .clickable(
                             interactionSource = null,
                             indication = null,
-                            enabled = !isTransitioning,
+                            enabled = !isTransitioning || closingIntent,
                             onClick = onExpand,
                         ),
                 ) {
@@ -608,7 +634,7 @@ fun MeloXIOSMiniPlayer(
                                     key = sharedPlayerArtworkKey(shownMediaId),
                                 ),
                                 animatedVisibilityScope = animatedVisibilityScope,
-                                boundsTransform = MeloXArtworkBoundsTransform,
+                                boundsTransform = sharedSinkBoundsTransform,
                                 renderInOverlayDuringTransition = true,
                                 // ⚠ 与上面 shell 同理（2026-10-06 下沉加固）：源端封面必须排在
                                 //   目标端封面（host 侧同为 overlay 层，`100f`）**之下**，
@@ -813,13 +839,52 @@ private fun MiniDancingBars(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
-    val smooth = remember { FloatArray(4) }
+    // 初始直接落在静止高度：暂停态本就该是这个值，省掉一次入场跳动。
+    val smooth = remember { FloatArray(4) { MINI_BARS_REST_HEIGHT } }
     val redrawTick = remember { mutableIntStateOf(0) }
     val activeState = rememberUpdatedState(active)
     val playingState = rememberUpdatedState(isPlaying)
     LaunchedEffect(Unit) {
         var lastNanos = 0L
         while (true) {
+            // ⚠⚠⚠ 低功耗铁律（2026-10-16 真机取证：前台静置 4s 出 609 帧 ≈ 152fps）——
+            //   `withFrameNanos` 的语义就是「**我要每一帧**」。只要这层循环还在转，
+            //   App 就会按面板最高档持续出帧，平台 ARR **再怎么调度也降不下来**：
+            //   它看到的明明是「每帧都有新内容」的应用。
+            //   旧实现在「暂停 / 不可见」时**照样每帧申请**，只是把 energy 调小
+            //   ⇒ 表面静止、实则满负荷，这是之前「静止也 120」的根因。
+            //   ⇒ 正确做法：不播放 / 不可见时先做一段有预算的「余韵」回落，
+            //     然后**彻底停帧**（suspend 等待），一帧都不再申请。
+            if (!activeState.value || !playingState.value) {
+                lastNanos = 0L
+                var settleLast = 0L
+                var settleStart = 0L
+                while (!activeState.value || !playingState.value) {
+                    val now = withFrameNanos { it }
+                    if (settleStart == 0L) settleStart = now
+                    val dt = if (settleLast == 0L) {
+                        1f / 60f
+                    } else {
+                        ((now - settleLast) / 1_000_000_000f).coerceIn(1f / 240f, 0.1f)
+                    }
+                    settleLast = now
+                    // 与活动帧同一条回落曲线（12/s）：起拍全套、落幕不断档，观感连续。
+                    val fall = 1f - exp(-dt * 12f)
+                    var settled = true
+                    for (i in smooth.indices) {
+                        smooth[i] += (MINI_BARS_REST_HEIGHT - smooth[i]) * fall
+                        if (abs(smooth[i] - MINI_BARS_REST_HEIGHT) > 0.004f) settled = false
+                    }
+                    redrawTick.intValue++
+                    if (settled || now - settleStart > MINI_BARS_SETTLE_BUDGET_NANOS) break
+                }
+                // 收尾完成 ⇒ **零帧申请**地挂起：等「可见且播放中」才回来。
+                // 期间 gfxinfo 的 Total frames 停止增长，系统才有空间把帧率交还调度。
+                snapshotFlow { activeState.value && playingState.value }
+                    .filter { it }
+                    .first()
+                continue
+            }
             withFrameNanos { now ->
                 if (!activeState.value) {
                     lastNanos = 0L
@@ -970,3 +1035,17 @@ private fun smoothStep(value: Float, start: Float, end: Float): Float {
 
 private fun lerpDp(start: Dp, end: Dp, progress: Float): Dp =
     (start.value + (end.value - start.value) * progress.coerceIn(0f, 1f)).dp
+
+/**
+ * [MiniDancingBars] 的静止柱高：与原实现暂停态（`energy = 0.10` 落到 epsilon
+ * 之前被 `coerceIn(0.12f, 1f)` 夹住）收敛后的结果一致 ⇒ 停帧前后外观不变。
+ */
+private const val MINI_BARS_REST_HEIGHT = 0.12f
+
+/**
+ * 「余韵」收尾预算。暂停后最多再申请这么多时间的帧做指数回落，到点立即停帧
+ * （就算是 stable 到位也一样）——见 [MiniDancingBars] 里的低功耗铁律注释。
+ */
+private const val MINI_BARS_SETTLE_BUDGET_MS = 700L
+
+private const val MINI_BARS_SETTLE_BUDGET_NANOS = MINI_BARS_SETTLE_BUDGET_MS * 1_000_000L
