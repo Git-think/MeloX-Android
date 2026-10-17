@@ -49,6 +49,7 @@ import com.lladlam.melox.core.music.provider.ProviderAccountManager
 import com.lladlam.melox.core.music.provider.ThirdPartyMusicSourceConsentStore
 import com.lladlam.melox.core.provider.lxuser.LxUserSourceStore
 import com.lladlam.melox.core.provider.lxuser.ChkszConfigStore
+import com.lladlam.melox.core.provider.lxuser.UnmConfigStore
 import com.lladlam.melox.core.provider.jellyfin.JellyfinApiClient
 import com.lladlam.melox.core.provider.jellyfin.JellyfinSessionStore
 import com.lladlam.melox.core.provider.local.LocalMediaScanner
@@ -115,8 +116,13 @@ fun ProviderServicesScreen(
     var lxImportError by remember { mutableStateOf<String?>(null) }
     var chkszApiKey by remember { mutableStateOf(ChkszConfigStore.readApiKey(context)) }
     var chkszBaseUrl by remember { mutableStateOf(ChkszConfigStore.readBaseUrl(context)) }
+    var chkszEnabled by remember { mutableStateOf(ChkszConfigStore.readEnabled(context)) }
     var chkszError by remember { mutableStateOf<String?>(null) }
     var showChkszKeyDialog by remember { mutableStateOf(false) }
+    var unmBaseUrl by remember { mutableStateOf(UnmConfigStore.readBaseUrl(context)) }
+    var unmServers by remember { mutableStateOf(UnmConfigStore.readServers(context)) }
+    var unmError by remember { mutableStateOf<String?>(null) }
+    var showUnmDialog by remember { mutableStateOf(false) }
     var showJellyfinDialog by remember { mutableStateOf(false) }
     var jellyfinServerUrl by remember { mutableStateOf(JellyfinSessionStore.read(context).serverUrl) }
     var jellyfinUsername by remember { mutableStateOf(JellyfinSessionStore.read(context).userName) }
@@ -433,15 +439,40 @@ fun ProviderServicesScreen(
                     showTopSeparator = false,
                 )
                 MeloXIosListRow(
-                    title = stringResource(R.string.provider_chksz),
+                    title = stringResource(R.string.provider_unm),
                     subtitle = when {
-                        chkszApiKey.isBlank() -> stringResource(R.string.provider_chksz_missing)
-                        chkszBaseUrl != ChkszConfigStore.DefaultBaseUrl -> chkszBaseUrl
-                        else -> stringResource(R.string.provider_chksz_configured)
+                        unmBaseUrl.isBlank() -> stringResource(R.string.provider_unm_missing)
+                        else -> unmBaseUrl
                     },
                     leading = { Spacer(Modifier.width(25.dp)) },
-                    onClick = { chkszError = null; showChkszKeyDialog = true },
+                    onClick = { unmError = null; showUnmDialog = true },
                 )
+                MeloXIosListRow(
+                    title = stringResource(R.string.provider_chksz),
+                    subtitle = stringResource(R.string.provider_chksz_enable_hint),
+                    leading = { Spacer(Modifier.width(25.dp)) },
+                    trailing = {
+                        MeloXGlassToggle(
+                            checked = chkszEnabled,
+                            onCheckedChange = {
+                                chkszEnabled = it
+                                ChkszConfigStore.setEnabled(context, it)
+                            },
+                        )
+                    },
+                )
+                if (chkszEnabled) {
+                    MeloXIosListRow(
+                        title = stringResource(R.string.provider_chksz_settings),
+                        subtitle = when {
+                            chkszApiKey.isBlank() -> stringResource(R.string.provider_chksz_missing)
+                            chkszBaseUrl != ChkszConfigStore.DefaultBaseUrl -> chkszBaseUrl
+                            else -> stringResource(R.string.provider_chksz_configured)
+                        },
+                        leading = { Spacer(Modifier.width(25.dp)) },
+                        onClick = { chkszError = null; showChkszKeyDialog = true },
+                    )
+                }
                 MeloXIosListRow(
                     title = stringResource(R.string.provider_view_third_party_terms),
                     subtitle = stringResource(R.string.provider_third_party_terms_subtitle),
@@ -731,6 +762,75 @@ fun ProviderServicesScreen(
                             chkszBaseUrl = ChkszConfigStore.readBaseUrl(context)
                             chkszError = null
                             showChkszKeyDialog = false
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MeloXGlassButtonStyle.BorderedProminent,
+                ) { Text(stringResource(R.string.provider_save)) }
+            }
+        }
+    }
+    if (showUnmDialog) {
+        MeloXGlassDialog(visible = true, onDismiss = { unmError = null; showUnmDialog = false }) {
+            Text(stringResource(R.string.provider_unm_title), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.provider_unm_body),
+                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+            Text(
+                stringResource(R.string.provider_unm_base_url),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+            )
+            MeloXGlassTextField(
+                value = unmBaseUrl,
+                onValueChange = { unmBaseUrl = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                placeholder = { Text("https://unm.example.com") },
+            )
+            Text(
+                stringResource(R.string.provider_unm_servers),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+            )
+            MeloXGlassTextField(
+                value = unmServers,
+                onValueChange = { unmServers = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                placeholder = { Text(UnmConfigStore.DefaultServers) },
+            )
+            unmError?.let {
+                Text(it, Modifier.padding(top = 7.dp), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MeloXGlassButton(
+                    onClick = {
+                        UnmConfigStore.clear(context)
+                        unmBaseUrl = UnmConfigStore.readBaseUrl(context)
+                        unmServers = UnmConfigStore.readServers(context)
+                        unmError = null
+                        showUnmDialog = false
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MeloXGlassButtonStyle.Plain,
+                ) { Text(stringResource(R.string.provider_clear)) }
+                MeloXGlassButton(
+                    onClick = {
+                        val baseUrl = unmBaseUrl.trim()
+                        if (baseUrl.isNotEmpty() && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                            unmError = context.getString(R.string.provider_invalid_http)
+                        } else {
+                            UnmConfigStore.writeBaseUrl(context, baseUrl)
+                            UnmConfigStore.writeServers(context, unmServers)
+                            unmBaseUrl = UnmConfigStore.readBaseUrl(context)
+                            unmServers = UnmConfigStore.readServers(context)
+                            unmError = null
+                            showUnmDialog = false
                         }
                     },
                     modifier = Modifier.weight(1f),

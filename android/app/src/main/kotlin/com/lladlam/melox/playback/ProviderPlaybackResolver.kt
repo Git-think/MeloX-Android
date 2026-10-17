@@ -34,6 +34,9 @@ class ProviderPlaybackResolver(
     private val localSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val authKeyProvider: (MusicSource) -> String = { "" },
     private val providerPlaybackEnabled: (MusicSource) -> Boolean = { true },
+    private val chkszPlayback: ChkszPlaybackResolver? = null,
+    private val lxUserPlayback: LxUserPlaybackResolver? = null,
+    private val unmPlayback: UnmPlaybackResolver? = null,
     private val thirdPartySourcesEnabled: () -> Boolean = { true },
     private val thirdPartyOnlyForMembership: () -> Boolean = { false },
 ) : ResolvingDataSource.Resolver {
@@ -120,6 +123,16 @@ class ProviderPlaybackResolver(
             Log.d(TAG, "resolve detail source=${source.storageValue} id=${resourceValue.take(8)} title=${track.title.take(40)} " +
                 "artists=${track.artistText.take(60)} durationMs=${track.durationMs} metadata=${track.providerMetadata.javaClass.simpleName}")
             Log.i(TAG, "Resolve start source=${source.storageValue} quality=${quality.name} thirdParty=${thirdPartySourcesEnabled()}")
+            // 「遇到会员歌曲时再调用」关闭时维持第三方优先：官方之前先试
+            // CHKSZ（默认关闭）/ UNM 解灰 / LX 脚本；开启时等官方明确失败后再试。
+            val allowExternalResolver = source != MusicSource.Jellyfin
+            if (allowExternalResolver && thirdPartySourcesEnabled() && !thirdPartyOnlyForMembership()) {
+                resolveThirdParty(track, quality, source)?.let { resolved ->
+                    synchronized(cacheLock) { resolvedUris[key] = resolved }
+                    pending.complete(resolved)
+                    return resolved
+                }
+            }
             val provider = providers.require(source)
             val playback = provider as? PlaybackCapability
                 ?: throw IOException("${provider.displayName} 当前没有实现播放能力")
@@ -128,8 +141,9 @@ class ProviderPlaybackResolver(
             }
 
             /**
-             * 官方音源不可用时的统一兜底入口：当前上传版本不带第三方脚本音源，
-             * 官方明确失败（会员 / 版权 / 地区 / 拿不到链接）时直接抛不可播放异常。
+             * 官方音源不可用时的统一兜底入口：第三方解析（CHKSZ / UNM / LX）只在
+             * 「第三方音乐源」打开时参与；「遇到会员歌曲时再调用」开启时官方失败后
+             * 才调用它们，关闭时已经在官方之前优先尝试过，避免重复等待。
              */
             fun thirdPartyFallbackOrThrow(
                 track: MusicTrack,
@@ -137,6 +151,9 @@ class ProviderPlaybackResolver(
                 source: MusicSource,
                 message: String,
             ): ResolvedRequest {
+                if (source != MusicSource.Jellyfin && thirdPartySourcesEnabled() && thirdPartyOnlyForMembership()) {
+                    resolveThirdParty(track, quality, source)?.let { return it }
+                }
                 throw MeloXPlaybackUnavailableException(message)
             }
             val result = when (resolution) {
@@ -181,6 +198,39 @@ class ProviderPlaybackResolver(
         } finally {
             inFlight.remove(key, pending)
         }
+    }
+
+    /**
+     * 第三方解析链（CHKSZ → UNM 解灰 → LX 脚本）。
+     * CHKSZ 默认关闭；未配置的解析器会立即返回 null。UNM 只处理网易云曲目。
+     */
+    private fun resolveThirdParty(
+        track: MusicTrack,
+        quality: AudioQualityTier,
+        source: MusicSource,
+    ): ResolvedRequest? {
+        val chksz = runCatching { chkszPlayback?.resolve(track, quality) }
+            .onFailure { Log.w(TAG, "CHKSZ stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        if (chksz != null) {
+            Log.i(TAG, "Resolve success source=${source.storageValue} stage=chksz")
+            return ResolvedRequest(Uri.parse(chksz.url), emptyMap())
+        }
+        val unm = runCatching { unmPlayback?.resolve(track) }
+            .onFailure { Log.w(TAG, "UNM stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        if (unm != null) {
+            Log.i(TAG, "Resolve success source=${source.storageValue} stage=unm")
+            return ResolvedRequest(Uri.parse(unm.url), emptyMap())
+        }
+        val lx = runCatching { lxUserPlayback?.resolve(track, quality) }
+            .onFailure { Log.w(TAG, "LX stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        if (lx != null) {
+            Log.i(TAG, "Resolve success source=${source.storageValue} stage=lx script=${lx.sourceId}")
+            return ResolvedRequest(Uri.parse(lx.url), lx.requestHeaders)
+        }
+        return null
     }
 
     private fun cached(key: ResolveKey): ResolvedRequest? = synchronized(cacheLock) {

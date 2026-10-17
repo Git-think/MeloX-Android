@@ -355,6 +355,14 @@
     <string name="provider_chksz_body">Uses the NetEase, QQ Music, and Kugou resolvers at api.chksz.com. Register at api.chksz.com and copy your personal API key after signing in. Registration is currently limited to LinuxDo users. The API base URL can also point to any compatible endpoint. The API key stays on this device and is not part of MeloX cloud control.</string>
     <string name="provider_api_key_placeholder">Enter your personal API key</string>
     <string name="provider_chksz_base_url">API base URL</string>
+    <string name="provider_chksz_enable_hint">Hidden by default · turn on to reveal and use it</string>
+    <string name="provider_chksz_settings">Resolver settings</string>
+    <string name="provider_unm">UNM unblock resolver</string>
+    <string name="provider_unm_missing">No server URL · tap to set one</string>
+    <string name="provider_unm_title">UNM unblock API</string>
+    <string name="provider_unm_body">Calls a self-hosted or public UNM (UnblockNeteaseMusic compatible) server with GET /match?id=…&amp;server=… to find a playable replacement for NetEase tracks blocked by membership, rights, or region. Enter the base URL of your server; the source list controls which sources the server tries. The setting stays on this device and is not part of MeloX cloud control.</string>
+    <string name="provider_unm_base_url">Server base URL</string>
+    <string name="provider_unm_servers">Source order (server)</string>
     <string name="provider_clear">Clear</string>
     <string name="provider_save">Save</string>
     <string name="provider_scanned_count">Scanned %1$d local songs</string>

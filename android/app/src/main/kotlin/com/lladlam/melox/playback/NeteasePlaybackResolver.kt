@@ -29,6 +29,9 @@ class NeteasePlaybackResolver(
     private val localSourceProvider: (Long) -> Uri? = { null },
     private val providerLocalSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val crossProviderFallback: CrossProviderPlaybackFallbackResolver? = null,
+    private val chkszPlayback: ChkszPlaybackResolver? = null,
+    private val lxUserPlayback: LxUserPlaybackResolver? = null,
+    private val unmPlayback: UnmPlaybackResolver? = null,
     private val providerPlaybackEnabled: (com.lladlam.melox.core.music.model.MusicSource) -> Boolean = { true },
     private val thirdPartySourcesEnabled: () -> Boolean = { true },
     private val thirdPartyOnlyForMembership: () -> Boolean = { false },
@@ -145,7 +148,7 @@ class NeteasePlaybackResolver(
                         cacheIdentity = "${fallback.source.storageValue}:${fallback.resourceId}",
                     )
                     } else {
-                        throw error
+                        resolveThirdParty(songId, fallbackRequest, quality) ?: throw error
                     }
             }
             synchronized(cacheLock) {
@@ -165,6 +168,58 @@ class NeteasePlaybackResolver(
         } finally {
             inFlight.remove(key, pending)
         }
+    }
+
+    /**
+     * 官方与跨平台兜底都失败后的第三方解析（CHKSZ → UNM 解灰 → LX 脚本）。
+     * 只在「第三方音乐源」总开关打开时调用；CHKSZ 默认关闭、未配置的解析器会直接返回 null。
+     */
+    private fun resolveThirdParty(
+        songId: Long,
+        fallbackRequest: CrossProviderFallbackRequest?,
+        quality: MusicQuality,
+    ): ResolvedRequest? {
+        if (!thirdPartySourcesEnabled()) return null
+        val commonQuality = quality.toCommonTier()
+        runCatching { chkszPlayback?.resolve(songId, commonQuality) }
+            .onFailure { Log.w(TAG, "CHKSZ fallback failed song=$songId error=${it.javaClass.simpleName}") }
+            .getOrNull()?.let { result ->
+                Log.i(TAG, "Resolve success song=$songId stage=chksz")
+                return ResolvedRequest(
+                    uri = Uri.parse(result.url),
+                    cacheIdentity = "chksz:${chkszPlayback?.cacheIdentity().orEmpty()}",
+                )
+            }
+        runCatching { unmPlayback?.resolve(songId) }
+            .onFailure { Log.w(TAG, "UNM fallback failed song=$songId error=${it.javaClass.simpleName}") }
+            .getOrNull()?.let { result ->
+                Log.i(TAG, "Resolve success song=$songId stage=unm")
+                return ResolvedRequest(
+                    uri = Uri.parse(result.url),
+                    cacheIdentity = "unm:${unmPlayback?.cacheIdentity().orEmpty()}",
+                )
+            }
+        fallbackRequest?.let { request ->
+            runCatching {
+                lxUserPlayback?.resolve(
+                    songId = request.songId,
+                    title = request.title,
+                    artist = request.artist,
+                    durationMs = request.durationMs,
+                    quality = request.quality,
+                )
+            }
+                .onFailure { Log.w(TAG, "LX fallback failed song=$songId error=${it.javaClass.simpleName}") }
+                .getOrNull()?.let { result ->
+                    Log.i(TAG, "Resolve success song=$songId stage=lx script=${result.sourceId}")
+                    return ResolvedRequest(
+                        uri = Uri.parse(result.url),
+                        headers = result.requestHeaders,
+                        cacheIdentity = "lx-user:${result.sourceId}",
+                    )
+                }
+        }
+        return null
     }
 
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
@@ -291,6 +346,9 @@ class NeteasePlaybackResolver(
                 localSourceProvider = providerLocalSourceProvider,
                 authKeyProvider = ProviderPlaybackRuntime::authKey,
                 providerPlaybackEnabled = providerPlaybackEnabled,
+                chkszPlayback = chkszPlayback,
+                lxUserPlayback = lxUserPlayback,
+                unmPlayback = unmPlayback,
                 thirdPartySourcesEnabled = thirdPartySourcesEnabled,
                 thirdPartyOnlyForMembership = thirdPartyOnlyForMembership,
             ).also { providerDelegate = it }

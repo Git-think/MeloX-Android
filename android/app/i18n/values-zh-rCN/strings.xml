@@ -355,6 +355,14 @@
     <string name="provider_chksz_body">使用 api.chksz.com 的网易云、QQ音乐和酷狗音乐解析接口。请先前往 api.chksz.com 注册账号并在登录后获取个人 API Key；目前该服务仅支持 LinuxDo 用户注册。API Base URL 也可指向其他兼容接口。API Key 仅保存在本机，不属于 MeloX 云控。</string>
     <string name="provider_api_key_placeholder">请输入个人 API Key</string>
     <string name="provider_chksz_base_url">API Base URL</string>
+    <string name="provider_chksz_enable_hint">默认隐藏 · 打开后显示并参与解析</string>
+    <string name="provider_chksz_settings">解析器设置</string>
+    <string name="provider_unm">UNM 解灰解析源</string>
+    <string name="provider_unm_missing">未配置服务地址 · 点击配置</string>
+    <string name="provider_unm_title">UNM 解灰 API</string>
+    <string name="provider_unm_body">通过 GET /match?id=…&amp;server=… 调用 UNM（UnblockNeteaseMusic 兼容）解灰服务，为会员、版权或地区受限的网易云歌曲寻找可播放的替代音源。请填写你自建或公共服务的地址；音源列表决定服务端尝试的音源顺序。配置仅保存在本机，不属于 MeloX 云控。</string>
+    <string name="provider_unm_base_url">服务地址 Base URL</string>
+    <string name="provider_unm_servers">音源顺序 server</string>
     <string name="provider_clear">清除</string>
     <string name="provider_save">保存</string>
     <string name="provider_scanned_count">已扫描 %1$d 首本地歌曲</string>

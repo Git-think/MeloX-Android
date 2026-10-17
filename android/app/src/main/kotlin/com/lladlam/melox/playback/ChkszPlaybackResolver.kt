@@ -15,14 +15,22 @@ class ChkszPlaybackResolver(context: Context) {
         baseUrlProvider = { ChkszConfigStore.readBaseUrl(appContext) },
     )
 
-    fun cacheIdentity(): String = ChkszConfigStore.readApiKey(appContext).let { key ->
-        if (key.isBlank()) "disabled"
-        else "configured:${key.hashCode()}:${ChkszConfigStore.readBaseUrl(appContext).hashCode()}"
+    fun cacheIdentity(): String = if (!ChkszConfigStore.readEnabled(appContext)) {
+        "disabled"
+    } else {
+        ChkszConfigStore.readApiKey(appContext).let { key ->
+            if (key.isBlank()) "disabled"
+            else "configured:${key.hashCode()}:${ChkszConfigStore.readBaseUrl(appContext).hashCode()}"
+        }
     }
 
-    internal fun resolve(songId: Long, quality: AudioQualityTier): ChkszPlaybackResult? =
-        client.resolveNetease(songId, quality)?.let(::ChkszPlaybackResult)
+    internal fun resolve(songId: Long, quality: AudioQualityTier): ChkszPlaybackResult? {
+        if (!ChkszConfigStore.readEnabled(appContext)) return null
+        return client.resolveNetease(songId, quality)?.let(::ChkszPlaybackResult)
+    }
 
-    internal fun resolve(track: MusicTrack, quality: AudioQualityTier): ChkszPlaybackResult? =
-        client.resolveTrack(track, quality)?.let(::ChkszPlaybackResult)
+    internal fun resolve(track: MusicTrack, quality: AudioQualityTier): ChkszPlaybackResult? {
+        if (!ChkszConfigStore.readEnabled(appContext)) return null
+        return client.resolveTrack(track, quality)?.let(::ChkszPlaybackResult)
+    }
 }

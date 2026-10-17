@@ -355,6 +355,14 @@
     <string name="provider_chksz_body">api.chksz.com の NetEase、QQ Music、Kugou リゾルバーを使います。api.chksz.com で登録し、ログイン後に個人 API キーをコピーしてください。現在、登録は LinuxDo ユーザーに限られています。API Base URL も互換のある任意のエンドポイントに変更できます。API キーはこのデバイスに保存され、MeloX のクラウド制御には含まれません。</string>
     <string name="provider_api_key_placeholder">個人 API キーを入力</string>
     <string name="provider_chksz_base_url">API Base URL</string>
+    <string name="provider_chksz_enable_hint">既定では非表示 · オンにすると表示され解析に使用</string>
+    <string name="provider_chksz_settings">リゾルバー設定</string>
+    <string name="provider_unm">UNM アンブロックリゾルバー</string>
+    <string name="provider_unm_missing">サーバー未設定 · タップして設定</string>
+    <string name="provider_unm_title">UNM アンブロック API</string>
+    <string name="provider_unm_body">GET /match?id=…&amp;server=… で UNM（UnblockNeteaseMusic 互換）サーバーを呼び出し、会員・権利・地域制限で再生できない NetEase 曲の再生可能な代替音源を取得します。自前または公開サーバーのベース URL を入力してください。音源リストはサーバーが試す音源の順序です。設定はこの端末にのみ保存され、MeloX のクラウド制御には含まれません。</string>
+    <string name="provider_unm_base_url">サーバーのベース URL</string>
+    <string name="provider_unm_servers">音源の順序 (server)</string>
     <string name="provider_clear">消去</string>
     <string name="provider_save">保存</string>
     <string name="provider_scanned_count">ローカルの曲を %1$d 件スキャンしました</string>

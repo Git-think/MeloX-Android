@@ -355,6 +355,14 @@
     <string name="provider_chksz_body">使用 api.chksz.com 的網易雲、QQ音樂和酷狗音樂解析介面。請先前往 api.chksz.com 註冊賬號並在登入後獲取個人 API Key；目前該服務僅支援 LinuxDo 使用者註冊。API Base URL 亦可指向其他相容介面。API Key 僅儲存在本機，不屬於 MeloX 雲控。</string>
     <string name="provider_api_key_placeholder">請輸入個人 API Key</string>
     <string name="provider_chksz_base_url">API Base URL</string>
+    <string name="provider_chksz_enable_hint">預設隱藏 · 開啟後顯示並參與解析</string>
+    <string name="provider_chksz_settings">解析器設定</string>
+    <string name="provider_unm">UNM 解灰解析源</string>
+    <string name="provider_unm_missing">未設定服務位址 · 點擊設定</string>
+    <string name="provider_unm_title">UNM 解灰 API</string>
+    <string name="provider_unm_body">以 GET /match?id=…&amp;server=… 呼叫 UNM（UnblockNeteaseMusic 相容）解灰服務，為會員、版權或地區受限的網易雲歌曲尋找可播放的替代音源。請填寫你自建或公開服務的位址；音源清單決定伺服器嘗試的音源順序。設定僅儲存在本機，不屬於 MeloX 雲控。</string>
+    <string name="provider_unm_base_url">服務位址 Base URL</string>
+    <string name="provider_unm_servers">音源順序 server</string>
     <string name="provider_clear">清除</string>
     <string name="provider_save">儲存</string>
     <string name="provider_scanned_count">已掃描 %1$d 首本地歌曲</string>
