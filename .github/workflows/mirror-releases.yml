@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: mirror-releases
@@ -160,3 +161,19 @@ jobs:
           args=(--repo "${GITHUB_REPOSITORY}" --title "${TITLE}" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
           gh release create "$TAG" "/tmp/MeloX-Android-${TAG}.apk" "${args[@]}"
+
+      # 合并冲突或构建/签名失败时留一条可见提示：优先创建/更新 Issue（需要仓库开启 Issues）。
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream mirror failed"
+          body=$(printf 'The upstream mirror run failed (merge conflict, build, or signing).\n\nResolve it and re-run the workflow.\n\nRun: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" \
+              || echo "::warning::Could not create the issue (Issues disabled?); check the failed run manually."
+          fi

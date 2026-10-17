@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: sync-upstream
@@ -105,3 +106,19 @@ jobs:
               --prerelease --title "Development build" \
               --notes "Rolling debug build synced from upstream, overwritten on every sync."
           gh release upload dev-latest /tmp/MeloX-Android-debug.apk --repo "${GITHUB_REPOSITORY}" --clobber
+
+      # 合并冲突或构建失败时留一条可见提示：优先创建/更新 Issue（需要仓库开启 Issues）。
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream sync failed"
+          body=$(printf 'The scheduled upstream sync failed (merge conflict or build failure).\n\nResolve it and re-run the workflow.\n\nRun: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" \
+              || echo "::warning::Could not create the issue (Issues disabled?); check the failed run manually."
+          fi
