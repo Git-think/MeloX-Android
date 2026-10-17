@@ -52,8 +52,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           before=$(git rev-parse HEAD)
-          git merge upstream/main --no-edit \
-            -m "chore: sync upstream main @ $(git rev-parse --short upstream/main)"
+          if ! git merge upstream/main --no-edit \
+            -m "chore: sync upstream main @ $(git rev-parse --short upstream/main)"; then
+            echo "Merge hit conflicts; auto-resolving the fork's README patches."
+            python3 tools/fork_readme_resolve.py
+            if git ls-files -u | grep -q .; then
+              echo "::error::Unresolved conflicts remain outside the auto-resolved README files."
+              git ls-files -u
+              exit 1
+            fi
+            git commit --no-edit
+          fi
           after=$(git rev-parse HEAD)
           if [ "$before" = "$after" ]; then
             echo "Already up to date with upstream."
@@ -114,6 +123,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           title="Upstream sync failed"
+          {
+            echo "## $title"
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
           body=$(printf 'The scheduled upstream sync failed (merge conflict or build failure).\n\nResolve it and re-run the workflow.\n\nRun: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number' 2>/dev/null || true)
           if [ -n "$existing" ]; then
