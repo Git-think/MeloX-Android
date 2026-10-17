@@ -2,9 +2,9 @@
 
 [English](README.md)
 
-[![Downloads](https://img.shields.io/github/downloads/lladlam/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/lladlam/MeloX-Android/releases)
-[![Release](https://img.shields.io/github/v/release/lladlam/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/lladlam/MeloX-Android/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/lladlam/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/lladlam/MeloX-Android/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/Git-think/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/Git-think/MeloX-Android/releases)
+[![Release](https://img.shields.io/github/v/release/Git-think/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/Git-think/MeloX-Android/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/Git-think/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/Git-think/MeloX-Android/commits/main)
 [![QQ群](https://img.shields.io/badge/QQ%E7%BE%A4-MeloX--Android-12B7F5?logo=tencentqq&logoColor=white)](https://qm.qq.com/q/wbhFQxj7mo)
 [![Telegram](https://img.shields.io/badge/Telegram-MeloX--Android-26A5E4?logo=telegram&logoColor=white)](https://t.me/+Eiy42NxIVNUwOWU1)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -26,7 +26,7 @@
 
 `0.6.5` 新增签名热更新通道：文案覆盖与受限 QuickJS 脚本都随已签名的云控 payload 下发，文案与小逻辑修复不再需要发 APK；未授权云控、验签失败或脚本失败/超时时一律回落内置行为。
 
-- 下载与完整更新日志：[GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.5)
+- 下载与完整更新日志：[GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.6.5)
 - 详细版本记录：[CHANGELOG.md](CHANGELOG.md)
 - 本次版本说明：[CHANGELOG.md](CHANGELOG.md)
 
@@ -36,6 +36,8 @@
 ## 项目说明
 
 MeloX Android 基于 [lladlam/MeloX](https://github.com/lladlam/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。
+
+本仓库是 [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android) 的 fork：本仓库的 Release 从这里的代码构建，并使用 fork 自己的签名密钥。
 
 项目目标不是使用 WebView 套壳，而是尽可能使用 Android 原生能力重新实现 MeloX：
 
@@ -136,7 +138,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - Spotify、YouTube Music 与网易云等源共用同一套 provider-neutral 下载与离线播放链路（`MeloXProviderDownloadStore`）。
 - vivo 设备自动尝试接入 OriginOS 原子岛；不提供单独开关，不支持该能力的设备自动保留标准 Android 媒体通知。该适配使用阿里云文档所述的 `notification.superx.*` 本地通知扩展，不依赖 EMAS 远程推送。
 - 支持导入 LX Music 兼容的 JavaScript 音乐源，并在受限 QuickJS 运行时中解析播放地址。
-- 可配置 CHKSZ 个人 API Key，优先解析网易云、QQ音乐和酷狗歌曲；配置前需要前往 `api.chksz.com` 注册，目前仅支持 LinuxDo 用户注册。API Base URL 也支持自定义，默认为 `https://api.chksz.com`。
+- 可配置 Meting API（兼容 metowolf/Meting）服务作为默认第三方解析源，优先解析网易云、QQ音乐和酷狗歌曲；旧版内置的 CHKSZ 解析源保留为可选开关。在「音乐服务」里填写 Meting 服务地址（服务端要求鉴权时再填 Auth 口令），或配置 CHKSZ 的 API Key。解析顺序：Meting → CHKSZ → UNM → LX 脚本。
 - 第三方解析失败时才回退到对应平台的原生播放；歌词仍由 MeloX 自己的歌词路线处理。
 
 ## 平台范围
@@ -186,7 +188,7 @@ Liquid Glass 在 Android 上使用 Kyant0 `AndroidLiquidGlass` 的原生 Backdro
 1. 克隆仓库：
 
    ```bash
-   git clone https://github.com/lladlam/MeloX-Android.git
+   git clone https://github.com/Git-think/MeloX-Android.git
    cd MeloX-Android
    ```
 
@@ -296,7 +298,7 @@ Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/An
 
 ### 反馈问题与建议
 
-- 请优先前往 [GitHub Issues](https://github.com/lladlam/MeloX-Android/issues) 提交问题或建议；
+- 请优先前往 [GitHub Issues](https://github.com/Git-think/MeloX-Android/issues) 提交问题或建议；
 - 如因网络问题无法访问，请**填写邮件发送至 `lladlam@outlook.com`**，注明**主题**、**问题详细说明 / 建议说明**，并附上**截图与日志**。
 
 ### 贡献代码

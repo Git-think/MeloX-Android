@@ -40,7 +40,7 @@ entry = {
     "fromApkSha256": sha(old),
     "toVersion": to_version or "TODO",
     "apkSha256": sha(new),
-    "patchUrl": "https://github.com/lladlam/MeloX-Android/releases/download/<tag>/" + pathlib.Path(out_path).name,
+    "patchUrl": "https://github.com/Git-think/MeloX-Android/releases/download/<tag>/" + pathlib.Path(out_path).name,
     "patchSha256": sha(patch),
     "patchBytes": len(patch),
 }

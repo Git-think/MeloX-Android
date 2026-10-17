@@ -31,7 +31,7 @@ jobs:
   redirect:
     runs-on: ubuntu-latest
     # Skip PRs opened by the maintainer / bots; only nudge outside contributors.
-    if: ${{ github.actor != 'lladlam' && github.actor != 'github-actions[bot]' }}
+    if: ${{ github.actor != 'Git-think' && github.actor != 'github-actions[bot]' }}
     steps:
       - name: Comment asking to retarget to `contributor`
         uses: actions/github-script@v7

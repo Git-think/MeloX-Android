@@ -2,9 +2,9 @@
 
 [中文](README.md)
 
-[![Downloads](https://img.shields.io/github/downloads/lladlam/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/lladlam/MeloX-Android/releases)
-[![Release](https://img.shields.io/github/v/release/lladlam/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/lladlam/MeloX-Android/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/lladlam/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/lladlam/MeloX-Android/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/Git-think/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/Git-think/MeloX-Android/releases)
+[![Release](https://img.shields.io/github/v/release/Git-think/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/Git-think/MeloX-Android/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/Git-think/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/Git-think/MeloX-Android/commits/main)
 [![QQ Group](https://img.shields.io/badge/QQ%20Group-MeloX--Android-12B7F5?logo=tencentqq&logoColor=white)](https://qm.qq.com/q/wbhFQxj7mo)
 [![Telegram](https://img.shields.io/badge/Telegram-MeloX--Android-26A5E4?logo=telegram&logoColor=white)](https://t.me/+Eiy42NxIVNUwOWU1)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -26,7 +26,7 @@
 
 `0.6.5` adds a signed hot-update channel: UI text overrides and sandboxed QuickJS behaviour hooks delivered inside the already-signed remote config, so copy and small logic fixes no longer need an APK. Everything falls back to the built-in text and logic when consent is off, the config is unverified, or a hook fails or times out.
 
-- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.5)
+- Download and full notes: [GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.6.5)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
@@ -35,6 +35,8 @@
 ## About
 
 MeloX Android is a native Android port of the design, interaction, and business logic in [lladlam/MeloX](https://github.com/lladlam/MeloX).
+
+This repository is the Git-think fork of [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android): releases here are built from this fork's code and signed with this fork's key.
 
 The goal is not a WebView wrapper. MeloX is reimplemented with native Android capabilities:
 
@@ -135,7 +137,7 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Spotify, YouTube Music, NetEase, and the other sources share the provider-neutral download and offline path (`MeloXProviderDownloadStore`).
 - vivo devices automatically try OriginOS Atomic Island. There is no separate switch. Unsupported devices keep the standard Android media notification. The adapter uses the documented local `notification.superx.*` extras and does not depend on EMAS push.
 - LX Music compatible JavaScript sources can be imported and resolved in a restricted QuickJS runtime.
-- A personal CHKSZ API key can be configured to resolve NetEase, QQ Music, and Kugou tracks first. Register at `api.chksz.com`. Registration currently requires a LinuxDo account.
+- A Meting API server (metowolf/Meting compatible) can be configured as the default third-party resolver for NetEase, QQ Music, and Kugou tracks; the CHKSZ resolver from earlier releases is still available as an optional API key resolver. Enter the Meting server base URL (and auth token if required), or a CHKSZ API key, under Music Services. Resolution order: Meting → CHKSZ → UNM → LX scripts.
 - If third-party resolution fails, playback falls back to the platform's native player. Lyrics still use MeloX's own lyric path.
 
 ## Platform scope
@@ -185,7 +187,7 @@ Some RuntimeShader and Backdrop effects need a newer Android version. Older vers
 1. Clone:
 
    ```bash
-   git clone https://github.com/lladlam/MeloX-Android.git
+   git clone https://github.com/Git-think/MeloX-Android.git
    cd MeloX-Android
    ```
 

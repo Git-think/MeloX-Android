@@ -54,4 +54,4 @@ MeloX 源代码按项目仓库所载开源许可证提供。修改、编译或�
 
 ## 十、联系我们
 
-如需报告侵权、错误内容、安全问题或其他争议，请通过 MeloX 项目主页的 GitHub Issues 联系维护者：https://github.com/lladlam/MeloX-Android/issues
+如需报告侵权、错误内容、安全问题或其他争议，请通过 MeloX 项目主页的 GitHub Issues 联系维护者：https://github.com/Git-think/MeloX-Android/issues

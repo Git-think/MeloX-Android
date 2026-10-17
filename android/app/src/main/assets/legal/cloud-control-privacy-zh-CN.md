@@ -63,4 +63,4 @@ MeloX Android 客户端和公开签名配置可供审查。第三方自行编译
 
 ## 九、联系我们
 
-如对云控范围、签名配置或本协议有疑问，请通过 MeloX Android 项目主页的 GitHub Issues 联系维护者：https://github.com/lladlam/MeloX-Android/issues
+如对云控范围、签名配置或本协议有疑问，请通过 MeloX Android 项目主页的 GitHub Issues 联系维护者：https://github.com/Git-think/MeloX-Android/issues

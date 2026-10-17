@@ -201,7 +201,7 @@ class MeloXRemoteConfigModelsTest {
                     "fromApkSha256": "$good",
                     "toVersion": "0.6.6",
                     "apkSha256": "$good",
-                    "patchUrl": "https://github.com/lladlam/MeloX-Android/releases/download/0.6.6/MeloX-0.6.5-0.6.6.patch",
+                    "patchUrl": "https://github.com/Git-think/MeloX-Android/releases/download/0.6.6/MeloX-0.6.5-0.6.6.patch",
                     "patchSha256": "$good",
                     "patchBytes": 123456
                   },

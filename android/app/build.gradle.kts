@@ -173,18 +173,17 @@ android {
             meloxReleaseSigning?.let { signingConfig = it }
 
             // ── Package id ──────────────────────────────────────────────────
-            // The official MeloX already owns com.lladlam.melox.android under
-            // upstream's signing key, and Android refuses to update an app whose
-            // new APK carries a different key. Keeping the bare id here means
-            // every release install fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE
-            // for as long as the official build is present — a fork can never be
-            // a clean in-place update. A distinct id makes each future release a
-            // safe update, permanently. Manifest authorities are all
+            // Fork patch: release builds keep the official id
+            // (com.lladlam.melox.android). Upstream defaults to ".fork" so a
+            // fork install can coexist with the official app; this fork ships
+            // the official id instead. The APK is still signed with the fork
+            // key, so it cannot update an official install in place — the
+            // official app (or a previous ".fork" build) must be uninstalled
+            // first. Manifest authorities are all
             // ${applicationId} templates, so nothing else has to change.
-            // Override with -PmeloxReleaseIdSuffix= (empty) to target the
-            // official id instead.
+            // Override with -PmeloxReleaseIdSuffix=.suffix to add one back.
             val releaseIdSuffix = providers.gradleProperty("meloxReleaseIdSuffix").orNull
-                ?: ".fork"
+                ?: ""
             if (releaseIdSuffix.isNotBlank()) {
                 applicationIdSuffix = releaseIdSuffix
             }

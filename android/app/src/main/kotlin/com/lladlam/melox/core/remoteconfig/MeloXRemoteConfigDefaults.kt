@@ -29,7 +29,7 @@ object MeloXRemoteConfigDefaults {
     )
 
     /** Only files under this prefix may be referenced by the updater. */
-    const val PinnedReleasePrefix = "https://github.com/lladlam/MeloX-Android/releases/download/"
+    const val PinnedReleasePrefix = "https://github.com/Git-think/MeloX-Android/releases/download/"
 
     val Rules = MeloXRemoteRules(
         lyricMatchOriginalToleranceMs = 2_000L,

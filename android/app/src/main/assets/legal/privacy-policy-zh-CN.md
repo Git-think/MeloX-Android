@@ -82,4 +82,4 @@ MeloX 使用 Android 应用沙箱保存私有数据，并尽量减少凭据暴�
 
 ## 十、联系我们
 
-如对隐私处理、数据删除或本政策有疑问，请通过 MeloX 项目主页的 GitHub Issues 联系维护者：https://github.com/lladlam/MeloX-Android/issues
+如对隐私处理、数据删除或本政策有疑问，请通过 MeloX 项目主页的 GitHub Issues 联系维护者：https://github.com/Git-think/MeloX-Android/issues

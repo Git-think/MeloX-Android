@@ -17,7 +17,7 @@
 | 能力 | 位置 | 说明 |
 | --- | --- | --- |
 | 签名云控 | `core/remoteconfig/` | 远程 JSON，签名校验（`MeloXRemoteConfigVerifier`），能力开关 `disabledCapabilities`、回退顺序 `fallback`、公告；按 `versionCode` 区间生效（`appliesTo`）。已能当 kill switch。 |
-| 整包更新 | `core/update/MeloXUpdateClient.kt` | GitHub Releases 检查，`isNewer(versionName)` 语义比较；仅允许 `github.com/lladlam/MeloX-Android/releases/download/` 下的 APK。 |
+| 整包更新 | `core/update/MeloXUpdateClient.kt` | GitHub Releases 检查，`isNewer(versionName)` 语义比较；仅允许 `github.com/Git-think/MeloX-Android/releases/download/` 下的 APK。 |
 | 脚本运行时 | `quickjs-android`（`LxUserRuntime.kt`） | 目前只执行 lx-music 用户脚本。已有沙箱执行的基础。 |
 | 分发渠道 | GitHub Releases | 自签名自分发，不受 Google Play 的动态代码加载政策约束（但见 §5）。 |
 
@@ -175,7 +175,7 @@
 ```json
 {
   "fromApkSha256": "...", "toVersion": "0.6.5", "apkSha256": "...",
-  "patchUrl": "https://github.com/lladlam/MeloX-Android/releases/download/<tag>/xxx.patch",
+  "patchUrl": "https://github.com/Git-think/MeloX-Android/releases/download/<tag>/xxx.patch",
   "patchSha256": "...", "patchBytes": 5016788
 }
 ```
