@@ -335,6 +335,16 @@ The MeloX Android code is released under the same **GNU General Public License v
 
 Copying, modifying, or distributing this project requires compliance with GPLv3, including source availability, copyright notices, change notices, and same-license distribution.
 
+## Sponsors / 赞助致谢
+
+感谢以下朋友对 MeloX Android 的赞助与支持！
+
+| 赞助者 | 赞助金额 |
+| --- | --- |
+| 爱发电用户\_26d40 | 50 元 |
+| 爱发电用户\_aec4c | 6 元（包月） |
+| Bai | 5 元 |
+
 ## Links
 
 - [LINUX DO](https://linux.do/)
