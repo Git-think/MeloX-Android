@@ -168,7 +168,11 @@ class NeteasePlaybackResolver(
         if (quality == MusicQualityRuntime.selected) {
             CrossProviderPlaybackRuntime.clear(songId)
         }
-        ResolvedRequest(Uri.parse(source.url))
+        // 网易云直链约 20 分钟有效：缓存 20 分钟，过期后重新解析，避免拿到失效链接。
+        ResolvedRequest(
+            uri = Uri.parse(source.url),
+            expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
+        )
     } catch (error: NeteasePlaybackUnavailableException) {
         val fallback = fallbackRequest
             ?.copy(quality = quality.toCommonTier())
@@ -214,6 +218,7 @@ class NeteasePlaybackResolver(
                 Log.i(TAG, "Resolve success song=$songId stage=chksz")
                 return ResolvedRequest(
                     uri = Uri.parse(result.url),
+                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
                     cacheIdentity = "chksz:${chkszPlayback?.cacheIdentity().orEmpty()}",
                 )
             }
@@ -223,6 +228,7 @@ class NeteasePlaybackResolver(
                 Log.i(TAG, "Resolve success song=$songId stage=unm")
                 return ResolvedRequest(
                     uri = Uri.parse(result.url),
+                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
                     cacheIdentity = "unm:${unmPlayback?.cacheIdentity().orEmpty()}",
                 )
             }
@@ -242,6 +248,7 @@ class NeteasePlaybackResolver(
                     return ResolvedRequest(
                         uri = Uri.parse(result.url),
                         headers = result.requestHeaders,
+                        expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
                         cacheIdentity = "lx-user:${result.sourceId}",
                     )
                 }
@@ -395,6 +402,9 @@ class NeteasePlaybackResolver(
 
         /** 「音源不可用」失败的冷却时长：重试期间不重复跑整条降级链。 */
         private const val FAILURE_COOLDOWN_MS = 15_000L
+
+        /** 网易云直链有效期约 20 分钟：解析结果最多缓存 20 分钟，过期后重新解析。 */
+        private const val DIRECT_LINK_TTL_MS = 20 * 60 * 1_000L
 
         private fun playbackCacheKey(
             songId: Long,
