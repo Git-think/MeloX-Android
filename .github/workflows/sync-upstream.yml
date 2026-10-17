@@ -37,6 +37,11 @@ jobs:
           # Full history so the merge sees both sides.
           fetch-depth: 0
           ref: main
+          # 上游可能改动 .github/workflows/ 下的文件；GITHUB_TOKEN 是 GitHub App
+          # 身份，没有 `workflows` 权限，带工作流文件变更的推送会被拒绝。
+          # 配置带 `workflow` scope 的 PAT（secret: SYNC_TOKEN）后即可正常推送；
+          # 未配置时回退默认 token（行为与之前一致）。
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
 
       - name: Merge upstream main
         id: merge
