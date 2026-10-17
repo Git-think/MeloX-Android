@@ -1,5 +1,8 @@
 package com.lladlam.melox.ui.podcast
 
+import com.lladlam.melox.ui.layout.LocalMeloXListDetail
+import com.lladlam.melox.ui.layout.rememberMeloXDetailSelection
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -108,7 +111,7 @@ private fun Modifier.meloxPodcastSharedArtwork(
     animatedVisibilityScope: AnimatedVisibilityScope?,
     key: String,
 ): Modifier {
-    if (sharedTransitionScope == null || animatedVisibilityScope == null) return this
+    if (LocalMeloXListDetail.current || sharedTransitionScope == null || animatedVisibilityScope == null) return this
     return with(sharedTransitionScope) {
         this@meloxPodcastSharedArtwork.sharedElement(
             sharedContentState = rememberSharedContentState(key = key),
@@ -138,6 +141,7 @@ fun MeloXPodcastScreen(
     // UI 线程被占住 ⇒ 观感是「点下去先卡一下，然后才开始滑」。
     deferLoadMillis: Long = 0,
 ) {
+    val onDetailSelected = rememberMeloXDetailSelection()
     val context = LocalContext.current.applicationContext
     val client = remember(context) {
         NeteaseUniversalSearchClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
@@ -196,6 +200,7 @@ fun MeloXPodcastScreen(
                 sharedTransitionScope = sharedScope,
                 selectedArtworkKey = selectedCardKey,
                 onPodcast = { podcast, artworkKey ->
+                    onDetailSelected()
                     selectedPodcastId = podcast.id
                     selectedCardKey = artworkKey
                     detailPodcast = podcast
@@ -594,7 +599,7 @@ private fun PodcastCardVisibility(
     content: @Composable AnimatedVisibilityScope.() -> Unit,
 ) {
     AnimatedVisibility(
-        visible = artworkKey != selectedArtworkKey,
+        visible = LocalMeloXListDetail.current || artworkKey != selectedArtworkKey,
         enter = fadeIn() + scaleIn(),
         exit = fadeOut() + scaleOut(),
         modifier = modifier,

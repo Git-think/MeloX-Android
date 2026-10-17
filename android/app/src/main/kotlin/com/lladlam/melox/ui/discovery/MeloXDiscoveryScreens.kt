@@ -1,5 +1,8 @@
 package com.lladlam.melox.ui.discovery
 
+import com.lladlam.melox.ui.layout.LocalMeloXListDetail
+import com.lladlam.melox.ui.layout.rememberMeloXDetailSelection
+
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
@@ -270,6 +273,8 @@ fun MeloXHomeScreen(
 
 @Composable
 private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
+    val onDetailSelected = rememberMeloXDetailSelection()
+    val hostContext = LocalContext.current
     val context = LocalContext.current.applicationContext
     val cache = remember(context) { NeteaseLibraryCache(context) }
     val client by remember(context) {
@@ -374,7 +379,7 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
             subtitle = profile.signature
                 ?.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) }
                 ?: stringResource(R.string.home_profile_subtitle),
-            onClick = { MeloXAccountActivity.launch(context, profile.userId) },
+            onClick = { MeloXAccountActivity.launch(hostContext, profile.userId) },
         )
     }
 
@@ -474,6 +479,7 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
                                 artworkUrl = songs.firstOrNull()?.artworkUrl,
                                 songs = songs,
                             )
+                            onDetailSelected()
                             songList = list
                             overlaySongList = list
                         } else {
@@ -486,6 +492,7 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
                 }
             },
             onCollection = {
+                onDetailSelected()
                 // 立即写入，不排队：退场途中再点卡时由 MeloXInterruptiblePage 的弹簧在途改向
                 // （继承当前位移与速度），点下去即响应 —— 这正是「退出后能立刻点击」。
                 selectedCollection = it
@@ -624,6 +631,7 @@ private fun HomeSongListDetail(
 
 @Composable
 private fun ProviderHomeDataScreen(source: MusicSource, onOpenTool: (String) -> Unit) {
+    val onDetailSelected = rememberMeloXDetailSelection()
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val registry = remember(source) { MeloXMusicProviders.create(context) }
@@ -730,6 +738,7 @@ private fun ProviderHomeDataScreen(source: MusicSource, onOpenTool: (String) -> 
                     }
                 },
                 onCollection = {
+                    onDetailSelected()
                     selectedCollection = it
                     overlayCollection = it
                 },
@@ -772,7 +781,7 @@ private fun MeloXHomeLayout(
     // 由 host 顶层 SharedTransitionLayout 传入；为空时卡片不做共享元素。
     sharedTransitionScope: SharedTransitionScope? = null,
 ) {
-    val context = LocalContext.current.applicationContext
+    val context = LocalContext.current
     val exploreListState = rememberLazyListState()
     // ⚠ 2026-09-29：状态栏避让从「容器 `statusBarsPadding()`」改成「滚动容器的顶部
     //   contentPadding」。原来 padding 打在 LazyColumn 的 modifier 上 ⇒ 列表视口
@@ -983,6 +992,7 @@ fun MeloXExploreScreen(source: MusicSource = MusicSource.Netease) {
 
 @Composable
 private fun NeteaseExploreDataScreen() {
+    val onDetailSelected = rememberMeloXDetailSelection()
     val context = LocalContext.current.applicationContext
     val cache = remember(context) { NeteaseLibraryCache(context) }
     val client = remember(context) { NeteaseLibraryClient({ NeteaseSessionStore.readCookie(context) }) }
@@ -1052,6 +1062,7 @@ private fun NeteaseExploreDataScreen() {
             onRefresh = ::refresh,
             showPodcast = category == "播客",
             onCollection = {
+                onDetailSelected()
                 // 立即写入，不排队：退场途中再点卡时由 MeloXInterruptiblePage 的弹簧在途改向
                 // （继承当前位移与速度），点下去即响应 —— 这正是「退出后能立刻点击」。
                 selectedCollection = it
@@ -1080,6 +1091,7 @@ private fun NeteaseExploreDataScreen() {
 
 @Composable
 private fun ProviderExploreDataScreen(source: MusicSource) {
+    val onDetailSelected = rememberMeloXDetailSelection()
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val provider = remember(source) { MeloXMusicProviders.create(context).require(source) }
@@ -1152,6 +1164,7 @@ private fun ProviderExploreDataScreen(source: MusicSource) {
             onRefresh = ::refresh,
             showPodcast = false,
             onCollection = {
+                onDetailSelected()
                 selectedCollection = it
                 overlayCollection = it
             },
@@ -1395,7 +1408,7 @@ private fun DiscoveryCardVisibility(
     content: @Composable AnimatedVisibilityScope.() -> Unit,
 ) {
     AnimatedVisibility(
-        visible = collection.key != selectedCollectionKey,
+        visible = LocalMeloXListDetail.current || collection.key != selectedCollectionKey,
         // ⚠⚠ **`enter` 必须是 `None`；`exit` 必须与 hero morph 同拍**
         //   （用户反复报「一个卡片没完全退出时点击另一个卡片打开，会残留上一个卡片」，试过
         //   `fadeIn` —— **没修复**，因为只要 enter 带任何动画就还会露半透明旧卡片）。
@@ -1679,7 +1692,7 @@ private fun Modifier.meloXDiscoverySharedArtwork(
     animatedVisibilityScope: AnimatedVisibilityScope?,
     key: String,
 ): Modifier {
-    if (sharedTransitionScope == null || animatedVisibilityScope == null) return this
+    if (LocalMeloXListDetail.current || sharedTransitionScope == null || animatedVisibilityScope == null) return this
     return with(sharedTransitionScope) {
         this@meloXDiscoverySharedArtwork.sharedElement(
             sharedContentState = rememberSharedContentState(key = key),

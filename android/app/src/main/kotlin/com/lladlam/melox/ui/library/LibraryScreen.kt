@@ -147,6 +147,11 @@ import com.lladlam.melox.core.network.NeteaseCollectionDetailsClient
 import com.lladlam.melox.core.network.NeteaseSearchClient
 import com.lladlam.melox.playback.PlaybackCommands
 import com.lladlam.melox.ui.MeloXBottomContentClearance
+import com.lladlam.melox.ui.MeloXInterruptiblePage
+import com.lladlam.melox.ui.layout.LocalMeloXListDetail
+import com.lladlam.melox.ui.layout.LocalMeloXInDetailPane
+import com.lladlam.melox.ui.layout.rememberMeloXDetailSelection
+import androidx.compose.runtime.key
 import com.lladlam.melox.ui.glass.meloXLiquidBottomBar
 import com.lladlam.melox.ui.glass.MeloXActionIcon
 import com.lladlam.melox.ui.glass.MeloXSwipeAction
@@ -260,6 +265,7 @@ fun LibraryScreen(
             .takeIf { forcedPageName != null || it.isEnabled(source, provider) }
             ?: fallback
     }
+    val onDetailSelected = rememberMeloXDetailSelection()
     var selectedPage by remember(source, forcedPageName) { mutableStateOf(initialLibraryPage) }
     var selectedPlaylist by remember(source, session.cookie) { mutableStateOf<NeteasePlaylistSummary?>(null) }
     var savedAlbums by remember(source) { mutableStateOf<List<MusicAlbumSummary>>(emptyList()) }
@@ -434,17 +440,6 @@ fun LibraryScreen(
         MeloXLibraryLoginUnavailable(onLogin, source)
         return
     }
-    val openAlbum = selectedAlbum
-    if (openAlbum != null) {
-        MeloXUnifiedProviderAlbumDetailScreen(album = openAlbum, onBack = { selectedAlbum = null })
-        return
-    }
-    val openArtist = selectedArtist
-    if (openArtist != null) {
-        MeloXProviderArtistDetailScreen(artist = openArtist, onBack = { selectedArtist = null })
-        return
-    }
-
     PullToRefreshBox(
         isRefreshing = loading && snapshot != null,
         onRefresh = { scope.launch { refreshLibrary() } },
@@ -453,56 +448,8 @@ fun LibraryScreen(
       SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
           val sharedScope = this
 
-        AnimatedContent(
-            targetState = selectedPlaylist,
-            modifier = Modifier.fillMaxSize(),
-            transitionSpec = {
-                val openingDetail = targetState != null
-                (
-                    fadeIn(
-                        animationSpec = tween(
-                            durationMillis = MeloXMotion.ContentEnterMillis,
-                            delayMillis = 0,
-                            easing = FastOutSlowInEasing,
-                        ),
-                    ) togetherWith fadeOut(
-                        animationSpec = tween(
-                            durationMillis = MeloXMotion.ContentExitMillis,
-                            easing = FastOutSlowInEasing,
-                        ),
-                    )
-                ).apply {
-                    // The newest target must stay above any retained outgoing
-                    // playlist content while an interrupted reverse animation finishes.
-                    targetContentZIndex = if (openingDetail) 2f else 0f
-                }
-            },
-            contentKey = { playlist -> playlist?.id ?: Long.MIN_VALUE },
-            label = "library-playlist-detail-transition",
-        ) { targetPlaylist ->
+        AnimatedVisibility(visible = true) {
             val playlistTransitionVisibilityScope = this
-            if (targetPlaylist != null) {
-                MeloXPlaylistDetailScreen(
-                    initialPlaylist = targetPlaylist,
-                    client = client,
-                    onBack = { selectedPlaylist = null },
-                    sharedTransitionScope = sharedScope,
-                    animatedVisibilityScope = playlistTransitionVisibilityScope,
-                    onModalVisibilityChanged = onModalVisibilityChanged,
-                    // ★ 详情页取消收藏后回刷资料库（收藏列表里该行应消失）。
-                    onLibraryChanged = { scope.launch { refreshLibrary() } },
-                    // ★ 让详情页知道哪一个是系统歌单「我喜欢的音乐」（不可删除 / 不可取消订阅）。
-                    likedPlaylistId = snapshot?.likedPlaylistId,
-                    onSongLikeChanged = { song, liked ->
-                        val current = snapshot ?: return@MeloXPlaylistDetailScreen
-                        val updated = current.withSongLiked(song, liked)
-                        snapshot = updated
-                        session.profile?.userId?.let { userId ->
-                            scope.launch { cache.saveSnapshot(userId, updated) }
-                        }
-                    },
-                )
-            } else {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -586,8 +533,20 @@ fun LibraryScreen(
                             MeloXLibraryPage.Playlists -> MeloXLibraryPlaylistsPage(
                                 playlists = data.playlists,
                                 localRecommendations = localRecommendations,
-                                onLocalRecommendationsClick = { showLocalRecommendations = true },
-                                onPlaylistClick = { selectedPlaylist = it },
+                                onLocalRecommendationsClick = {
+                                    onDetailSelected()
+                                    selectedPlaylist = null
+                                    selectedAlbum = null
+                                    selectedArtist = null
+                                    showLocalRecommendations = true
+                                },
+                                onPlaylistClick = {
+                                    onDetailSelected()
+                                    selectedAlbum = null
+                                    selectedArtist = null
+                                    showLocalRecommendations = false
+                                    selectedPlaylist = it
+                                },
                                 // ★ 歌单删除 / 取消收藏（2026-10-07 修复「收藏的歌单删不掉」）：
                                 //   资料库歌单列表来自 `/api/user/playlist`，只含两类内容 ——
                                 //     ① 系统歌单「我喜欢的音乐」：网易云不允许删除或取关 ⇒ 直接提示，不发请求
@@ -662,7 +621,13 @@ fun LibraryScreen(
                                     )
                                 },
                                 emptyRes = R.string.library_no_albums,
-                                onClick = { index -> selectedAlbum = savedAlbums.getOrNull(index) },
+                                onClick = { index ->
+                                    onDetailSelected()
+                                    selectedPlaylist = null
+                                    selectedArtist = null
+                                    showLocalRecommendations = false
+                                    selectedAlbum = savedAlbums.getOrNull(index)
+                                },
                             )
 
                             MeloXLibraryPage.Artists -> MeloXLibraryCoverListPage(
@@ -676,19 +641,67 @@ fun LibraryScreen(
                                     )
                                 },
                                 emptyRes = R.string.library_no_artists,
-                                onClick = { index -> selectedArtist = followedArtists.getOrNull(index) },
+                                onClick = { index ->
+                                    onDetailSelected()
+                                    selectedPlaylist = null
+                                    selectedAlbum = null
+                                    showLocalRecommendations = false
+                                    selectedArtist = followedArtists.getOrNull(index)
+                                },
                             )
                         }
                     }
                 }
-            }
         }
       }
     }
-    if (showLocalRecommendations) {
-        LocalRecommendationPlaylistScreen(
-            onBack = { showLocalRecommendations = false },
-        )
+    MeloXInterruptiblePage(
+        visible = selectedPlaylist != null || selectedAlbum != null || selectedArtist != null || showLocalRecommendations,
+        onBack = {
+            when {
+                selectedArtist != null -> selectedArtist = null
+                selectedAlbum != null -> selectedAlbum = null
+                selectedPlaylist != null -> selectedPlaylist = null
+                else -> showLocalRecommendations = false
+            }
+        },
+    ) {
+        when {
+            selectedPlaylist != null -> {
+                val playlist = selectedPlaylist!!
+                key(playlist.id) {
+                SharedTransitionLayout(Modifier.fillMaxSize()) {
+                    AnimatedVisibility(visible = true) {
+                        MeloXPlaylistDetailScreen(
+                            initialPlaylist = playlist,
+                            client = client,
+                            onBack = { selectedPlaylist = null },
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this,
+                            onModalVisibilityChanged = onModalVisibilityChanged,
+                            onLibraryChanged = { scope.launch { refreshLibrary() } },
+                            likedPlaylistId = snapshot?.likedPlaylistId,
+                            onSongLikeChanged = { song, liked ->
+                                val current = snapshot ?: return@MeloXPlaylistDetailScreen
+                                val updated = current.withSongLiked(song, liked)
+                                snapshot = updated
+                                session.profile?.userId?.let { userId ->
+                                    scope.launch { cache.saveSnapshot(userId, updated) }
+                                }
+                            },
+                        )
+                    }
+                }
+                }
+            }
+            selectedAlbum != null -> MeloXUnifiedProviderAlbumDetailScreen(
+                album = selectedAlbum!!, onBack = { selectedAlbum = null },
+            )
+            selectedArtist != null -> MeloXProviderArtistDetailScreen(
+                artist = selectedArtist!!, onBack = { selectedArtist = null },
+            )
+            showLocalRecommendations -> LocalRecommendationPlaylistScreen(onBack = { showLocalRecommendations = false })
+        }
     }
 }
 
@@ -751,8 +764,8 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
         if (page != MeloXDownloadsPage.PlaylistDetail) selectedPlaylistId = null
     }
 
-    when (page) {
-        MeloXDownloadsPage.Root -> LazyColumn(
+    val split = LocalMeloXListDetail.current && !LocalMeloXInDetailPane.current
+    if (page == MeloXDownloadsPage.Root || split) LazyColumn(
   modifier = Modifier.fillMaxSize(),
   contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 146.dp),
   verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -979,6 +992,15 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
   }
         }
 
+    MeloXInterruptiblePage(
+        visible = page != MeloXDownloadsPage.Root,
+        onBack = {
+            page = if (page == MeloXDownloadsPage.PlaylistDetail) MeloXDownloadsPage.Playlists else MeloXDownloadsPage.Root
+        },
+    ) {
+      Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+       when (page) {
+        MeloXDownloadsPage.Root -> Unit
         MeloXDownloadsPage.Active -> LazyColumn(
   modifier = Modifier.fillMaxSize(),
   contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 146.dp),
@@ -1101,6 +1123,8 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
       }
   }
         }
+       }
+      }
     }
 }
 
@@ -1868,7 +1892,7 @@ internal fun MeloXUnifiedPlaylistDetailScreen(
     val client = remember(context) {
         NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
     }
-    if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+    if (!LocalMeloXListDetail.current && sharedTransitionScope != null && animatedVisibilityScope != null) {
         MeloXPlaylistDetailScreen(
             initialPlaylist = playlist,
             client = client,
@@ -1958,7 +1982,7 @@ internal fun MeloXUnifiedProviderAlbumDetailScreen(
     val client = remember(context) {
         NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
     }
-    if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+    if (!LocalMeloXListDetail.current && sharedTransitionScope != null && animatedVisibilityScope != null) {
         MeloXPlaylistDetailScreen(
             initialPlaylist = placeholder,
             client = client,

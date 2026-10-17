@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.lladlam.melox.core.account.rememberNeteaseSessionStore
+import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.ui.MeloXPageHost
 import com.lladlam.melox.ui.finishMeloXPage
@@ -54,9 +56,6 @@ class MeloXSettingsDetailActivity : ComponentActivity() {
         val route = intent.getStringExtra(EXTRA_ROUTE)
             ?.let { name -> SettingsRoute.entries.firstOrNull { it.name == name } }
             ?: run { finish(); return }
-        val source = intent.getStringExtra(EXTRA_SOURCE)
-            ?.let { name -> runCatching { MusicSource.valueOf(name) }.getOrNull() }
-            ?: MusicSource.Netease
         enableEdgeToEdge()
         prepareMeloXPageWindow()
         setContent {
@@ -77,12 +76,7 @@ class MeloXSettingsDetailActivity : ComponentActivity() {
                                 .layerBackdrop(pageBackdrop),
                         )
                         CompositionLocalProvider(LocalMeloXBackdrop provides pageBackdrop) {
-                            SettingsDetailScreen(
-                                route = route,
-                                source = source,
-                                session = rememberNeteaseSessionStore(),
-                                onBack = ::finishMeloXPage,
-                            )
+                            MeloXSettingsDetailPage(intent, ::finishMeloXPage)
                         }
                     }
                 }
@@ -112,4 +106,18 @@ class MeloXSettingsDetailActivity : ComponentActivity() {
             )
         }
     }
+}
+
+/** Shared by the standalone page and the adaptive detail pane. */
+@Composable
+internal fun MeloXSettingsDetailPage(
+    intent: Intent,
+    onBack: () -> Unit,
+    session: NeteaseSessionStore = rememberNeteaseSessionStore(),
+) {
+    val route = intent.getStringExtra("settings_route")
+        ?.let { name -> SettingsRoute.entries.firstOrNull { it.name == name } } ?: return
+    val source = intent.getStringExtra("settings_source")
+        ?.let { runCatching { MusicSource.valueOf(it) }.getOrNull() } ?: MusicSource.Netease
+    SettingsDetailScreen(route, source, session, onBack)
 }

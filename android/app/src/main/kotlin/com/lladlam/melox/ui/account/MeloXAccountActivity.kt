@@ -99,7 +99,7 @@ class MeloXAccountActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AccountHomeScreen(userId: Long, onBack: () -> Unit) {
+internal fun AccountHomeScreen(userId: Long, onBack: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext
     val cookie = remember(app) { { NeteaseSessionStore.readCookie(app) } }
