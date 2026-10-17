@@ -287,6 +287,13 @@ fun ProviderSettingsHub(
                     }
 
                     Spacer(Modifier.height(16.dp))
+                    if (currentSource == MusicSource.YouTubeMusic && currentAccount.loggedIn) {
+                        YouTubeAccountControls(onRelogin = {
+                            showServiceDialog = false
+                            showYouTubeLogin = true
+                        })
+                        Spacer(Modifier.height(16.dp))
+                    }
                     Text(
                         stringResource(R.string.provider_cross_search),
                         fontSize = 13.sp,

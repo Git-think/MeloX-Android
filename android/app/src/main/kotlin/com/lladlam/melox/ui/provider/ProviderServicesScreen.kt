@@ -344,6 +344,10 @@ fun ProviderServicesScreen(
         }
 
         Spacer(Modifier.size(24.dp))
+        if (currentSource == MusicSource.YouTubeMusic && currentAccount.loggedIn) {
+            YouTubeAccountControls(onRelogin = { showYouTubeLogin = true })
+            Spacer(Modifier.size(24.dp))
+        }
         if (currentSource == MusicSource.Local) {
             ServicesSectionLabel(stringResource(R.string.provider_local_library))
             MeloXIosGroupedList(surfaceColor = MaterialTheme.colorScheme.surface) {

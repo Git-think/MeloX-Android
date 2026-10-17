@@ -25,7 +25,9 @@ data class YouTubeClient(
     val requirePoToken: Boolean = false,
     val includeUserAgentInContext: Boolean = false,
 ) {
-    fun toContext(locale: YouTubeLocale, visitorData: String?, dataSyncId: String?) = Context(
+    fun toContext(locale: YouTubeLocale, visitorData: String?, dataSyncId: String?): Context {
+        val requestLocale = locale.normalized()
+        return Context(
         thirdParty = if (isEmbedded) Context.ThirdParty(embedUrl = "https://www.reddit.com/") else null,
         client = Context.Client(
             clientName = clientName,
@@ -36,14 +38,15 @@ data class YouTubeClient(
             deviceMake = deviceMake,
             deviceModel = deviceModel,
             androidSdkVersion = androidSdkVersion,
-            gl = locale.gl,
-            hl = locale.hl,
+            gl = requestLocale.gl,
+            hl = requestLocale.hl,
             visitorData = visitorData
         ),
         user = Context.User(
             onBehalfOfUser = if (loginSupported) dataSyncId else null
         ),
     )
+    }
 
     companion object {
         const val USER_AGENT_WEB = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"

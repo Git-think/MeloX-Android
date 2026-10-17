@@ -4,11 +4,16 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -22,6 +27,9 @@ import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,15 +58,18 @@ import com.lladlam.melox.ui.provider.MeloXProviderServicesActivity
 import com.lladlam.melox.ui.provider.ProviderServicesPage
 import com.lladlam.melox.ui.settings.MeloXSettingsDetailActivity
 import com.lladlam.melox.ui.settings.MeloXSettingsDetailPage
+import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.song.MeloXSongWikiActivity
 import com.lladlam.melox.ui.song.MeloXSongWikiPage
 import com.lladlam.melox.ui.cloud.MeloXCloudMusicScreen
 import com.lladlam.melox.ui.library.LibraryScreen
 import com.lladlam.melox.ui.podcast.MeloXPodcastScreen
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /** Window aspect ratio, deliberately independent of device type and width classes. */
-internal fun meloXUsesListDetail(size: IntSize): Boolean =
-    size.height > 0 && size.width > size.height
+internal fun meloXUsesListDetail(size: IntSize, enabled: Boolean = true): Boolean =
+    enabled && size.height > 0 && size.width > size.height
 
 internal val LocalMeloXPaneSize = staticCompositionLocalOf<IntSize?> { null }
 internal val LocalMeloXListDetail = staticCompositionLocalOf { false }
@@ -123,6 +134,11 @@ class MeloXDetailPaneState {
 }
 
 internal fun Context.openMeloXDetailPage(intent: Intent): Boolean {
+    // 0.6.4 settings use the platform Activity transition in a single pane.
+    // Only the landscape settings list needs an inline secondary-pane page.
+    val config = resources.configuration
+    if (intent.component?.className == MeloXSettingsDetailActivity::class.java.name &&
+        (!MeloXSettingsRuntime.splitScreenEnabled || config.screenWidthDp <= config.screenHeightDp)) return false
     var current = this
     while (true) {
         if (current is MeloXDetailPageOwner) {
@@ -186,11 +202,12 @@ internal fun MeloXListDetailLayout(
     state: MeloXDetailPaneState,
     session: NeteaseSessionStore,
     onSourceSelected: (MusicSource) -> Unit = {},
+    hasMiniPlayer: Boolean = false,
     primaryModifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val windowSize = LocalWindowInfo.current.containerSize
-    val split = meloXUsesListDetail(windowSize)
+    val split = meloXUsesListDetail(windowSize, MeloXSettingsRuntime.splitScreenEnabled)
     val context = LocalContext.current
     val divider = MaterialTheme.colorScheme.outlineVariant
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -198,21 +215,37 @@ internal fun MeloXListDetailLayout(
         val size = with(density) { IntSize(maxWidth.roundToPx(), maxHeight.roundToPx()) }
         val leftWidth = if (split) size.width / 2 else size.width
         val rightSize = IntSize(if (split) size.width - leftWidth else size.width, size.height)
+        fun topClearance(right: Boolean) = if (!split) 0.dp else {
+            val nav = MeloXSettingsRuntime.splitNavigationPosition
+            val mini = MeloXSettingsRuntime.splitMiniPlayerPosition
+            (if (nav.right == right && nav.vertical == -1) 80.dp else 0.dp) +
+                (if (hasMiniPlayer && mini.right == right && mini.vertical == -1) 80.dp else 0.dp)
+        }
+        val leftTop = topClearance(false)
+        val rightTop = topClearance(true)
+        fun sideClearance(right: Boolean) = if (!split) 0.dp else {
+            val nav = MeloXSettingsRuntime.splitNavigationPosition
+            val mini = MeloXSettingsRuntime.splitMiniPlayerPosition
+            (if (nav.right == right && nav.isSideRail) 80.dp else 0.dp) +
+                (if (hasMiniPlayer && mini.right == right && mini.isSideRail) 80.dp else 0.dp)
+        }
+        val leftSide = sideClearance(false)
+        val rightSide = sideClearance(true)
         Layout(
             modifier = Modifier.fillMaxSize(),
             content = {
                 Box(
-                    Modifier.fillMaxSize().clipToBounds().then(primaryModifier).then(
+                    Modifier.fillMaxSize().clipToBounds().padding(top = leftTop).absolutePadding(left = leftSide).then(primaryModifier).then(
                         if (!split && state.pages.isNotEmpty()) Modifier.clearAndSetSemantics { } else Modifier,
                     ),
                 ) {
                     CompositionLocalProvider(
                         LocalDetailPaneState provides state,
                         LocalMeloXListDetail provides split,
-                        LocalMeloXPaneSize provides IntSize(leftWidth, size.height),
+                        LocalMeloXPaneSize provides IntSize((leftWidth - with(density) { leftSide.roundToPx() }).coerceAtLeast(0), (size.height - with(density) { leftTop.roundToPx() }).coerceAtLeast(0)),
                     ) { content() }
                 }
-                Box(Modifier.fillMaxSize().clipToBounds()) {
+                Box(Modifier.fillMaxSize().clipToBounds().padding(top = rightTop).absolutePadding(right = rightSide)) {
                     if (split) {
                         Box(
                             Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
@@ -229,7 +262,7 @@ internal fun MeloXListDetailLayout(
                         LocalDetailPaneState provides state,
                         LocalMeloXListDetail provides split,
                         LocalMeloXInDetailPane provides true,
-                        LocalMeloXPaneSize provides rightSize,
+                        LocalMeloXPaneSize provides IntSize((rightSize.width - with(density) { rightSide.roundToPx() }).coerceAtLeast(0), (rightSize.height - with(density) { rightTop.roundToPx() }).coerceAtLeast(0)),
                     ) {
                         if (split) state.slots.forEach { slot ->
                             key(slot) {
@@ -241,12 +274,15 @@ internal fun MeloXListDetailLayout(
                             key(page) {
                                 val detailContext = remember(context, state, page) { DetailContext(context, state, page) }
                                 CompositionLocalProvider(LocalContext provides detailContext) {
-                                    MeloXInterruptiblePage(visible = true, onBack = { state.pop(page) }) {
+                                    AdaptiveActivityPage(
+                                        isTopPage = state.pages.lastOrNull() === page,
+                                        onBack = { state.pop(page) },
+                                    ) { close ->
                                         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                                             DetailPage(
                                                 page.intent,
                                                 session = session,
-                                                onBack = { state.pop(page) },
+                                                onBack = close,
                                                 onSourceSelected = onSourceSelected,
                                                 onLoggedIn = { state.pop(page); page.onSuccess?.invoke() },
                                             )
@@ -275,6 +311,42 @@ internal fun MeloXListDetailLayout(
     }
 }
 
+/** Pane navigation owns its gesture; nested dialogs can register their own back handler. */
+@Composable
+private fun AdaptiveActivityPage(
+    isTopPage: Boolean,
+    onBack: () -> Unit,
+    content: @Composable (() -> Unit) -> Unit,
+) {
+    val progress = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
+    val close: () -> Unit = {
+        if (!closing) {
+            closing = true
+            scope.launch {
+                progress.animateTo(1f, tween(160))
+                onBack()
+            }
+        }
+    }
+    MeloXInterruptiblePage(visible = true, retreatProgress = { progress.value }) {
+        PredictiveBackHandler(enabled = isTopPage && !closing) { events ->
+            try {
+                events.collect { progress.snapTo(it.progress) }
+                closing = true
+                progress.animateTo(1f, tween(160))
+                onBack()
+            } catch (error: CancellationException) {
+                closing = false
+                progress.animateTo(0f, tween(180))
+            }
+        }
+        BackHandler(enabled = isTopPage && closing) { }
+        content(close)
+    }
+}
+
 @Composable
 private fun DetailPage(
     intent: Intent,
@@ -283,7 +355,6 @@ private fun DetailPage(
     onSourceSelected: (MusicSource) -> Unit,
     onLoggedIn: () -> Unit,
 ) {
-    BackHandler(onBack = onBack)
     when (intent.getStringExtra("route")) {
         "Podcasts" -> MeloXPodcastScreen(applyStatusBarPadding = true, onExit = onBack)
         "Downloads" -> LibraryScreen(session = session, onLogin = null, forcedPageName = "Downloads")

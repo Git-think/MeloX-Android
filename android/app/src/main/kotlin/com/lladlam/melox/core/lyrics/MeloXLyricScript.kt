@@ -26,12 +26,14 @@ enum class MeloXLyricScript { Original, Simplified, Traditional;
  *
  * - 中文界面：`languageTag = null`，按 [script] 选 hans/hant（原有逻辑）。
  * - 其它语言（en/tr/ja...）：`languageTag` = 系统语言，优先选同名 `xml:lang` 的翻译轨，
- *   没有精确匹配时再退到非中文翻译，最后才用第一条，保证不会因此丢掉翻译。
+ *   没有匹配的译文时保留原文，不以其它语言冒充目标语言。
  */
 data class MeloXLyricPreference(
     val languageTag: String?,
     val script: MeloXLyricScript,
 ) {
+    fun cacheKey(): String = "${languageTag ?: "zh"}:${script.name}"
+
     companion object {
         /** 设置项取值：`system` / `zh-Hans` / `zh-Hant` / 语言标签（en、tr…）。 */
         fun fromSetting(value: String, locale: Locale = Locale.getDefault()): MeloXLyricPreference =

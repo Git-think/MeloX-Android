@@ -327,16 +327,45 @@ fun MeloXIOSLyricsPanel(
     edgeFadeBottomTerminal: Dp = 0.dp,
     // ★ 渐隐带内的最大边缘模糊（dp）。默认沿用横屏值；竖屏传 0dp（只要渐隐、不要模糊）。
     edgeBlurMax: Dp = MeloXLandscapeLyricsEdgeBlurMax,
+    controlsRevealHeight: Dp = 0.dp,
 ) {
+    val revealHeightPx = with(LocalDensity.current) { controlsRevealHeight.toPx() }
+    val revealInteraction = rememberUpdatedState(onInterfaceInteraction)
+    val lyricsModifier = modifier.pointerInput(isInterfaceHidden, revealHeightPx) {
+        if (!isInterfaceHidden || revealHeightPx <= 0f) return@pointerInput
+        // Observe at Initial so a recognised tap is consumed before a lyric's
+        // combinedClickable sees its up event. Down/move stay unconsumed: the
+        // lyrics can still be scrolled from this same bottom region.
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val inControls = down.position.y >= size.height - revealHeightPx
+                var moved = false
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                    if (event.changes.size > 1 || change == null ||
+                        (change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                    if (event.changes.all { !it.pressed }) {
+                        if (inControls && !moved && change != null && !change.isConsumed) {
+                            event.changes.forEach { it.consume() }
+                            revealInteraction.value.invoke()
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    }
     val configuration = LocalConfiguration.current
     if (allowAutomaticSkyline && configuration.screenWidthDp > configuration.screenHeightDp && MeloXSettingsRuntime.skylineEnabled) {
-        MeloXSkylineLyricsPanel(state, modifier, onInterfaceInteraction, active)
+        MeloXSkylineLyricsPanel(state, lyricsModifier, onInterfaceInteraction, active)
         return
     }
     when (MeloXSettingsRuntime.lyricsStyle) {
         MeloXLyricsStyle.AppleMusic -> MeloXAppleMusicLyricsPanel(
             state,
-            modifier,
+            lyricsModifier,
             isInterfaceHidden,
             onInterfaceInteraction,
             onInterfaceVisibilityChange,
@@ -348,8 +377,8 @@ fun MeloXIOSLyricsPanel(
             edgeFadeBottomTerminal,
             edgeBlurMax,
         )
-        MeloXLyricsStyle.Eva -> MeloXEvaLyricsPanel(state, modifier, onInterfaceInteraction, active)
-        MeloXLyricsStyle.TextPV -> MeloXTextPVLyricsPanel(state, modifier, onInterfaceInteraction, active)
+        MeloXLyricsStyle.Eva -> MeloXEvaLyricsPanel(state, lyricsModifier, onInterfaceInteraction, active)
+        MeloXLyricsStyle.TextPV -> MeloXTextPVLyricsPanel(state, lyricsModifier, onInterfaceInteraction, active)
     }
 }
 
@@ -467,7 +496,9 @@ private fun MeloXAppleMusicLyricsPanel(
         renderedPositionState.longValue = state.positionMs
     }
 
-    LaunchedEffect(mediaId, state.title, state.artist, state.album, state.durationMs, automaticLyricSelectionEnabled) {
+    val lyricRequestKey = lyricUiRequestKey(state, automaticLyricSelectionEnabled)
+    val currentLyricRequestKey = rememberUpdatedState(lyricRequestKey)
+    LaunchedEffect(lyricRequestKey) {
         if (mediaId.isNullOrBlank()) return@LaunchedEffect
         isLoading = true
         errorMessage = null
@@ -477,7 +508,7 @@ private fun MeloXAppleMusicLyricsPanel(
                 // timing can finish later, but must still belong to this track.
                 val livePositionMs = anchorPositionMs +
                     (SystemClock.elapsedRealtime() - anchorRealtimeMs)
-                if (state.mediaId == mediaId &&
+                if (state.mediaId == mediaId && currentLyricRequestKey.value == lyricRequestKey &&
                     (upgraded.autoSyncModelKey != null || livePositionMs <= MeloXProviderLyricsLoader.AmllUpgradeWindowMs)
                 ) {
                     lyrics = upgraded

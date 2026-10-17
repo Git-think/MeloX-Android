@@ -45,6 +45,12 @@ enum class MeloXLyricsFontWeight(val composeWeight: FontWeight) {
 
 /** Process-visible settings used by UI paths that need immediate recomposition. */
 object MeloXSettingsRuntime {
+    var splitScreenEnabled by mutableStateOf(true)
+        internal set
+    var splitNavigationPosition by mutableStateOf(MeloXSplitChromePosition.BottomLeft)
+        internal set
+    var splitMiniPlayerPosition by mutableStateOf(MeloXSplitChromePosition.BottomLeft)
+        internal set
     var performanceOverlayEnabled by mutableStateOf(false)
         internal set
     var themeMode by mutableStateOf(MeloXThemeMode.System)
@@ -381,9 +387,20 @@ object MeloXSettingsRuntime {
 
     private var initialized = false
 
+    private fun loadSplitScreenSettings(context: Context) {
+        splitScreenEnabled = MeloXSettingsPreferences.boolean(context, "general_split_screen", true)
+        splitNavigationPosition = MeloXSplitChromePosition.fromPreference(
+            MeloXSettingsPreferences.string(context, "general_split_navigation_position", "BottomLeft"),
+        )
+        splitMiniPlayerPosition = MeloXSplitChromePosition.fromPreference(
+            MeloXSettingsPreferences.string(context, "general_split_mini_player_position", "BottomLeft"),
+        )
+    }
+
     /** Reads only state required to draw the first root frame. The remaining settings load after setContent. */
     fun initializeCritical(context: Context) {
         val app = context.applicationContext
+        loadSplitScreenSettings(app)
         themeMode = runCatching {
             MeloXThemeMode.valueOf(MeloXSettingsPreferences.string(app, "theme_mode", MeloXThemeMode.System.name))
         }.getOrDefault(MeloXThemeMode.System)
@@ -409,6 +426,7 @@ object MeloXSettingsRuntime {
         if (initialized && !force) return
         initialized = true
         val app = context.applicationContext
+        loadSplitScreenSettings(app)
         performanceOverlayEnabled = MeloXSettingsPreferences.boolean(app, "developer_performance_overlay", false)
         themeMode = runCatching {
             MeloXThemeMode.valueOf(MeloXSettingsPreferences.string(app, "theme_mode", MeloXThemeMode.System.name))
@@ -759,6 +777,7 @@ object MeloXSettingsPreferences {
             com.lladlam.melox.core.lyrics.LyricBindingStore.clear(context)
         }
         when (key) {
+            "general_split_screen" -> MeloXSettingsRuntime.splitScreenEnabled = value
             "developer_performance_overlay" -> MeloXSettingsRuntime.performanceOverlayEnabled = value
             "feature_podcasts" -> MeloXSettingsRuntime.podcastsEnabled = value
             "feature_history" -> MeloXSettingsRuntime.listeningHistoryEnabled = value
@@ -908,6 +927,8 @@ object MeloXSettingsPreferences {
     fun setString(context: Context, key: String, value: String) {
         prefs(context).edit().putString(key, value).apply()
         when (key) {
+            "general_split_navigation_position" -> MeloXSettingsRuntime.splitNavigationPosition = MeloXSplitChromePosition.fromPreference(value)
+            "general_split_mini_player_position" -> MeloXSettingsRuntime.splitMiniPlayerPosition = MeloXSplitChromePosition.fromPreference(value)
             "theme_mode" -> MeloXSettingsRuntime.themeMode = runCatching {
                 MeloXThemeMode.valueOf(value)
             }.getOrDefault(MeloXThemeMode.System)

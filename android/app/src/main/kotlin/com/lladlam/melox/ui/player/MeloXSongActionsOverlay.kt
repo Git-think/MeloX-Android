@@ -123,7 +123,21 @@ fun MeloXSongActionsOverlay(
     // ★ 「天际歌词」入口（2026-10-07）。只有平板双栏传得进来，见
     //   [MeloXNowPlayingActionsSheet] 同名声明的注释；为 null 时本行不渲染。
     onShowSkyline: (() -> Unit)? = null,
+    onEditPlaylistTrack: (() -> Unit)? = null,
 ) {
+    song.providerTrack?.let { track ->
+        MeloXProviderSongActionsOverlay(
+            state = playbackState,
+            identity = track.id,
+            track = track,
+            visible = visible,
+            onDismiss = onDismiss,
+            onNavigateSearch = onNavigateSearch,
+            onShowSkyline = onShowSkyline,
+            onEditPlaylistTrack = onEditPlaylistTrack,
+        )
+        return
+    }
     val context = LocalContext.current
     val app = context.applicationContext
     val scope = rememberCoroutineScope()

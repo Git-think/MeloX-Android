@@ -42,10 +42,7 @@ class InnerTube {
         const val PLAYBACK_TELEMETRY_VER = "2"
     }
 
-    var locale = YouTubeLocale(
-        gl = Locale.getDefault().country,
-        hl = Locale.getDefault().toLanguageTag()
-    )
+    var locale = YouTubeLocale.fromLocale()
     var visitorData: String? = null
     var dataSyncId: String? = null
     /**
@@ -56,6 +53,7 @@ class InnerTube {
      * the listener picked.
      */
     var pageId: String? = null
+    var authUser: String = "0"
 
     var cookie: String? = null
         set(value) {
@@ -188,24 +186,10 @@ class InnerTube {
             visitorData?.let { append("X-Goog-Visitor-Id", it) }
             if (setLogin && client.loginSupported) {
                 cookie?.let { cookie ->
-                    append("cookie", cookie)
-                    if ("SAPISID" !in cookieMap) return@let
-                    val currentTime = System.currentTimeMillis() / 1000
-                    val sapisidHash = sha1("$currentTime ${cookieMap["SAPISID"]} ${YouTubeClient.ORIGIN_YOUTUBE_MUSIC}")
-                    append("Authorization", "SAPISIDHASH ${currentTime}_${sapisidHash}")
-                    // Vendored: the channel within that account, where one was
-                    // chosen. Absent for the personal channel, which is what
-                    // the account answers as by default.
-                    //
-                    // The two travel together. `X-Goog-PageId` says which
-                    // channel to act as, and `X-Goog-AuthUser` says which of
-                    // the signed-in accounts that channel belongs to — sent on
-                    // its own, the first was answered with 401 and the words
-                    // "missing required authentication credential", which reads
-                    // as a dead session and is really an incomplete request.
-                    pageId?.takeIf { it.isNotBlank() }?.let {
-                        append("X-Goog-PageId", it)
-                        append("X-Goog-AuthUser", "0")
+                    com.metrolist.innertube.utils.YouTubeAuth.headers(
+                        cookie, System.currentTimeMillis() / 1000, authUser, pageId,
+                    ).forEach { (name, value) ->
+                        set(name, value)
                     }
                 }
             }

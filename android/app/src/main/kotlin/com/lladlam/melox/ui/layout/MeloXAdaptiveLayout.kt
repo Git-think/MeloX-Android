@@ -48,7 +48,8 @@ fun rememberMeloXWindowInfo(): MeloXWindowInfo {
         else -> MeloXWindowWidthClass.Compact
     }
     // 见字段注释：宽度档位不足以判定播放页双栏，必须叠加高度门槛。
-    val playerTwoPane = width >= MeloXPlayerTwoPaneMinWidth.value.toInt() &&
+    val playerTwoPane = com.lladlam.melox.ui.settings.MeloXSettingsRuntime.splitScreenEnabled &&
+        width >= MeloXPlayerTwoPaneMinWidth.value.toInt() &&
         height >= MeloXPlayerTwoPaneMinHeight.value.toInt()
     return when (widthClass) {
         MeloXWindowWidthClass.Compact ->

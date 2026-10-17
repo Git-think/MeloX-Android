@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,7 +80,8 @@ private fun rememberAlternativeLyrics(
     var error by remember(mediaId, automaticLyricSelectionEnabled) { mutableStateOf<String?>(null) }
     var loadedRequestKey by remember(mediaId, automaticLyricSelectionEnabled) { mutableStateOf<String?>(null) }
     val requestKey = lyricUiRequestKey(state, automaticLyricSelectionEnabled)
-    LaunchedEffect(active, mediaId, state.title, state.artist, state.album, state.durationMs, automaticLyricSelectionEnabled) {
+    val currentRequestKey = rememberUpdatedState(requestKey)
+    LaunchedEffect(active, requestKey) {
         if (!active || mediaId.isNullOrBlank() || loadedRequestKey == requestKey) return@LaunchedEffect
         loading = true
         error = null
@@ -87,7 +89,7 @@ private fun rememberAlternativeLyrics(
             MeloXProviderLyricsLoader.load(context, state) { upgraded ->
                 // AutoSync/AMLL may finish after the fast line-timed path; only
                 // accept it while this panel still shows the same track.
-                if (state.mediaId == mediaId) document = upgraded
+                if (state.mediaId == mediaId && currentRequestKey.value == requestKey) document = upgraded
             }
         }
             .onSuccess {
@@ -157,7 +159,8 @@ private fun rememberTextPVLyrics(
     var loadedRequestKey by remember(mediaId, automaticLyricSelectionEnabled) { mutableStateOf<String?>(null) }
     val requestKey = lyricUiRequestKey(state, automaticLyricSelectionEnabled)
 
-    LaunchedEffect(active, mediaId, state.title, state.artist, state.album, state.durationMs, automaticLyricSelectionEnabled) {
+    val currentRequestKey = rememberUpdatedState(requestKey)
+    LaunchedEffect(active, requestKey) {
         if (!active || mediaId.isNullOrBlank() || loadedRequestKey == requestKey) return@LaunchedEffect
         loading = true
         error = null
@@ -165,7 +168,7 @@ private fun rememberTextPVLyrics(
             MeloXProviderLyricsLoader.load(context, state) { upgraded ->
                 // AutoSync/AMLL may finish after the fast line-timed path; only
                 // accept it while this panel still shows the same track.
-                if (state.mediaId == mediaId) document = upgraded
+                if (state.mediaId == mediaId && currentRequestKey.value == requestKey) document = upgraded
             }
         }
             .onSuccess {
@@ -236,7 +239,7 @@ internal fun lyricUiRequestKey(state: MeloXPlaybackUiState, automaticSelection: 
     append(':').append(normalizeLyricMatchText(state.album))
     append(':').append(state.durationMs.takeIf { it > 0L }?.let { ((it + 500L) / 1_000L) * 1_000L } ?: 0L)
     append(':').append(automaticSelection)
-    append(':').append(com.lladlam.melox.core.lyrics.MeloXLyricScript.fromSystem().name)
+    append(':').append(requestedLyricPreference().cacheKey())
 }
 
 @Composable

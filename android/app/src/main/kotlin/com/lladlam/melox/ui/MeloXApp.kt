@@ -180,6 +180,11 @@ import com.lladlam.melox.ui.layout.rememberMeloXWindowInfo
 import com.lladlam.melox.ui.layout.MeloXDetailPageOwner
 import com.lladlam.melox.ui.layout.MeloXDetailPaneState
 import com.lladlam.melox.ui.layout.MeloXListDetailLayout
+import com.lladlam.melox.ui.layout.MeloXPositionedChrome
+import com.lladlam.melox.ui.settings.meloXChromeScrollCoupled
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.animateContentSize
 import com.lladlam.melox.ui.layout.meloXUsesListDetail
 import androidx.compose.ui.platform.LocalWindowInfo
 import com.lladlam.melox.ui.player.MeloXImmersivePlaybackEffect
@@ -249,7 +254,7 @@ fun MeloXApp(
     val context = hostContext.applicationContext
     val detailPaneState = (hostContext as? MeloXDetailPageOwner)?.detailPaneState
         ?: remember { MeloXDetailPaneState() }
-    val listDetailMode = meloXUsesListDetail(LocalWindowInfo.current.containerSize)
+    val listDetailMode = meloXUsesListDetail(LocalWindowInfo.current.containerSize, MeloXSettingsRuntime.splitScreenEnabled)
     var selectedSource by remember {
         mutableStateOf(MusicProviderSelectionStore.selectedSource(context))
     }
@@ -519,6 +524,12 @@ fun MeloXApp(
         }
     }
 
+    val currentListDetailMode by rememberUpdatedState(listDetailMode)
+    LaunchedEffect(listDetailMode, MeloXSettingsRuntime.splitNavigationPosition, MeloXSettingsRuntime.splitMiniPlayerPosition,
+        MeloXSettingsRuntime.disableAutomaticTabBarShrink) {
+        tabBarMinimized = false
+        scrollAccumulator = 0f
+    }
     val tabBarMinimizeConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(
@@ -526,7 +537,10 @@ fun MeloXApp(
                 source: NestedScrollSource,
             ): Offset {
                 if (source != NestedScrollSource.UserInput) return Offset.Zero
-                if (MeloXSettingsRuntime.disableAutomaticTabBarShrink) {
+                if (MeloXSettingsRuntime.disableAutomaticTabBarShrink || !meloXChromeScrollCoupled(
+                        currentListDetailMode, MeloXSettingsRuntime.splitNavigationPosition, MeloXSettingsRuntime.splitMiniPlayerPosition,
+                    )) {
+                    tabBarMinimized = false
                     scrollAccumulator = 0f
                     return Offset.Zero
                 }
@@ -853,6 +867,7 @@ fun MeloXApp(
                     MeloXListDetailLayout(
                         state = detailPaneState,
                         session = neteaseSession,
+                        hasMiniPlayer = playbackState.hasMedia,
                         primaryModifier = Modifier.nestedScroll(tabBarMinimizeConnection),
                         onSourceSelected = { source ->
                             selectedSource = source
@@ -1054,11 +1069,11 @@ fun MeloXApp(
                     hasMedia = playbackState.hasMedia,
                     minimized = tabBarMinimized,
                     visibleRootTabs = visibleRootTabs,
+                    split = listDetailMode,
+                    navigationModifier = Modifier.onGloballyPositioned { toneState.updateBounds(it) },
                     modifier = Modifier
                         .align(if (listDetailMode) Alignment.BottomStart else Alignment.BottomCenter)
-                        .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
-                        // 采样的目标矩形 = 底部 chrome 在窗口里的实际位置。
-                        .onGloballyPositioned { toneState.updateBounds(it) },
+                        .then(if (listDetailMode) Modifier.fillMaxSize() else Modifier.fillMaxWidth()),
                     miniPlayer = { compactProgress ->
                         playerTransition.AnimatedVisibility(
                             // ⚠⚠ 2026-10-06 取证埋点：记录本 lambda 每帧收到的 `value`
@@ -1087,6 +1102,7 @@ fun MeloXApp(
                                 state = playbackState,
                                 onExpand = openPlayer,
                                 compactProgress = compactProgress,
+                                vertical = listDetailMode && MeloXSettingsRuntime.splitMiniPlayerPosition.isSideRail,
                                  dynamicGlassEnabled = true,
                                  sharedTransitionScope = sharedScope,
                                  animatedVisibilityScope = this,
@@ -1526,13 +1542,17 @@ private fun MeloXBottomChrome(
     hasMedia: Boolean,
     minimized: Boolean,
     visibleRootTabs: List<AppTab>,
+    split: Boolean = false,
+    navigationModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
     miniPlayer: @Composable (compactProgress: Float) -> Unit,
 ) {
     val tabsBackdrop = rememberLayerBackdrop()
     val dockScope = rememberCoroutineScope()
+    val coupled = meloXChromeScrollCoupled(split, MeloXSettingsRuntime.splitNavigationPosition, MeloXSettingsRuntime.splitMiniPlayerPosition)
+    val inlineMini = !split || (coupled && !MeloXSettingsRuntime.splitNavigationPosition.isSideRail)
     val rawProgress by animateFloatAsState(
-        targetValue = if (minimized) 1f else 0f,
+        targetValue = if (minimized && coupled) 1f else 0f,
         // 展开 / 收缩各用**一条完整弹簧**（方向不同、手感不同）：
         //   · 展开 bounce 0.245 → ζ=0.755，过冲 2.68% → 外扩 6.02dp（左 2.01 / 右 4.01dp，
         //     与搜索键的 7dp 缝留 3.00dp 视觉余量）—— 空间受限，所以收着弹、且**偏右**落；
@@ -1576,7 +1596,7 @@ private fun MeloXBottomChrome(
     // 而它自身的外扩量只有 0.9dp、肉眼不可见 —— 整段间隙留给 nav 的过冲更划算。
     val searchSize = lerpDpBouncy(ChromeExpandedSize, ChromeCompactSize, bounceFrac.coerceAtLeast(0f))
     val mediaReveal by animateFloatAsState(
-        targetValue = if (hasMedia) 1f else 0f,
+        targetValue = if (hasMedia && inlineMini) 1f else 0f,
         // 下方是 miniLift × mediaReveal 的纯乘子，不经过 lerpDp 的夹取，
         // 所以过冲天然可见 —— 播放栏出现时会先"弹过"再落位。
         animationSpec = spring(
@@ -1586,7 +1606,7 @@ private fun MeloXBottomChrome(
         label = "melox-mini-player-reveal",
     )
     val expandedChromeHeight by animateDpAsState(
-        targetValue = if (hasMedia) 124.dp else 64.dp,
+        targetValue = if (hasMedia && inlineMini) 124.dp else 64.dp,
         animationSpec = spring(dampingRatio = 0.9f, stiffness = 360f),
         label = "melox-chrome-height",
     )
@@ -1595,13 +1615,30 @@ private fun MeloXBottomChrome(
     val expandedLayerAlpha = 1f - smoothStep(progress, 0.43f, 0.72f)
     val compactLayerAlpha = smoothStep(progress, 0.52f, 0.82f)
 
+    MeloXPositionedChrome(
+        split = split,
+        hasMedia = hasMedia && !inlineMini,
+        coupledProgress = if (coupled) progress else 0f,
+        navigationPosition = MeloXSettingsRuntime.splitNavigationPosition,
+        miniPlayerPosition = MeloXSettingsRuntime.splitMiniPlayerPosition,
+        modifier = modifier.then(if (split) Modifier.stableNavigationBarsPadding() else Modifier),
+        miniPlayer = {
+            Box(Modifier.fillMaxWidth().padding(
+                horizontal = if (MeloXSettingsRuntime.splitMiniPlayerPosition.isSideRail) 4.dp else 12.dp,
+                vertical = 8.dp,
+            )) { miniPlayer(if (coupled) progress else 0f) }
+        },
+    ) {
+    if (split && MeloXSettingsRuntime.splitNavigationPosition.isSideRail) {
+        MeloXVerticalNavigation(selectedTab, source, visibleRootTabs, onSelect, navigationModifier, if (coupled) progress else 0f, hasMedia && coupled)
+    } else {
     Column(
-        modifier = modifier
+        modifier = navigationModifier
             .fillMaxWidth()
             // ⚠ 用 ViewCompat 稳定取数，不用 `navigationBarsPadding()`：edge-to-edge 后
             //   这条 Compose insets 链在本机读到 0，胶囊会直接压到系统手势条上（见
             //   stableNavigationBarsPadding 的说明）。
-            .stableNavigationBarsPadding()
+            .then(if (split) Modifier else Modifier.stableNavigationBarsPadding())
             // Mei keeps the 64dp navigation capsule 8dp above the gesture
             // inset, giving the dock the same breathing room as iOS.
             .padding(bottom = 8.dp),
@@ -1653,7 +1690,7 @@ private fun MeloXBottomChrome(
             // 这里随收缩进度补一个 1dp 下移，把两者垂直中心压平。
             val miniCenterAlignNudge = lerpDpBouncy(0.dp, 1.dp, bounceFrac) * mediaReveal
 
-            if (hasMedia) {
+            if (hasMedia && inlineMini) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -2128,6 +2165,49 @@ private fun MeloXBottomChrome(
                     },
                     selected = selectedTab == AppTab.Search,
                 )
+            }
+        }
+    }
+    }
+}
+
+}
+
+@Composable
+private fun MeloXVerticalNavigation(
+    selectedTab: AppTab,
+    source: MusicSource,
+    tabs: List<AppTab>,
+    onSelect: (AppTab) -> Unit,
+    modifier: Modifier = Modifier,
+    compactProgress: Float = 0f,
+    reserveMiniSlot: Boolean = false,
+) {
+    Box(modifier.fillMaxWidth().animateContentSize().padding(horizontal = 4.dp, vertical = 8.dp)) {
+        Column(
+            Modifier.fillMaxWidth()
+                .meloXLiquidBottomBar(shape = Capsule(), tint = bottomLiquidGlassTint(), surfaceColor = bottomGlassSurfaceColor())
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            (if (compactProgress > .5f) listOf(
+                if (selectedTab == AppTab.Search) tabs.firstOrNull() ?: AppTab.Settings else selectedTab,
+                AppTab.Search,
+            ) else tabs + AppTab.Search).distinct().forEach { tab ->
+                if (tab == AppTab.Search && compactProgress > .5f && reserveMiniSlot) Spacer(Modifier.height(56.dp))
+                val active = tab == selectedTab
+                val color = if (active) MeloXSystemColors.Red else MaterialTheme.colorScheme.onSurface
+                Column(
+                    Modifier.fillMaxWidth().height(56.dp)
+                        .semantics { selected = active }
+                        .clickable(role = Role.Tab, onClick = { onSelect(tab) }),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    RootGlyphIcon(tab.rootGlyph(), Modifier.size(24.dp), color, selected = active)
+                    Text(tab.titleFor(source), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = color)
+                }
             }
         }
     }

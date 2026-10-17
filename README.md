@@ -24,9 +24,13 @@
 
 ## Current version: 0.6.5
 
-`0.6.5` adds a signed hot-update channel: UI text overrides and sandboxed QuickJS behaviour hooks delivered inside the already-signed remote config, so copy and small logic fixes no longer need an APK. Everything falls back to the built-in text and logic when consent is off, the config is unverified, or a hook fails or times out.
+`0.6.5` (versionCode **24**, 2026-10-18) adds configurable split-screen layouts, independent Dock / mini-player placement, shared multi-provider actions, and YouTube Music account and library improvements. It also restores application language selection, fixes lyric translation language routing, and retains the signed hot-update channel.
 
-- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.6.5)
+- Split-screen is enabled by default. In **Settings → General**, place the Dock and mini player independently at the bottom-left, bottom-right, top-left, top-right, or vertically along either screen edge. Matching positions retain linked scroll-collapse behaviour; separate positions stay expanded.
+- Search, collection details, song menus and downloads use each provider's actual capabilities. YouTube Music adds channel switching, editable-playlist filtering and continuation paging, with fixes for request region and browser-session authentication.
+- All music sources use the same lyric-loading pipeline, including matching, bindings, caching and translation-language preferences. Language changes reload the current track; immersive bottom-area taps reveal controls without seeking.
+
+- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/v0.6.5)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
