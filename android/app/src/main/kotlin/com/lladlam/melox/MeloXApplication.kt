@@ -11,7 +11,6 @@ import com.lladlam.melox.core.network.MeloXHttpClient
 import com.lladlam.melox.core.audio.MusicQualityPreferences
 import com.lladlam.melox.core.audio.MusicQualityRuntime
 import com.lladlam.melox.core.diagnostics.MeloXCrashRecorder
-import com.lladlam.melox.core.display.MeloXFrameRateHost
 import com.lladlam.melox.ui.animation.MeloXSystemScale
 import com.lladlam.melox.ui.player.ArtworkDynamicPaletteProvider
 
@@ -32,9 +31,6 @@ class MeloXApplication : Application() {
         // Activity 转场同一个**动画缩放键（TRANSITION_ANIMATION_SCALE）：否则在「过渡动画
         // 缩放」上调速度时，只有 Activity 页变、Compose 页纹丝不动。见 MeloXSystemScale。
         MeloXSystemScale.install(this)
-        // 可变刷新率：用 lifecycle callbacks 统一挂到**每个** Activity（8 个），
-        // 各 Activity 零改动。见 MeloXFrameRateHost 的说明。
-        MeloXFrameRateHost.install(this)
         registerActivityLifecycleCallbacks(MeloXAppVisibility)
         registerComponentCallbacks(MeloXMemoryCallbacks)
     }

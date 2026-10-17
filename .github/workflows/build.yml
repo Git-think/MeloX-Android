@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-  # Run the same build on PRs targeting main so the required status check
-  # (`build-debug`) can gate merges via the main-branch ruleset.
+  # Validate both direct PRs and contributor PRs redirected by repository policy.
   pull_request:
     branches:
       - main
+      - contributor
   workflow_dispatch:
 
 permissions:
@@ -48,6 +48,7 @@ jobs:
       # The fixed tag and fixed file name mean every build replaces the same file, so
       # nothing accumulates and no retention policy is needed.
       - name: Publish rolling development release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

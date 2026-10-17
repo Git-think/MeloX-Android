@@ -12,8 +12,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.togetherWith
@@ -166,7 +164,6 @@ import com.lladlam.melox.ui.animation.meloXContentExit
 import com.lladlam.melox.ui.animation.MeloXPlayerRecede
 import com.lladlam.melox.ui.animation.meloXPageEnter
 import com.lladlam.melox.ui.animation.meloXPageExit
-import com.lladlam.melox.ui.account.MeloXNeteaseLoginActivity
 import com.lladlam.melox.ui.animation.sprungFrac
 import com.lladlam.melox.ui.glass.BOTTOM_GLASS_SURFACE_ALPHA
 import com.lladlam.melox.ui.glass.bottomGlassFallbackColor
@@ -180,6 +177,11 @@ import com.lladlam.melox.ui.glass.meloXGlassBackdrop
 import com.lladlam.melox.ui.glass.publicdemo.PublicDampedDragAnimation
 import com.lladlam.melox.ui.glass.publicdemo.PublicInteractiveHighlight
 import com.lladlam.melox.ui.layout.rememberMeloXWindowInfo
+import com.lladlam.melox.ui.layout.MeloXDetailPageOwner
+import com.lladlam.melox.ui.layout.MeloXDetailPaneState
+import com.lladlam.melox.ui.layout.MeloXListDetailLayout
+import com.lladlam.melox.ui.layout.meloXUsesListDetail
+import androidx.compose.ui.platform.LocalWindowInfo
 import com.lladlam.melox.ui.player.MeloXImmersivePlaybackEffect
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -191,7 +193,6 @@ import com.lladlam.melox.ui.player.meloXPlayerRecedeSpec
 import com.lladlam.melox.ui.player.meloXPlayerTweenDurationMillis
 import com.lladlam.melox.ui.player.rememberMeloXDisplayCornerPx
 import com.lladlam.melox.ui.player.rememberMeloXDisplayCornerInfo
-import com.lladlam.melox.ui.player.MeloSmoothCornerShape
 import com.lladlam.melox.ui.player.MeloXSmoothCorner
 import com.lladlam.melox.ui.player.MeloXPlayerRecedeCompatFallbackDp
 import com.lladlam.melox.ui.player.meloXPlayerTransitionDurationMillis
@@ -246,6 +247,9 @@ fun MeloXApp(
 ) {
     val hostContext = LocalContext.current
     val context = hostContext.applicationContext
+    val detailPaneState = (hostContext as? MeloXDetailPageOwner)?.detailPaneState
+        ?: remember { MeloXDetailPaneState() }
+    val listDetailMode = meloXUsesListDetail(LocalWindowInfo.current.containerSize)
     var selectedSource by remember {
         mutableStateOf(MusicProviderSelectionStore.selectedSource(context))
     }
@@ -262,15 +266,8 @@ fun MeloXApp(
     var messagesVisible by remember { mutableStateOf(false) }
     BackHandler(enabled = messagesVisible) { messagesVisible = false }
     var recognitionVisible by remember { mutableStateOf(false) }
-    var loginReturnTab by remember { mutableStateOf(AppTab.Settings) }
-    // 网易云登录改为独立 Activity（MeloXNeteaseLoginActivity），走系统原生转场，与设置详情页一致。
-    // 登录成功回传 RESULT_OK，据此切到回跳 tab；取消则不切。
-    val neteaseLoginLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { if (it.resultCode == Activity.RESULT_OK) selectedTab = loginReturnTab }
     fun launchNeteaseLogin(returnTab: AppTab) {
-        loginReturnTab = returnTab
-        neteaseLoginLauncher.launch(Intent(hostContext, MeloXNeteaseLoginActivity::class.java))
+        detailPaneState.openLogin(hostContext) { selectedTab = returnTab }
     }
     var tabBarMinimized by rememberSaveable { mutableStateOf(false) }
     var scrollAccumulator by remember { mutableFloatStateOf(0f) }
@@ -340,6 +337,24 @@ fun MeloXApp(
     //   ζ=1 = 临界阻尼 ⇒ 无过冲，fraction 单调趋近 target；落定 ≈ 设置时长，故延迟该时长后拍 2。
     val playerSpringThumpEngage = rememberSpringThump(HapticFeedbackType.Confirm)
     val playerSpringThumpLand = rememberSpringThump(HapticFeedbackType.LongPress)
+    // ★ 打开播放页的触感 = **连续双拍**（2026-10-15 第二轮定案）。
+    //
+    // 原版的「双拍」真身：**`MeloXIOSLyricsPanel` 首次挂载**时，列表边沿观察者
+    //   `snapshotFlow{ canScrollForward to canScrollBackward }` 对**两个条件各震一记**
+    //   `LongPress`；挂载瞬间列表停在 (0,0)、两者皆 `false` ⇒ **同一帧连发两记**
+    //   ⇒ 系统顺序播放出两下 = 用户听到的「双拍」。
+    //   面板在旧口径下于**转场开始**就组合 ⇒ 这两下恰好落在点击瞬间；
+    //   2026-10-15「常驻重层延后组合」把面板首帧组合推到转场结束 ⇒ 整体后移
+    //   ⇒ 用户报「点击瞬间有、性能版打开完之后才有」。
+    //
+    // ⚠⚠ 修法要点（踩过两次）：
+    //   原版这两下是**紧挨着**的（同帧 / 相隔一两帧，用户听成「连续的」），
+    //   **不是**「点击一拍 + 展开落定一拍」——落定在数百毫秒之后，用户会直接判成「不连续」。
+    //   ⇒ 这里显式复刻：两记 `LongPress` 都钉在**点击帧**、只隔约 60ms，
+    //     不再依赖歌词面板的挂载时机与它的条件个数。力度沿用 `LongPress`（与原版一致，不改成 Confirm）。
+    //   误触发已在 `MeloXIOSLyricsPanel` 侧去掉（初值 `true`→`null`、跳过首次发射），保证不叠成三下。
+    val playerOpenThump = rememberSpringThump(HapticFeedbackType.LongPress)
+
     // 下沉进度（0 静止 / 1 完全沉下）。**只在 draw 期调用**（graphicsLayer /
     // drawBehind / drawWithContent 的 lambda 里读 playerRootFraction）⇒ 每帧只重绘，
     // 不重组 MeloXApp 这棵大树、也不重排页面。
@@ -353,8 +368,8 @@ fun MeloXApp(
         } else {
             val span = (MeloXPlayerRecede.ScaleEnd - MeloXPlayerRecede.ScaleStart)
                 .takeIf { it > 0f } ?: 1f
-            // ⚠ 只裁上界（1）：关闭过冲时 f<0（页面缩放 >1、被屏裁掉）必须放行，正是回弹来源。
-            ((playerRootFraction - MeloXPlayerRecede.ScaleStart) / span).coerceAtMost(1f)
+                    // ⚠ 只裁上界（1）：关闭过冲时 f<0（页面缩放 >1、被屏裁掉）必须放行，正是回弹来源。
+                    ((playerRootFraction - MeloXPlayerRecede.ScaleStart) / span).coerceAtMost(1f)
         }
     }
     var playerArtworkPageUsesScale by remember { mutableStateOf(false) }
@@ -368,6 +383,10 @@ fun MeloXApp(
     val displayCornerPx = displayCorner.usedPx
     val playerScope = rememberCoroutineScope()
     var playerTransitionJob by remember { mutableStateOf<Job?>(null) }
+    // ★ 2026-10-15 配套「转场可打断」：**关闭落定那记「咚」的待发任务**。
+    //   关闭若被「点按抢回播放页」（或任何新的主状态变更）打断，这条延迟任务**必须撤销** ——
+    //   否则它会带着旧计时在**打开途中**炸出一记无主的「咚」（听感上就是打开时莫名多了一下）。
+    var playerSettleThumpJob by remember { mutableStateOf<Job?>(null) }
     // ⚠⚠⚠ 2026-10-04 修「下沉回弹偶尔消失」：`BoundsTransform` 生成 spec 时会**实时读取**
     //   方向判据（`targetState == PostExit`），而读的那一刻与动画起跑的那个合成帧之间并没有
     //   顺序保证 ⇒ 偶尔读到未翻转的值 ⇒ 那一轮 keyframes 被退化成普通 tween ⇒ **回弹丢失**。
@@ -376,6 +395,9 @@ fun MeloXApp(
     //   ⚠ 必须在**每个**主状态变更点都写（openPlayer / closePlayer / intent 打开 /
     //     手势 seek 收起 / 手势释放 settle），漏一处就会留一条漏回弹的路径。
     var playerClosingIntent by remember { mutableStateOf(false) }
+    // ★ 2026-10-15 修「打断动画期间点底栏误触抢回」：mini 播放器在 window 中的命中矩形，
+    //   由 `MeloXIOSMiniPlayer` 实时上报、供 `MeloXIOSNowPlayingSharedHost` 限定 reopen 触发范围。
+    val miniPlayerHitRect = remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     // ⚠⚠⚠ 2026-10-06：`expansionProgress`（内容层进度）的**动画目标值**镜像 ——
     //   「本次推进的**目标方向**是打开吗」。**必须在 `animateTo / seekTo` 之前同步写**。
     //   为什么不能直接用 `playerTransitionState.targetState`：它的更新晚于动画启动
@@ -400,8 +422,21 @@ fun MeloXApp(
     val openPlayer: () -> Unit = {
         if (playbackState.hasMedia) {
             MeloXPlayerSinkDiag.event("open")
+            // ★ 打开触感 = **连续双拍**（复刻原版「歌词面板首次挂载时同帧连发两记 LongPress」）：
+            //   两记都钉在**点击瞬间**、只隔约 60ms —— ⚠ 不是「拍 1 在点击、拍 2 在落定」。
+            //   说明见上方 `playerOpenThump` 声明处。
+            //   60ms = 干净的双击节奏（≲20ms 会被听成一记，间隔过大则成「不连续」）。
+            playerOpenThump()                     // 双拍 ①
+            playerScope.launch {
+                kotlinx.coroutines.delay(60L)
+                playerOpenThump()                 // 双拍 ②（紧接，连续）
+            }
             playerClosingIntent = false
             playerTransitionTargetOpen = true
+            // ★ 转场可打断：本次是「打开」（含关闭途中被点按抢回）⇒ 撤销关闭那条尚未发出的
+            //   落定「咚」，避免它在打开途中多震一记。
+            playerSettleThumpJob?.cancel()
+            playerSettleThumpJob = null
             playerTransitionJob?.cancel()
             playerTransitionJob = playerScope.launch {
                 playerTransitionState.animateTo(
@@ -424,7 +459,8 @@ fun MeloXApp(
         //   单独开一条 coroutine 跑延迟的拍 2，不阻塞动画启动。
         //   spring ζ=1，99% 落定 ≈ 设置时长。延迟设置时长后震落定拍。
         playerSpringThumpEngage()                  // 拍 1：返回/关闭瞬间「啪」——激活下沉
-        playerScope.launch {
+        playerSettleThumpJob?.cancel()
+        playerSettleThumpJob = playerScope.launch {
             val settleMs = meloXPlayerTweenDurationMillis().toLong()
             kotlinx.coroutines.delay(settleMs)
             playerSpringThumpLand()                // 拍 2：弹簧落定「咚」——落定
@@ -443,6 +479,18 @@ fun MeloXApp(
             )
         }
     }
+    // ★ 帧率：播放页转场（morph）**全程锁定高刷**（2026-10-16 修「120-60-120」）。
+    //   症状：点开 / 收起播放页，帧率 120→60→120，中段掉到 60Hz。
+    //   根因（已定位）：morph 在 `SharedTransitionLayout` 的 overlay 里飞行，主 decor
+    //   那段不合成，面板会把 `setFrameRate(120)` 请求丢回 60Hz；而 `applyIntent` 有
+    //   「意图不变则不下发」早退 —— 意图一直 High ⇒ 早退把重钉请求吞了，轮询再也钉不回去，
+    //   只能等意图先掉 Low 再回 High 才重新生效 ⇒ 120-60-120。
+    //   修法：转场进行中（`currentState != targetState`）置控制器级
+    //   `playerTransitionActive=true` —— 强制 `desiredIntent=High` 且**绕过早退**每 tick
+    //   重发 `setFrameRate(120)`；落定即关，交回常规判据。循环内每拍重断言 true，
+    //   抗「快速重开导致旧 effect finally 把标志误关」的竞态。
+    //   ⚠ 只读布尔 `currentState/targetState`，**绝不读 `.fraction`**（根 composable
+    //   读 fraction 会触发全树重组抖动 —— 见文件头铁律）。
     val neteaseSession = rememberNeteaseSessionStore()
     val rootPageState = rememberSaveableStateHolder()
     // Page glass samples a stable background layer. The page itself is
@@ -507,6 +555,9 @@ fun MeloXApp(
         if (openNowPlayingRequest > 0 && playbackState.hasMedia) {
             playerClosingIntent = false
             playerTransitionTargetOpen = true
+            // ★ 转场可打断：同 `openPlayer` —— 撤销关闭那条待发的落定「咚」。
+            playerSettleThumpJob?.cancel()
+            playerSettleThumpJob = null
             playerTransitionState.animateTo(
                 targetState = true,
                 animationSpec = playerOpenFractionSpec(),
@@ -623,6 +674,14 @@ fun MeloXApp(
                 if (MeloXSettingsRuntime.reduceMotion) 0f else recedeMasterFraction()
             }
 
+            // ⚠ 退让层的圆角**必须走实例缓存**，不能每帧 `MeloSmoothCornerShape(...)`：
+            //   `graphicsLayer` 的 lambda **每帧执行**，而该 Shape 没实现 `equals`
+            //   ⇒ 每帧喂进去的都是"新"形状 ⇒ `RenderNode.setOutline` 按引用判等必然标脏
+            //   ⇒ 这一层全屏的路径裁剪每帧重建重栅格化（`MeloXPageTransitions` 里
+            //   `MeloXSlideShapeCache` 的注释给的是同一套论证，这里只是把它补到
+            //   当时没覆盖到的调用点上）。本处是 **sx ≠ sy** 的分轴缩放 ⇒ 用 `ofXY`。
+            val recedeShapeCache = remember { MeloXSlideShapeCache() }
+
             // 横屏播放器默认沉浸：隐藏状态栏 + 底部导航小白条（systemBars）；
             // 竖屏只藏顶栏（statusBars），且仍走「沉浸式播放」设置开关，底栏保持可见。
             val playerWindow = rememberMeloXWindowInfo()
@@ -736,15 +795,26 @@ fun MeloXApp(
                         val sx = lerp(1f, MeloXPlayerRecede.PageScaleX, f)
                         // 纵向比例由横向内缩反推：只有**可见内缩在 x/y 上相等**，
                         // 与屏幕同心/相切的圆弧才能同时贴住上下左右四条边、黑边才等宽。
+                        // ⚠ 这里的「等宽」只管**缩放**：上下等宽随后被 PageSinkDp 的**平移**
+                        //    刻意打破（AM 下沉口径，见 MeloXMotion 文档）——平移不改圆弧贴合，
+                        //    两者不矛盾，别看到上下不等宽就回来"修"这里。
                         val syFull = 1f - (1f - MeloXPlayerRecede.PageScaleX) * size.width / size.height
                         val sy = lerp(1f, syFull, f)
                         scaleX = sx
                         scaleY = sy
-                        translationY = MeloXPlayerRecede.PageLiftDp.dp.toPx() * f
+                        // 向下沉降（AM 口径）：与缩放读**同一个** f ⇒ 与卡片推进严格同拍。
+                        // 数值/推导见 `MeloXPlayerRecede.PageSinkDp`。
+                        translationY = MeloXPlayerRecede.PageSinkDp.dp.toPx() * f
                         // 圆角 = **系统屏幕圆角**（全程恒定、不收），且用**平滑圆角**
                         // （Lamé 超椭圆、连续曲率）而不是正圆弧 —— 后者曲率在直边处跳变，
                         // 肉眼就是「圆弧生硬」。分轴补偿保证可见半径在 x/y 上都是 displayCornerPx。
-                        shape = MeloSmoothCornerShape(displayCornerPx, sx, sy)
+                        // ⚠ 缩放先吸附到 1/64 步长（= ±1.6px @184px，肉眼不可辨）再进缓存：
+                        //   否则 sx/sy 每帧都是新值，缓存永远 miss，等于没加。
+                        shape = recedeShapeCache.ofXY(
+                            displayCornerPx,
+                            meloXQuantizedScale(sx),
+                            meloXQuantizedScale(sy),
+                        )
                         clip = f > 0.0005f
                     },
             ) {
@@ -775,15 +845,20 @@ fun MeloXApp(
             //     等于把「录制点在哪一层」变成了竞态 ⇒ 采样原点会在两处之间跳。
             Scaffold(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(tabBarMinimizeConnection),
+                    .fillMaxSize(),
                 contentWindowInsets = WindowInsets(),
                 containerColor = MaterialTheme.colorScheme.background,
                 ) { innerPadding ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding),
+                    Box(Modifier.fillMaxSize().padding(innerPadding)) {
+                    MeloXListDetailLayout(
+                        state = detailPaneState,
+                        session = neteaseSession,
+                        primaryModifier = Modifier.nestedScroll(tabBarMinimizeConnection),
+                        onSourceSelected = { source ->
+                            selectedSource = source
+                            libraryModalVisible = false
+                            heartModeLaunchAttempted = false
+                        },
                     ) {
                     val searchTabBackClear = remember { mutableStateOf(com.lladlam.melox.ui.search.SearchBackAction.SwitchToHome) }
                     var searchTabAction by remember { mutableStateOf(com.lladlam.melox.ui.search.SearchBackAction.SwitchToHome) }
@@ -839,7 +914,8 @@ fun MeloXApp(
                          AppTab.Search -> if (selectedSource == MusicSource.Netease) SearchScreen(
                              backClearSignal = searchTabBackClear,
                              onSearchBackState = { searchTabAction = it },
-                             onSearchExit = {
+                              onSearchExit = {
+                                  detailPaneState.clearPages()
                                  tabBarMinimized = false
                                  selectedTab = AppTab.Home
                              },
@@ -849,17 +925,15 @@ fun MeloXApp(
                             source = selectedSource,
                             onOpenTool = { route ->
                                 when (route) {
-                                    "Podcasts" -> selectedTab = AppTab.Podcasts
-                                    "Downloads" -> selectedTab = AppTab.Downloads
-                                    "Cloud" -> selectedTab = AppTab.Cloud
-                                    else -> {
-                                        // 设置详情是独立 Activity（平台转场），所以这里
-                                        // 直接启动它 + 把下层的主界面切到设置页，
-                                        // 退回时看到的就是设置列表。见 MeloXSettingsDetailActivity。
-                                        MeloXSettingsDetailActivity.launch(hostContext, route, selectedSource)
-                                        selectedTab = AppTab.Settings
-                                    }
-                                }
+                                     "Podcasts", "Downloads", "Cloud" -> detailPaneState.openTool(route)
+                                     else -> {
+                                         when (route) {
+                                             "Recognition" -> recognitionVisible = true
+                                             "Messages" -> messagesVisible = true
+                                             else -> MeloXSettingsDetailActivity.launch(hostContext, route, selectedSource)
+                                         }
+                                     }
+                                 }
                             },
                         )
                         AppTab.Explore -> if (selectedSource == MusicSource.Netease) MeloXExploreScreen() else ProviderExploreScreen(selectedSource)
@@ -882,8 +956,9 @@ fun MeloXApp(
                         AppTab.Cloud -> MeloXCloudMusicScreen()
                         AppTab.Settings -> ProviderSettingsHub(
                             currentSource = selectedSource,
-                            onSourceSelected = { source ->
-                                selectedSource = source
+                             onSourceSelected = { source ->
+                                 detailPaneState.clearPages()
+                                 selectedSource = source
                                 MusicProviderSelectionStore.setSelectedSource(context, source)
                                 tabBarMinimized = false
                                 libraryModalVisible = false
@@ -901,11 +976,12 @@ fun MeloXApp(
                                 }
                             },
                             onOpenServices = { MeloXProviderServicesActivity.launch(hostContext) },
-                            onOpenMessages = { messagesVisible = true },
-                        )
-                    } }
+                             onOpenMessages = { messagesVisible = true },
+                         )
+                     } }
+                     }
                     }
-                }
+                 }
             }
                 // 下沉时的压暗层：只罩住被缩小的页面本身，底部 chrome 与播放器不受影响。
                 // 与缩放窗口同源（同一条 recedeFraction），保证「缩多少 = 暗多少」。
@@ -933,7 +1009,7 @@ fun MeloXApp(
             }
             val bottomBarTone = toneState.darkness(systemDark)
 
-            if (!messagesVisible) CompositionLocalProvider(
+            if ((!messagesVisible && detailPaneState.pages.isEmpty()) || listDetailMode) CompositionLocalProvider(
                 // ⚠ 底栏玻璃**恒**采样 bottomChromeBackdrop（底栏 / 迷你栏 / 搜索键 / 水珠统一）。
                 //   它的录制节点在**外层 recede Box** 上（`graphicsLayer` 之外，唯一一处平行层）：
                 //   **恒定挂载 + 每帧跟着转场进度重录**
@@ -967,6 +1043,11 @@ fun MeloXApp(
                         //   明确强感、与收起落定的落定拍同款力度。只在 tab 真正切换时响
                         //   （维持展开态的重复点击不响、与 tabBarMinimized 变化的 LongPress 不叠加成双 buzz）。
                         if (tab != selectedTab) tabHaptic(HapticFeedbackType.LongPress)
+                        if (tab != selectedTab) {
+                            detailPaneState.clearPages()
+                            messagesVisible = false
+                            recognitionVisible = false
+                        }
                         tabBarMinimized = false
                         selectedTab = tab
                     },
@@ -974,7 +1055,8 @@ fun MeloXApp(
                     minimized = tabBarMinimized,
                     visibleRootTabs = visibleRootTabs,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(if (listDetailMode) Alignment.BottomStart else Alignment.BottomCenter)
+                        .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
                         // 采样的目标矩形 = 底部 chrome 在窗口里的实际位置。
                         .onGloballyPositioned { toneState.updateBounds(it) },
                     miniPlayer = { compactProgress ->
@@ -1014,6 +1096,7 @@ fun MeloXApp(
                                  //   （「下沉抽搐一下再往上」「点击很难看」）。详见
                                  //   `MeloXIOSMiniPlayer` 里 `sharedSinkBoundsTransform` 处的说明。
                                  closingIntent = playerClosingIntent,
+                                miniPlayerHitRect = miniPlayerHitRect,
                             )
                         }
                     },
@@ -1026,7 +1109,9 @@ fun MeloXApp(
                 enter = meloXPageEnter(veilColor = MaterialTheme.colorScheme.background),
                 exit = meloXPageExit(),
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxHeight()
+                    .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
+                    .align(Alignment.TopEnd)
                     .zIndex(15f),
             ) {
                 // 包一层只为把页面几何（含**系统屏幕圆角**）挂进 slide 变换内侧
@@ -1038,6 +1123,7 @@ fun MeloXApp(
                         settled = transition.currentState == transition.targetState,
                     ),
                 ) {
+                    BackHandler { messagesVisible = false }
                     MessagesScreen(onBack = { messagesVisible = false })
                 }
             }
@@ -1050,7 +1136,9 @@ fun MeloXApp(
                 enter = meloXPageEnter(veilColor = MaterialTheme.colorScheme.background),
                 exit = meloXPageExit(),
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxHeight()
+                    .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
+                    .align(Alignment.TopEnd)
                     .zIndex(15f),
             ) {
                 Box(
@@ -1058,6 +1146,7 @@ fun MeloXApp(
                         settled = transition.currentState == transition.targetState,
                     ),
                 ) {
+                    BackHandler { recognitionVisible = false }
                     MeloXRecognitionOverlay(onBack = { recognitionVisible = false })
                 }
             }
@@ -1088,7 +1177,13 @@ fun MeloXApp(
                     MeloXIOSNowPlayingSharedHost(
                         state = playbackState,
                         onDismiss = closePlayer,
-                        onNavigateSearch = { query, kind ->
+                        // ★ 转场可打断（2026-10-15）：关闭动画进行中，在播放面上点按一次
+                        //   = 抢回播放页。与点迷你栏**同一条链路**（`openPlayer`）
+                        //   ⇒ 动画从当前 fraction 连续回 1f，不跳变。
+                        onReopen = openPlayer,
+                        miniPlayerHitRect = miniPlayerHitRect,
+                         onNavigateSearch = { query, kind ->
+                             detailPaneState.clearPages()
                             if (selectedSource == MusicSource.Netease) {
                                 MeloXSearchLaunchBus.post(query, kind)
                             }
@@ -1125,6 +1220,9 @@ fun MeloXApp(
                             playerTransitionTargetOpen = false
                             playerTransitionJob?.cancelAndJoin()
                             playerTransitionJob = null
+                            // ★ 转场可打断：拖拽开始 ⇒ 撤销上一条待发的落定「咚」。
+                            playerSettleThumpJob?.cancel()
+                            playerSettleThumpJob = null
                             playerTransitionState.seekTo(
                                 fraction = fraction.coerceIn(0f, 0.999f),
                                 targetState = false,
@@ -1165,11 +1263,15 @@ fun MeloXApp(
                             playerTransitionTargetOpen = !collapse
                             playerTransitionJob?.cancelAndJoin()
                             playerTransitionJob = null
+                            // ★ 转场可打断：上一条待发的落定「咚」先撤销（回弹 collapse=false
+                            //   时更不能让它残留着、在回弹途中炸出来）。
+                            playerSettleThumpJob?.cancel()
+                            playerSettleThumpJob = null
                             // ★ 双拍下沉触感（与底栏同款）：只在 collapse=true（确定收起）时震。
                             //   拍 1 松手瞬间「啪」激活，拍 2 弹簧落定「咚」落定。
                             if (collapse) {
                                 playerSpringThumpEngage()       // 拍 1：松手瞬间「啪」——激活下沉
-                                playerScope.launch {
+                                playerSettleThumpJob = playerScope.launch {
                                     val settleMs = meloXPlayerTweenDurationMillis().toLong()
                                     kotlinx.coroutines.delay(settleMs)
                                     playerSpringThumpLand()     // 拍 2：弹簧落定「咚」——落定
@@ -1203,37 +1305,7 @@ fun MeloXApp(
 
          }
 
-        // ── 系统圆角读数（仅 debug 包）────────────────────────────────────────
-        //   用户口径：「再次确认获取系统圆角」⇒ 直接把 WindowInsets 原始读数与最终采用值
-        //   打在屏幕左上角，肉眼即可核对（release 不渲染，零影响）。
-        if (BuildConfig.DEBUG) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(99f),
-                contentAlignment = Alignment.TopStart,
-            ) {
-                val runtimeText = displayCorner.runtimePx?.let { "${it.toInt()}px" } ?: "null"
-                val usedPx = displayCorner.usedPx.toInt()
-                val usedDp = with(density) { displayCorner.usedPx.toDp().value }.toInt()
-                // 平滑角的外接尺寸（= 目标半径 × 补偿倍数），量的是「角占多大」而不是半径本身，
-                // 因为超椭圆在同半径下切深只有正圆弧的一半，必须靠外接尺寸补回来。
-                val spanPx = (displayCorner.usedPx * MeloXSmoothCorner.MaxSpanFactor).toInt()
-                Text(
-                    text = "sysCorner runtime=$runtimeText  used=${usedPx}px(${usedDp}dp)  " +
-                        "smooth n=${MeloXSmoothCorner.MaxExponent} span=${spanPx}px  " +
-                        "fallback=${MeloXPlayerRecedeCompatFallbackDp.toInt()}dp",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.72f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        }
-
-        // 网易云登录已改为独立 Activity（MeloXNeteaseLoginActivity），走系统原生转场，
-        // 与「设置 → 详情」这类页面完全一致；此处不再内嵌覆盖层。
+        // 全局弹窗独立于左右栏导航，保持覆盖整个窗口。
         clipboardTarget?.let { target ->
             MeloXAppDialog(
                 title = stringResource(R.string.app_clipboard_title),
@@ -2298,6 +2370,13 @@ private fun playerSettleMasterSpec(): FiniteAnimationSpec<Float> {
  *
  * ⚠ 回退只需一行：把本函数与 [playerCloseFractionSpec] 都改回
  *   `playerAutomaticFractionSpec()`（保留未删，专为回退）。
+ *
+ * ⚠⚠ 2026-10-15 回退记录：曾按用户口径 "damping 0.75，有轻微回弹"把**打开方向**
+ *   单独换成 underdamped 弹簧（ζ=0.75，过冲 ~2.8%；recede / 内容层 / MiniPlayer
+ *   三处同换 + recedeMasterFraction 上界钳制放开），用户实测「**效果太差**」⇒
+ *   整条回退到本函数（ζ=1）。当时的新增 spec / 常量 / import 已全部删除。
+ *   教训：本项目播放器动画的「弹」已由关闭方向 + 迷你栏尾段 bounce 提供，
+ *   打开方向再加过冲是**双重回弹**，与 AM 手感相反。
  */
 private fun playerOpenFractionSpec(): FiniteAnimationSpec<Float> = playerSettleMasterSpec()
 

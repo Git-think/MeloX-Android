@@ -111,6 +111,9 @@ internal val MeloXPlayerShellBoundsTransform = BoundsTransform { _, _ ->
 //   时长改走 [meloXPlayerTweenDurationMillis]（抵消系统缩放）。
 // ⚠⚠ 2026-10-03 回退记录：本函数曾被临时改成 `LinearEasing`（把形状统一上移到 fraction），
 //   用户实测「反而比上版本效果差」⇒ **已回退**。缓动留在这一层（几何/圆角/内容/recede 同源）。
+// ⚠⚠⚠ 2026-10-15 回退记录：曾给本函数加 `open` 参数、打开方向返回 ζ=0.75
+//   underdamped 弹簧（与 master / recede 三处同换），用户实测「效果太差」⇒
+//   恢复无条件 tween。打开方向的「弹」不由这里提供。
 internal fun meloXPlayerLinearFloatSpec() = tween<Float>(
     durationMillis = meloXPlayerTweenDurationMillis(),
     easing = MeloXPlayerAppleEasing,

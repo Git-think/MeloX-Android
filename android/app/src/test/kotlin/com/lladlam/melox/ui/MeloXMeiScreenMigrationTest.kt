@@ -10,8 +10,8 @@ class MeloXMeiScreenMigrationTest {
         val activity = File("src/main/kotlin/com/lladlam/melox/ui/collection/MeloXCollectionDetailActivity.kt").readText()
         val library = File("src/main/kotlin/com/lladlam/melox/ui/library/LibraryScreen.kt").readText()
 
-        assertTrue(activity.contains("MeloXUnifiedAlbumDetailScreen(id, ::finish)"))
-        assertTrue(activity.contains("MeloXArtistDetailScreen(id, onExit)"))
+        assertTrue(activity.contains("MeloXUnifiedAlbumDetailScreen(id, onBack)"))
+        assertTrue(activity.contains("MeloXArtistDetailScreen(id, onBack)"))
         assertTrue(library.contains("internal fun MeloXUnifiedProviderAlbumDetailScreen"))
     }
 

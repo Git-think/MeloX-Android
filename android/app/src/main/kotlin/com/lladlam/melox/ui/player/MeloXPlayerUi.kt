@@ -153,6 +153,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
     private val downloadStore by lazy(LazyThreadSafetyMode.NONE) { MeloXDownloadStore.get(appContext) }
     private val sleepTimerHandler = Handler(Looper.getMainLooper())
     private var pendingMediaClearRunnable: Runnable? = null
+    private var pendingQueueRebuildRunnable: Runnable? = null
     private var recordedMediaId: String? = null
     private var recordedCompletion = false
     private val artworkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -253,10 +254,18 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
-            refresh(
-                rebuildQueue = events.contains(Player.EVENT_TIMELINE_CHANGED) ||
-                    events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
-            )
+            val queueDirty = events.contains(Player.EVENT_TIMELINE_CHANGED) ||
+                events.contains(Player.EVENT_MEDIA_METADATA_CHANGED)
+            // ⚠⚠⚠ 2026-10-16 修「队列页点模式键后立刻退出会卡住」：随机播放的一次开关会
+            //   经 `reorderFutureInPlace` 发出**每首一首一条** moveMediaItem ⇒ 每条都回抛
+            //   EVENT_TIMELINE_CHANGED ⇒ 原实现每条都全量 `buildQueue` + 队列 LazyColumn
+            //   全量重组 = O(N²) 主线程风暴；风暴窗口内点「接下来播放」退出列表页，
+            //   切页动画/点击全被压死（用户观感 = 卡住）。
+            //   ⇒ 当前曲目元数据照旧**立刻**刷新（rebuildQueue=false，便宜；尺寸变化时
+            //     它内部仍会即时重建一次）；队列全量重建合并为 120ms 去抖单次 ——
+            //     一轮 shuffle 重排只付一次 buildQueue。
+            refresh(rebuildQueue = false)
+            if (queueDirty) scheduleQueueRebuild(player)
         }
     }
 
@@ -272,6 +281,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
 
     internal fun unbind() {
         cancelPendingMediaClear()
+        cancelPendingQueueRebuild()
         controller?.removeListener(listener)
         controller?.release()
         controller = null
@@ -476,6 +486,22 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
     private fun cancelPendingMediaClear() {
         pendingMediaClearRunnable?.let(sleepTimerHandler::removeCallbacks)
         pendingMediaClearRunnable = null
+    }
+
+    /** 时间线/元数据驱动的队列全量重建去抖：风暴窗口内的 N 条事件只付 1 次 buildQueue。 */
+    private fun scheduleQueueRebuild(player: Player) {
+        if (pendingQueueRebuildRunnable != null) return
+        val runnable = Runnable {
+            pendingQueueRebuildRunnable = null
+            if (controller === player) refresh(rebuildQueue = true)
+        }
+        pendingQueueRebuildRunnable = runnable
+        sleepTimerHandler.postDelayed(runnable, QUEUE_REBUILD_COALESCE_MS)
+    }
+
+    private fun cancelPendingQueueRebuild() {
+        pendingQueueRebuildRunnable?.let(sleepTimerHandler::removeCallbacks)
+        pendingQueueRebuildRunnable = null
     }
 
     private fun clearMediaState(player: Player) {
@@ -852,6 +878,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
 
     private companion object {
         const val MEDIA_CLEAR_GRACE_MS = 500L
+        const val QUEUE_REBUILD_COALESCE_MS = 120L
         const val SLEEP_TIMER_END_KEY = "playback_sleep_timer_end_epoch_ms"
     }
 }

@@ -66,29 +66,7 @@ class MeloXCollectionDetailActivity : ComponentActivity() {
         setContent {
             MeloXPageHost {
               MeloXTheme {
-                val page: @Composable () -> Unit = {
-                    when {
-                        isProgram -> PodcastProgramScreen(id, onExit)
-                        kind == MeloXSearchKind.Albums -> MeloXUnifiedAlbumDetailScreen(id, ::finish)
-                        kind == MeloXSearchKind.Artists -> MeloXArtistDetailScreen(id, onExit)
-                        kind == MeloXSearchKind.Playlists -> MeloXUnifiedPlaylistDetailScreen(
-                            playlist = NeteasePlaylistSummary(
-                                id = id,
-                                name = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "歌单" },
-                                coverUrl = intent.getStringExtra(EXTRA_COVER),
-                                trackCount = intent.getIntExtra(EXTRA_COUNT, 0),
-                                creatorName = intent.getStringExtra(EXTRA_CREATOR).orEmpty(),
-                            ),
-                            onBack = onExit,
-                        )
-                        kind == MeloXSearchKind.Podcasts -> MeloXPodcastScreen(
-                            initialPodcastId = id,
-                            onExit = onExit,
-                            bottomPadding = 32.dp,
-                        )
-                    }
-                }
-                page()
+                MeloXCollectionDetailPage(intent, onExit)
               }
             }
         }
@@ -114,9 +92,31 @@ class MeloXCollectionDetailActivity : ComponentActivity() {
                 .putExtra(EXTRA_ID, id)
                 .putExtra(EXTRA_KIND, kind.name)
                 .apply { if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-            if (kind == MeloXSearchKind.Albums) context.startActivity(intent)
-            else context.startMeloXPage(intent)
+            context.startMeloXPage(intent)
         }
+    }
+}
+
+@Composable
+internal fun MeloXCollectionDetailPage(intent: Intent, onBack: () -> Unit) {
+    val id = intent.getLongExtra("id", -1L)
+    if (id <= 0L) return
+    val kind = runCatching { MeloXSearchKind.valueOf(intent.getStringExtra("kind").orEmpty()) }.getOrNull()
+    when {
+        intent.getBooleanExtra("program", false) -> PodcastProgramScreen(id, onBack)
+        kind == MeloXSearchKind.Albums -> MeloXUnifiedAlbumDetailScreen(id, onBack)
+        kind == MeloXSearchKind.Artists -> MeloXArtistDetailScreen(id, onBack)
+        kind == MeloXSearchKind.Playlists -> MeloXUnifiedPlaylistDetailScreen(
+            playlist = NeteasePlaylistSummary(
+                id = id,
+                name = intent.getStringExtra("name").orEmpty().ifBlank { "歌单" },
+                coverUrl = intent.getStringExtra("cover"),
+                trackCount = intent.getIntExtra("count", 0),
+                creatorName = intent.getStringExtra("creator").orEmpty(),
+            ),
+            onBack = onBack,
+        )
+        kind == MeloXSearchKind.Podcasts -> MeloXPodcastScreen(initialPodcastId = id, onExit = onBack, bottomPadding = 32.dp)
     }
 }
 @Composable private fun Header(title: String, onBack: () -> Unit) = Row(Modifier.fillMaxWidth().height(58.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(44.dp).meloXLiquidButton(shape = CircleShape).clickable(onClick = onBack), contentAlignment = Alignment.Center) { MeloXActionIcon("‹", Modifier.size(20.dp), MaterialTheme.colorScheme.onSurface) }; Spacer(Modifier.width(12.dp)); Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }

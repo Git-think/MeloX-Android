@@ -990,8 +990,8 @@
     <string name="settings_general_clipboard">Recognize NetEase links on the clipboard</string>
     <string name="settings_general_clipboard_note">The clipboard is read once each time the app returns to the foreground. MeloX asks before opening a song or playlist.</string>
     <string name="settings_general_haptics">Haptics</string>
-    <string name="settings_general_system_font">Use the system font</string>
-    <string name="settings_general_system_font_note">Lyrics always use MiLan Pro. Other screens use the system font.</string>
+    <string name="settings_general_system_font">System font scope</string>
+    <string name="settings_general_system_font_note">Off: MiLan Pro everywhere. Non-lyrics: system font except lyrics. Global: system font including lyrics.</string>
     <string name="settings_general_tabbar">Don\'t shrink the tab bar automatically</string>
     <string name="settings_general_tabbar_note">The bottom bar stays expanded while you scroll up.</string>
     <string name="settings_recognition_ready">Move closer to the sound, then start</string>

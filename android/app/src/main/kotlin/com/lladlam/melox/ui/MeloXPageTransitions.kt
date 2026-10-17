@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import com.lladlam.melox.ui.layout.LocalMeloXListDetail
+import com.lladlam.melox.ui.layout.LocalMeloXInDetailPane
+import com.lladlam.melox.ui.layout.MeloXAdaptiveDetail
+import com.lladlam.melox.ui.layout.openMeloXDetailPage
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -117,17 +122,32 @@ internal fun Modifier.meloXPageSlideGeometry(
  *   因此故意用普通字段而不是 `mutableStateOf`（在那里写状态是非法且会引入额外失效）。
  *   每个调用点各自 `remember` 一个实例，不存在跨图层串用。
  */
-private class MeloXSlideShapeCache {
+internal class MeloXSlideShapeCache {
     private var cachedRadius = Float.NaN
-    private var cachedScale = Float.NaN
+    private var cachedScaleX = Float.NaN
+    private var cachedScaleY = Float.NaN
     private var cachedShape: Shape? = null
 
-    fun of(radiusPx: Float, scale: Float): Shape {
+    fun of(radiusPx: Float, scale: Float): Shape = ofXY(radiusPx, scale, scale)
+
+    /**
+     * **分轴版**：页面退让层（`MeloXApp` 里 recede 的 `graphicsLayer`）挂的是
+     * **sx ≠ sy 的非等比缩放**（见那边的 `sx` / `syFull` 推导），进不了单轴入口。
+     *
+     * ⚠ 为什么这里必须也走缓存：同一个坑在两个调用点都存在 —— 早前只有推入/退回
+     *   这一条是被认真优化过的（`of` + [meloXQuantizedScale]），而播放页打开时
+     *   **外壳 morph 与后方页面退让是同时跑的**（两边的 master fraction 严格同拍），
+     *   漏掉的那一边照样每帧喂一个新 shape ⇒ 一边便宜一边贵，总成本并没降下来。
+     */
+    fun ofXY(radiusPx: Float, scaleX: Float, scaleY: Float): Shape {
         val hit = cachedShape
-        if (hit != null && cachedRadius == radiusPx && cachedScale == scale) return hit
-        return MeloSmoothCornerShape(radiusPx, scale, scale).also {
+        if (hit != null && cachedRadius == radiusPx && cachedScaleX == scaleX && cachedScaleY == scaleY) {
+            return hit
+        }
+        return MeloSmoothCornerShape(radiusPx, scaleX, scaleY).also {
             cachedRadius = radiusPx
-            cachedScale = scale
+            cachedScaleX = scaleX
+            cachedScaleY = scaleY
             cachedShape = it
         }
     }
@@ -146,7 +166,7 @@ private const val MeloXPageSlideScaleDrop = 0.08f
  *
  * 代价：可见半径误差 ≤ 0.85%（184px → ±1.6px），肉眼不可辨；观感与不吸附等价。
  */
-private fun meloXQuantizedScale(scale: Float): Float =
+internal fun meloXQuantizedScale(scale: Float): Float =
     if (!scale.isFinite()) 1f else (scale * 64f).roundToInt() / 64f
 
 /**
@@ -196,6 +216,8 @@ private fun meloXQuantizedScale(scale: Float): Float =
  * @param progress 被覆盖的程度：0 = 前台，1 = 完全退到后面。
  */
 internal fun Modifier.meloXPageRecede(progress: () -> Float): Modifier =
+    composed {
+        if (LocalMeloXListDetail.current && !LocalMeloXInDetailPane.current) return@composed this
     // ⚠⚠ **必须是布局期位移，不能是 `graphicsLayer { translationX }`**（2026-10-02 改）。
     //   共享元素 morph 的两端 bounds 取自 `SharedTransitionLayout` 的 **lookahead 布局坐标**，
     //   而 `graphicsLayer` 的绘制期变换**不进 lookahead** ⇒ 旧页动了、卡片在屏上的实际位置变了，
@@ -213,6 +235,7 @@ internal fun Modifier.meloXPageRecede(progress: () -> Float): Modifier =
             //   RTL 下不镜像。
             placeable.place((-placeable.width * MeloXPageRecedeParallax * p).roundToInt(), 0)
         }
+    }
     }
 
 /**
@@ -258,7 +281,7 @@ private const val MeloXPageRecedeParallax = 1f / 3f
  *
  * ### ⚠⚠ 「推入期间不要组合重内容」= 调用方的义务（2026-10-09，修播客页一顿一顿）
  * 本容器只负责把内容**推入**，管不了内容有多重。而推入期的目标帧率是 **120fps（8.3ms/帧）**
- * （见 `core/display/MeloXFrameRateController`）：子页只要在推入那几帧里组合自己的重脚手架，
+ * 子页只要在推入那几帧里组合自己的重脚手架，
  * 就会和滑动/下层退让抢 UI 线程，帧一顶过 16.7ms 就被肉眼读成「一顿一顿」。
  *
  * 已知的重脚手架（按代价排序）：
@@ -291,6 +314,19 @@ internal fun MeloXInterruptiblePage(
     //  · 前台按返回 ⇒ onBack()（关闭）；
     //  · 退出途中再按返回 ⇒ 吞掉不穿透（否则会穿透到下层/Activity，表现为「连点把页面整个关掉」）。
     onBack: (() -> Unit)? = null,
+    content: @Composable AnimatedVisibilityScope.() -> Unit,
+) {
+    MeloXAdaptiveDetail(visible, onDismiss = onBack) { shown ->
+        MeloXInlinePage(shown, modifier, retreatProgress, onBack, content)
+    }
+}
+
+@Composable
+private fun MeloXInlinePage(
+    visible: Boolean,
+    modifier: Modifier,
+    retreatProgress: () -> Float,
+    onBack: (() -> Unit)?,
     content: @Composable AnimatedVisibilityScope.() -> Unit,
 ) {
     AnimatedContent(
@@ -339,7 +375,7 @@ internal fun MeloXInterruptiblePage(
 }
 
 /**
- * 启动一个「整页推入」的页面 Activity。
+ * 主窗口内的详情交给自适应导航；从其它 Activity 打开时仍使用原生页面。
  *
  * ⚠⚠ **不要在这里做任何转场定制** —— `overridePendingTransition` / `ActivityOptions
  *   .makeCustomAnimation` / 主题里的 `windowAnimationStyle` 一个都不要用。转场是平台的活：
@@ -352,7 +388,7 @@ internal fun MeloXInterruptiblePage(
  * `windowAnimationStyle`。
  */
 internal fun Context.startMeloXPage(intent: Intent) {
-    startActivity(intent)
+    if (!openMeloXDetailPage(intent)) startActivity(intent)
 }
 
 /** 关闭一个页面 Activity。转场同样交给平台，配对地不要配 `overridePendingTransition`。 */

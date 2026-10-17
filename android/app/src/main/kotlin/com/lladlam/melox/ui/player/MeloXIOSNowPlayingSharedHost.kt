@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -69,6 +71,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource.Companion.UserInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -105,6 +109,17 @@ import kotlin.math.sin
 fun MeloXIOSNowPlayingSharedHost(
     state: MeloXPlaybackUiState,
     onDismiss: () -> Unit,
+    // ★ 2026-10-15 新增：**转场可打断**（用户口径「完全关闭前不能再次点击打开」）。
+    //   关闭动画进行中，在播放面上做一次**点按**（非拖拽）即抢回播放页 ——
+    //   由 `MeloXApp` 传 `openPlayer`（与点迷你栏**同一条链路**）⇒ 关闭途中再点一下，
+    //   动画从**当前 fraction 连续**回 1f（`SeekableTransitionState.animateTo` 天生支持打断：
+    //   位置连续、不跳变、不重播）。默认 `{}` ⇒ 其它调用点行为不变。
+    onReopen: () -> Unit = {},
+    // ★ 2026-10-15 修「打断动画期间点底栏误触抢回」：reopen 触发范围限制在 mini 播放器
+    //   自身命中矩形内。该矩形由 mini 播放器挂 `onGloballyPositioned` 实时上报（window 坐标），
+    //   本函数全屏 `pointerInput` 据此只在点击落在 mini 区域时才抢回；其余区域仍只拦截
+    //   （防按钮误触）不抢回 —— 于是关闭动画中点底栏导航不再误入播放页。
+    miniPlayerHitRect: MutableState<Rect?> = mutableStateOf(null),
     onNavigateSearch: (String, MeloXSearchKind) -> Unit = { _, _ -> },
     // ⚠ 三方合并遗留（2026-10-11）：上游 3f877ea 在此新增了 `onNavigateAlbum` /
     //   `onNavigateArtist`（播放页 ⋯ 菜单跳专辑 / 歌手），但本地侧**从来没有这条链路**
@@ -475,10 +490,51 @@ fun MeloXIOSNowPlayingSharedHost(
     //     ⇒ 改为「**只要没完全展开就算过渡中**」（稳态展开 p=1 ⇒ false，一切照旧）。
     val transitionInFlight = expansionProgress < 0.999f
     val blockClicksWhileTransitioning = rememberUpdatedState(transitionInFlight)
+    // ★ 转场可打断（2026-10-15）：`onReopen` 供下面 `pointerInput(Unit)` 读取 ——
+    //   那段 lambda 只创建一次，必须走 `rememberUpdatedState` 才能拿到最新回调。
+    val onReopenState = rememberUpdatedState(onReopen)
+    // ★ 2026-10-15 修「点底栏误触抢回」：记录本全屏 Box 自身的 window 坐标，
+    //   用以把 pointerInput 收到的局部坐标换算成 window 坐标，再与 mini 命中矩形比较。
+    val hostCoordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    // ★★★ 2026-10-15（打开播放页流畅度）：**常驻重层延后组合**。
+    //
+    // 事实：`MeloXIOSNowPlayingScene` 里「歌词」与「队列」两棵子树是**常驻**的（页面切换靠
+    // 各自的 alpha/offset 做交叉淡入，见 scene 里那两个 Box）。封面页（打开播放页时的
+    // 初始页）它们的 alpha 恒 0 ⇒ **一个像素都看不见**，但 `graphicsLayer{alpha=0}` 不会让
+    // Compose 跳过子树：两棵子树照常参与**组合 / 测量 / 布局 / 绘制**。而它们恰好是本页最重
+    // 的两块 —— 歌词是一整个 `LazyColumn`（`LazyLayoutCacheWindow(ahead=720dp, behind=240dp)`
+    // ⇒ 视口外还多组合若干行）+ 逐字 `Canvas`；队列是一整个列表。
+    //
+    // 于是「打开播放页」这条 360ms 的 morph 时间线上，每一帧都在为**看不见的内容**付电。
+    //
+    // ⇒ 把它们的**首次组合**推到展开动画落定之后（`expansionProgress` 到 1）。
+    //   · 为什么用 latch（单向置真）：收起方向 `transitionInFlight` 会重新变 true，
+    //     若直接拿它当判据，下拉返回时歌词会在**手势中途凭空消失**（用户报障过的那类事故）。
+    //   · 落定后立刻组合 ⇒ 用户之后滑到歌词/队列页时**早已就绪**，不会把卡顿转移到切页。
+    //   · 场景侧还留了「当前页不是封面页 ⇒ 立刻组合」的旁路（冷启动直接进歌词页等），
+    //     所以这条只影响「封面页的展开动画」这一种情形。
+    var residentLayersReady by remember { mutableStateOf(false) }
+    LaunchedEffect(transitionInFlight) {
+        if (!transitionInFlight) residentLayersReady = true
+    }
+
+    // 逐帧计时（只读探针，见文件头；摘除时删这一段 + 那个文件即可）。
+    // ⚠⚠ 2026-10-15 v2：key 必须用**相位**，不能再用 `transitionInFlight` ——
+    //    后者在收起静止态（p=0）也是 true，LaunchedEffect 不会在打开时重启，
+    //    v1 因此**从来没trace到过打开方向**（只有关闭方向），且一次 close 的会话
+    //    会跨空闲延续到下一次 open、f 编号跨方向合并。相位 0/1/2 各自独立成会话：
+    //    每次「过渡中」都是完整的一次打开或一次关闭。
+    val morphPhase = when {
+        expansionProgress >= 0.999f -> 2
+        expansionProgress <= 0.001f -> 0
+        else -> 1
+    }
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .onGloballyPositioned { hostCoordsState.value = it }
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
@@ -487,17 +543,38 @@ fun MeloXIOSNowPlayingSharedHost(
                             .changes.firstOrNull { it.changedToDown() } ?: continue
                         if (!blockClicksWhileTransitioning.value) continue
                         // 吞掉这一整段手势（含后续 up），避免 down 之后仍被判成 click。
+                        // ★ 同时把这一段分类成「点按」还是「拖拽」：**点按**（最大位移 ≤ touchSlop
+                        //   且时长 ≤ longPressTimeout）且**本次推进正朝关闭**（`hostExitingState`
+                        //   = `closingIntent`）时，升级为「抢回播放页」—— 打断关闭、
+                        //   从当前 fraction 连续回打开。拖拽一律不触发（保留原拦截语义）。
                         var pointerId = down.id
+                        var maxDistance = 0f
+                        var lastUptime = down.uptimeMillis
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
-                            event.changes.forEach { change ->
+                            var stillPressed = false
+                            for (change in event.changes) {
                                 if (change.id == pointerId) {
                                     change.consume()
-                                    if (change.pressed) pointerId = change.id
+                                    lastUptime = change.uptimeMillis
+                                    maxDistance = maxOf(
+                                        maxDistance,
+                                        (change.position - down.position).getDistance(),
+                                    )
+                                    if (change.pressed) stillPressed = true
                                 }
                             }
-                            if (event.changes.none { it.id == pointerId && it.pressed }) break
+                            if (!stillPressed) break
                         }
+                        val isTap = maxDistance <= viewConfiguration.touchSlop &&
+                            (lastUptime - down.uptimeMillis) <= viewConfiguration.longPressTimeoutMillis
+                        // ★ 2026-10-15 修「打断动画期间点底栏也进入播放页」：reopen 只在「点按落在
+                        //   mini 播放器命中矩形内」时才抢回。把 Box 局部坐标换算到 window 坐标再与
+                        //   `miniPlayerHitRect` 比较（该矩形由 mini 播放器实时上报）。其余区域仍走
+                        //   上面的 `consume()` 拦截（防按钮误触），但不抢回 ⇒ 点底栏导航不再误入。
+                        val tapInWindow = (hostCoordsState.value?.localToWindow(Offset.Zero) ?: Offset.Zero) + down.position
+                        val withinMini = miniPlayerHitRect.value?.contains(tapInWindow) == true
+                        if (isTap && hostExitingState.value && withinMini) onReopenState.value()
                     }
                 }
             },
@@ -734,6 +811,8 @@ fun MeloXIOSNowPlayingSharedHost(
                             lyricsActive = page == MeloXNowPlayingPage.Lyrics &&
                                 expansionProgress >= 0.98f &&
                                 !showLandscapeSkyline,
+                            // ★ 常驻重层（歌词/队列）的首帧组合推到展开动画落定之后，见上方 latch 注释。
+                            residentLayersReady = residentLayersReady,
                             orientTransition = orientTransition,
                             columnCenterProgress = columnCenterProgress,
                             sharedTransitionScope = sharedTransitionScope,
@@ -1079,13 +1158,25 @@ private fun SharedArtworkDestination(
         //   （见下方`artworkTransform`），相对下沉 = 脱节 = 露馅 ⇒ 该变量已删除。
         //   转屏飞行时的立体感现在由本体 scale（flightLiftScale）整体带过去。
 
-        // ★ 修「打开动画瞬间封面变小」：morph 期间 targetSize 必须保持 fullArtworkSize，
-        //   不受 pageFrameProgress 影响。pageFrameProgress 只在 morph 结束后接管
-        //   （让封面从全屏缩到 72dp 缩略图）。
+        // ★ 修「歌词页打开时封面先到正中、展开完才跳左上角」：morph 期间封面必须停在**目标页**
+        //   的静止位，而不是无条件钉死全屏居中。
+        //   · 封面页（Artwork）：静止位 = 全屏居中 ⇒ destPageFrame = 0；
+        //   · 歌词 / 队列页（竖屏）：静止位 = 左上角 72dp 缩略图 ⇒ destPageFrame = 1。
+        //   morph 期间用 destPageFrame 取代 live pageFrameProgress，封面直接以目标页姿态进场
+        //   （mini → 72dp 左上角 一镜到底）；morph 结束瞬间 live pageFrameProgress 已等于该值
+        //   （page 打开前已从 playback_last_page 还原、headerProgress 到位），故无边界跳变。
+        //   ⚠ 顺带根治早先「打开瞬间封面变小」：封面页打开时若 headerProgress 残留非 0，旧实现
+        //   （morph 期间不钉死）会让封面以 72dp 姿态进场；钉死到目标页位即一并消除。
+        //   ⚠ 仅在 morph（expansionProgress ∈ (0.01,0.99)）期间生效；收起 / 页间滑动
+        //   （exp >= 0.99）仍走 live pageFrameProgress，切页滑动观感不变。
+        //   ⚠ 横屏 / 平板双栏：歌词页仍是左列大封面（pageFrameProgress 恒 0，见本函数 997 行），
+        //   destPageFrame 必须随之恒 0，否则会引入横屏「先 72dp 再跳全屏」新跳变。
+        val destPageFrame = if (page == MeloXNowPlayingPage.Artwork || isLandscape) 0f else 1f
         val morphFreeze = expansionProgress > 0.01f && expansionProgress < 0.99f
-        val targetSize = if (morphFreeze) fullArtworkSize else lerpDp(fullArtworkSize, 72.dp, pageFrameProgress)
-        val targetX = lerpDp(fullX, 0.dp, pageFrameProgress)
-        val targetY = lerpDp(fullY, compactFrameTop, pageFrameProgress)
+        val effectivePageFrame = if (morphFreeze) destPageFrame else pageFrameProgress
+        val targetSize = lerpDp(fullArtworkSize, 72.dp, effectivePageFrame)
+        val targetX = lerpDp(fullX, 0.dp, effectivePageFrame)
+        val targetY = lerpDp(fullY, compactFrameTop, effectivePageFrame)
         // ★ 圆角从迷你侧 6dp 连续长到 12dp。封面 sharedElement 带
         //   `renderInOverlayDuringTransition = true` ⇒ 过渡期间由本函数这份副本渲染，
         //   源侧 clip 不参与。
@@ -1375,6 +1466,13 @@ private fun BoxScope.meloXArtworkShadowLayer(
     //   切歌时必须重置，否则会用上一张封面的亮度去压暗新封面。
     var coverLuma by remember(model, url) { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
+    // ★ 压暗 colorFilter 按值缓存（2026-10-15 性能排查）：
+    //   `graphicsLayer` 的 lambda **每帧**都会执行，而压暗系数 `dim` 只随
+    //   `coverLuma`（切歌时异步采样，一首歌最多几跳）变化 ⇒ 每帧重建
+    //   `ColorMatrix`（FloatArray(20)）+ `ColorFilter` 是纯浪费（打开动画
+    //   360ms × 120Hz ≈ 43 次无谓分配，且新实例还会让 RenderNode 每帧重设
+    //   paint）。dim 不变即复用**同一实例** ⇒ 零分配；数学逐值相同 ⇒ 零观感变化。
+    val dimFilterCache = remember { MeloXDimColorFilterCache() }
     // 亮度 → 压暗系数。暗封面 0 压（保持 v94 手感），白封面压到 0.34。
     fun coverDimFactor(): Float {
         val t = smoothStep(coverLuma, MeloXArtworkShadowDimStartLuma, MeloXArtworkShadowDimFullLuma)
@@ -1427,14 +1525,43 @@ private fun BoxScope.meloXArtworkShadowLayer(
                             //   不改 H/S ⇒ 色相与饱和度比例**天然完整保留**。
                             //   所以不需要饱和度矩阵（也不需要 `postConcat`/`timesAssign`，
                             //   纯对角阵一步到位）。上一版额外降饱和纯属多余，纯灰反而显脏。
-                            colorFilter = ColorFilter.colorMatrix(
-                                ColorMatrix().apply { setToScale(dim, dim, dim, 1f) },
-                            )
+                            // ★ 矩阵经 [MeloXDimColorFilterCache] 按 dim 缓存：dim 不变时
+                            //   复用同一实例，不再每帧分配（零观感变化，见上方声明处）。
+                            colorFilter = dimFilterCache.forDim(dim)
                         }
                     }
                     .clip(RoundedCornerShape(cornerRadius)),
             )
         }
+    }
+}
+
+/**
+ * 压暗 colorFilter 的**按值缓存**（draw 期安全：纯字段读写，不触发重组/重绘调度）。
+ *
+ * 为什么需要：阴影副本的 `graphicsLayer` lambda 每帧执行，但压暗系数 `dim` 只随
+ * 封面平均亮度（切歌时异步采样，一首歌最多几跳）变化。原实现每帧
+ * `ColorMatrix()` + `ColorFilter.colorMatrix()` 各分配一次 —— 打开动画
+ * 360ms × 120Hz ≈ 43 次无谓分配，且新实例还会让 RenderNode 每帧重设 paint。
+ * 缓存后 dim 不变即复用同一实例：数学逐值相同 ⇒ **零观感变化**，纯省分配。
+ *
+ * ⚠ 之所以不走 `remember(dim)`：调用点在 `graphicsLayer` lambda（draw 期）里，
+ *   不能调 composable API；且按值比较比按 key 重组更便宜（ dim 不变时连
+ *   recomposition 都不触发）。
+ */
+private class MeloXDimColorFilterCache {
+    private var key: Float = Float.NaN
+    private var cached: ColorFilter? = null
+
+    fun forDim(dim: Float): ColorFilter {
+        val existing = cached
+        if (existing != null && key == dim) return existing
+        val created = ColorFilter.colorMatrix(
+            ColorMatrix().apply { setToScale(dim, dim, dim, 1f) },
+        )
+        key = dim
+        cached = created
+        return created
     }
 }
 

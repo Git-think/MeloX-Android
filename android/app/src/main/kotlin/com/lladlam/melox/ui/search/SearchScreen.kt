@@ -1,5 +1,8 @@
 package com.lladlam.melox.ui.search
 
+import com.lladlam.melox.ui.layout.LocalMeloXListDetail
+import com.lladlam.melox.ui.layout.rememberMeloXDetailSelection
+
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -542,7 +545,7 @@ fun SearchScreen(
     // ── 「推入动画期间不组合重子页面」闸门（2026-10-09，修「搜索-浏览类别-播客」一顿一顿）──
     //
     // ⚠⚠ 根因：推入动画与子页面首屏**抢同一个 UI 线程**。动画期间本轮的目标帧率是 120fps
-    //   （8.3ms/帧，见 `core/display/MeloXFrameRateController`），只要有一项重活落在动画窗口里，
+    //   （8.3ms/帧预算），只要有一项重活落在动画窗口里，
     //   帧就掉到 16.7ms+ 并被读成顿挫。播客首屏恰好带三样重的**脚手架**：
     //     ① 自己一层**嵌套** `SharedTransitionLayout`（本页已在外层 search 的 STL 里，
     //        再套一层 = 每帧多跑一次 lookahead）；
@@ -571,7 +574,9 @@ fun SearchScreen(
     }
     // 打开详情时可见性（selectedDetail）与内容（overlayDetail）同时写入。
     // 返回只清 selectedDetail，内容留到退出过渡跑完再自然 dispose。
+    val onDetailSelected = rememberMeloXDetailSelection()
     fun applyDetail(destination: SearchDetailDestination) {
+        onDetailSelected()
         selectedDetail = destination
         overlayDetail = destination
         // 没有 hero 的详情（provider 歌手）落在整页子页面层，内容同样要留到退场结束。
@@ -685,7 +690,7 @@ fun SearchScreen(
                 .fillMaxSize()
                 .meloXPageRecede { homeRecede.value }
                 // 被覆盖时屏蔽主页的无障碍节点（与设置列表同款），否则读屏会同时读出两层。
-                .then(if (subPageOpen) Modifier.clearAndSetSemantics { } else Modifier),
+                .then(if (subPageOpen && !LocalMeloXListDetail.current) Modifier.clearAndSetSemantics { } else Modifier),
         ) {
                 val window = rememberMeloXWindowInfo()
                 Column(
@@ -755,8 +760,9 @@ fun SearchScreen(
                     recommendations = recommendations,
                     onPlaylist = { openDetail(SearchDetailDestination.Netease(it.asSearchItem())) },
                     sharedTransitionScope = searchSharedScope,
-                    selectedKey = homeSelectedKey,
-                    onCategory = { category ->
+                     selectedKey = homeSelectedKey,
+                     onCategory = { category ->
+                         onDetailSelected()
                         if (category == "播客") {
                             subPageContent = SearchSubPage.Podcast
                             podcastDiscovery = true
@@ -857,6 +863,13 @@ fun SearchScreen(
         // 内容取 subPageContent（返回时不清），退场动画期间才有东西可画。
         MeloXInterruptiblePage(
             visible = subPageOpen,
+            onBack = {
+                when {
+                    podcastDiscovery -> podcastDiscovery = false
+                    selectedDetail != null -> selectedDetail = null
+                    else -> categoryTitle = null
+                }
+            },
             retreatProgress = { 0f },
             modifier = Modifier.fillMaxSize().zIndex(1f),
         ) {
@@ -902,6 +915,7 @@ fun SearchScreen(
         // 于是退出过渡期间详情子树仍在组合里，封面才有机会一镜到底 morph 回结果卡片。
         MeloXInterruptiblePage(
             visible = overlayDestination != null,
+            onBack = { selectedDetail = null },
             retreatProgress = { detailBackProgress.value },
             modifier = Modifier.fillMaxSize().zIndex(2f),
         ) {
@@ -957,7 +971,7 @@ private fun Modifier.meloXSearchSharedArtwork(
     animatedVisibilityScope: AnimatedVisibilityScope?,
     key: String,
 ): Modifier {
-    if (sharedTransitionScope == null || animatedVisibilityScope == null) return this
+    if (LocalMeloXListDetail.current || sharedTransitionScope == null || animatedVisibilityScope == null) return this
     return with(sharedTransitionScope) {
         this@meloXSearchSharedArtwork.sharedElement(
             sharedContentState = rememberSharedContentState(key = key),
@@ -984,7 +998,7 @@ private fun SearchCardVisibility(
     content: @Composable AnimatedVisibilityScope.() -> Unit,
 ) {
     AnimatedVisibility(
-        visible = destinationKey != selectedKey,
+        visible = LocalMeloXListDetail.current || destinationKey != selectedKey,
         enter = fadeIn() + scaleIn(),
         exit = fadeOut() + scaleOut(),
         modifier = modifier,
@@ -1493,7 +1507,7 @@ private fun SearchMediaResults(
  * **整页子页在「推入动画期间」的轻量占位。**
  *
  * ### 为什么需要它（2026-10-09，修「搜索-浏览类别-播客」一顿一顿）
- * 推入动画的目标帧率是 120fps（8.3ms/帧，见 `core/display/MeloXFrameRateController`）——
+ * 推入动画的目标帧率是 120fps（8.3ms/帧预算）——
  * 任何重脚手架只要落在动画窗口里就会把帧顶到 16.7ms+，读成顿挫。而播客首屏自带
  * **嵌套 `SharedTransitionLayout` + `PullToRefreshBox` + 无限进度动画**，一组合就占住 UI 线程。
  * 占位里**只有**一个（宿主已画的）背板 + 一个进度指示器 ⇒ 逐帧成本可忽略。

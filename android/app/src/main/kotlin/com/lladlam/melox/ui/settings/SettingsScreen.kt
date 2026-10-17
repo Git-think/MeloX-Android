@@ -829,6 +829,7 @@ private fun ExperimentalSettings(context: android.content.Context, source: Music
             MeloXSettingsPreferences.setBoolean(context, "autosync_word_lyrics_enabled", enabled)
         }
     }
+    Spacer(Modifier.height(10.dp))
     if (autoSyncEnabled) {
         SettingsGlassGroup { AutoSyncModelPanel(context) }
         Spacer(Modifier.height(10.dp))
@@ -1560,6 +1561,25 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
             grouped = true,
         )
     }
+    Spacer(Modifier.height(10.dp))
+    SettingsGlassGroup {
+        SettingsToggleRow(
+            context,
+            "隐藏歌单搜索栏",
+            "library_playlist_search_hidden",
+            false,
+            "开启后，固定搜索栏隐藏，并在顶部滑动拉出。关闭则恢复原始样式。",
+            grouped = true,
+        )
+        SettingsToggleRow(
+            context,
+            "歌单展示封面",
+            "library_playlist_show_artwork",
+            false,
+            "开启后，歌单内的歌曲展示微小封面而不是数字序号。关闭则全部展示数字。",
+            grouped = true,
+        )
+    }
 }
 
 @Composable
@@ -1790,7 +1810,7 @@ private fun LyricsStringChoiceSetting(
     label: (String) -> String,
 ) {
     val groupRowIndex = LocalSettingsGroupRowIndex.current
-    val showSep = if (grouped) groupRowIndex.intValue++.let { it > 0 } else false
+    val showSep = remember(grouped) { if (grouped) groupRowIndex.intValue++.let { it > 0 } else false }
     var selected by remember(key) { mutableStateOf(MeloXSettingsPreferences.string(context, key, default)) }
     MeloXSettingsDropdown(
         title = title,
@@ -1847,7 +1867,7 @@ private fun LyricsChoiceSetting(
     label: (Int) -> String,
 ) {
     val groupRowIndex = LocalSettingsGroupRowIndex.current
-    val effectiveShowTopSeparator = if (grouped) groupRowIndex.intValue++.let { it > 0 } else false
+    val effectiveShowTopSeparator = remember(grouped) { if (grouped) groupRowIndex.intValue++.let { it > 0 } else false }
     // ⚠ 不用 remember 缓存：`selectedProvider` 可能每次读取都做一次迁移+写回
     //   （那正是我们要的：进设置页即完成迁移，显示立刻是新值）。
     var selected by remember(key) { mutableStateOf(selectedProvider()) }
@@ -1876,7 +1896,7 @@ private fun LyricsFloatChoiceSetting(
     label: (Float) -> String,
 ) {
     val groupRowIndex = LocalSettingsGroupRowIndex.current
-    val effectiveShowTopSeparator = if (grouped) groupRowIndex.intValue++.let { it > 0 } else false
+    val effectiveShowTopSeparator = remember(grouped) { if (grouped) groupRowIndex.intValue++.let { it > 0 } else false }
     var selected by remember(key) { mutableStateOf(MeloXSettingsPreferences.float(context, key, default)) }
     val selectedValue = values.minByOrNull { kotlin.math.abs(selected - it) } ?: default
     MeloXSettingsDropdown(
@@ -2605,6 +2625,17 @@ private fun GeneralSettings(context: android.content.Context) {
         )
         SettingsToggleRow(context, stringResource(R.string.settings_general_clipboard), "general_clipboard_links", true, stringResource(R.string.settings_general_clipboard_note), grouped = true)
         SettingsToggleRow(context, stringResource(R.string.settings_general_haptics), "general_haptic_feedback", true, grouped = true)
+        MeloXSettingsDropdown(
+            title = stringResource(R.string.settings_general_system_font),
+            selected = MeloXSettingsRuntime.systemFontScope,
+            items = listOf(
+                "off" to "关闭",
+                "nonlyrics" to "除歌词外",
+                "all" to "全局",
+            ),
+            onSelected = { MeloXSettingsPreferences.setString(context, "system_font_scope", it) },
+            grouped = true,
+        )
         SettingsToggleRow(
             context,
             stringResource(R.string.settings_general_tabbar),
@@ -3230,10 +3261,12 @@ private fun SettingsToggleRow(
 ) {
     var value by remember(key) { mutableStateOf(MeloXSettingsPreferences.boolean(context, key, default)) }
     val groupRowIndex = LocalSettingsGroupRowIndex.current
-    val effectiveShowTopSeparator = when {
-        showTopSeparator -> true
-        grouped -> groupRowIndex.intValue++.let { it > 0 }
-        else -> false
+    val effectiveShowTopSeparator = remember(grouped, showTopSeparator) {
+        when {
+            showTopSeparator -> true
+            grouped -> groupRowIndex.intValue++.let { it > 0 }
+            else -> false
+        }
     }
     @Composable fun row() {
         MeloXIosListRow(
@@ -3262,7 +3295,7 @@ private fun SettingsExternalToggleRow(
     onValueChange: (Boolean) -> Unit,
 ) {
     val groupRowIndex = LocalSettingsGroupRowIndex.current
-    val effectiveShowTopSeparator = if (grouped) groupRowIndex.intValue++.let { it > 0 } else false
+    val effectiveShowTopSeparator = remember(grouped) { if (grouped) groupRowIndex.intValue++.let { it > 0 } else false }
     val row = @Composable {
         MeloXIosListRow(
             title = title,
