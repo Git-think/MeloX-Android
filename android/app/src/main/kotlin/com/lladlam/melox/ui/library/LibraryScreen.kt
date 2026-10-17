@@ -447,6 +447,20 @@ fun LibraryScreen(
         MeloXLibraryLoginUnavailable(onLogin, source)
         return
     }
+    val splitPlaylistDetail = LocalMeloXListDetail.current && !LocalMeloXInDetailPane.current
+    // Keep the outgoing destination alive until the page container disposes it.
+    val selection = Triple(selectedPlaylist, selectedAlbum, selectedArtist)
+    val detailOpen = selectedPlaylist != null || selectedAlbum != null || selectedArtist != null || showLocalRecommendations
+    var retainedSelection by remember { mutableStateOf(selection) }
+    var retainedRecommendations by remember { mutableStateOf(showLocalRecommendations) }
+    androidx.compose.runtime.SideEffect {
+        if (detailOpen) {
+            retainedSelection = selection
+            retainedRecommendations = showLocalRecommendations
+        }
+    }
+    val (detailPlaylist, detailAlbum, detailArtist) = if (detailOpen) selection else retainedSelection
+    val detailRecommendations = if (detailOpen) showLocalRecommendations else retainedRecommendations
     PullToRefreshBox(
         isRefreshing = loading && snapshot != null,
         onRefresh = { scope.launch { refreshLibrary() } },
@@ -455,8 +469,39 @@ fun LibraryScreen(
       SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
           val sharedScope = this
 
-        AnimatedVisibility(visible = true) {
+        AnimatedContent(
+            targetState = selectedPlaylist.takeUnless { splitPlaylistDetail },
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                (fadeIn(tween(MeloXMotion.ContentEnterMillis, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(MeloXMotion.ContentExitMillis, easing = FastOutSlowInEasing))).apply {
+                    targetContentZIndex = if (targetState != null) 2f else 0f
+                }
+            },
+            contentKey = { playlist -> playlist?.id ?: Long.MIN_VALUE },
+            label = "library-playlist-detail-transition",
+        ) { targetPlaylist ->
             val playlistTransitionVisibilityScope = this
+            if (targetPlaylist != null) {
+                MeloXPlaylistDetailScreen(
+                    initialPlaylist = targetPlaylist,
+                    client = client,
+                    onBack = { selectedPlaylist = null },
+                    sharedTransitionScope = sharedScope,
+                    animatedVisibilityScope = playlistTransitionVisibilityScope,
+                    onModalVisibilityChanged = onModalVisibilityChanged,
+                    onLibraryChanged = { scope.launch { refreshLibrary() } },
+                    likedPlaylistId = snapshot?.likedPlaylistId,
+                    onSongLikeChanged = { song, liked ->
+                        val current = snapshot ?: return@MeloXPlaylistDetailScreen
+                        val updated = current.withSongLiked(song, liked)
+                        snapshot = updated
+                        session.profile?.userId?.let { userId ->
+                            scope.launch { cache.saveSnapshot(userId, updated) }
+                        }
+                    },
+                )
+            } else {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -662,8 +707,9 @@ fun LibraryScreen(
         }
       }
     }
+    }
     MeloXInterruptiblePage(
-        visible = selectedPlaylist != null || selectedAlbum != null || selectedArtist != null || showLocalRecommendations,
+        visible = (splitPlaylistDetail && selectedPlaylist != null) || selectedAlbum != null || selectedArtist != null || showLocalRecommendations,
         onBack = {
             when {
                 selectedArtist != null -> selectedArtist = null
@@ -674,8 +720,8 @@ fun LibraryScreen(
         },
     ) {
         when {
-            selectedPlaylist != null -> {
-                val playlist = selectedPlaylist!!
+            splitPlaylistDetail && detailPlaylist != null && detailAlbum == null && detailArtist == null -> {
+                val playlist = detailPlaylist
                 key(playlist.id) {
                 SharedTransitionLayout(Modifier.fillMaxSize()) {
                     AnimatedVisibility(visible = true) {
@@ -701,13 +747,13 @@ fun LibraryScreen(
                 }
                 }
             }
-            selectedAlbum != null -> MeloXUnifiedProviderAlbumDetailScreen(
-                album = selectedAlbum!!, onBack = { selectedAlbum = null },
+            detailAlbum != null -> MeloXUnifiedProviderAlbumDetailScreen(
+                album = detailAlbum, onBack = { selectedAlbum = null },
             )
-            selectedArtist != null -> MeloXProviderArtistDetailScreen(
-                artist = selectedArtist!!, onBack = { selectedArtist = null },
+            detailArtist != null -> MeloXProviderArtistDetailScreen(
+                artist = detailArtist, onBack = { selectedArtist = null },
             )
-            showLocalRecommendations -> LocalRecommendationPlaylistScreen(onBack = { showLocalRecommendations = false })
+            detailRecommendations -> LocalRecommendationPlaylistScreen(onBack = { showLocalRecommendations = false })
         }
     }
 }
