@@ -119,37 +119,18 @@ class NeteasePlaybackResolver(
             }
         }
         return try {
-            val resolved = try {
-                val source = qualityClient.playbackSourceBlocking(
-                    songId = songId,
-                    requestedQuality = quality,
-                )
-                if (quality == MusicQualityRuntime.selected) {
-                    CrossProviderPlaybackRuntime.clear(songId)
-                }
-                ResolvedRequest(Uri.parse(source.url))
-            } catch (error: NeteasePlaybackUnavailableException) {
-                val fallback = fallbackRequest
-                    ?.copy(quality = quality.toCommonTier())
-                    ?.let { crossProviderFallback?.resolve(it) }
-                if (fallback != null) {
-                    MusicQualityRuntime.recordActual(
-                        songId = songId,
-                        requested = quality,
-                        actual = fallback.actualQuality.toMusicQuality(quality),
-                    )
+            // 「遇到会员歌曲时再调用」关闭 ⇒ 第三方优先（含网易云曲目）：先向
+            // CHKSZ / UNM / LX 要一次链接，拿到即用，官方接口不再请求；
+            // 开启 ⇒ 官方优先，第三方只在官方明确失败后兜底。
+            val thirdPartyFirst = thirdPartySourcesEnabled() && !thirdPartyOnlyForMembership()
+            val resolved = if (thirdPartyFirst) {
+                resolveThirdParty(songId, fallbackRequest, quality)?.also {
                     if (quality == MusicQualityRuntime.selected) {
-                        CrossProviderPlaybackRuntime.record(songId, fallback.source)
+                        CrossProviderPlaybackRuntime.clear(songId)
                     }
-                    ResolvedRequest(
-                        uri = Uri.parse(fallback.url),
-                        headers = fallback.requestHeaders,
-                        expiresAtEpochMs = fallback.expiresAtEpochMs,
-                        cacheIdentity = "${fallback.source.storageValue}:${fallback.resourceId}",
-                    )
-                    } else {
-                        resolveThirdParty(songId, fallbackRequest, quality) ?: throw error
-                    }
+                } ?: resolveOfficialSource(songId, quality, fallbackRequest, thirdPartyTried = true)
+            } else {
+                resolveOfficialSource(songId, quality, fallbackRequest, thirdPartyTried = false)
             }
             synchronized(cacheLock) {
                 recentFailures.remove(key)
@@ -171,8 +152,54 @@ class NeteasePlaybackResolver(
     }
 
     /**
-     * 官方与跨平台兜底都失败后的第三方解析（CHKSZ → UNM 解灰 → LX 脚本）。
-     * 只在「第三方音乐源」总开关打开时调用；CHKSZ 默认关闭、未配置的解析器会直接返回 null。
+     * 官方（含跨平台兜底）解析。[thirdPartyTried] 为 true 时失败后不再重复调用
+     * 第三方链（第三方优先模式里前面已经试过一次）。
+     */
+    private fun resolveOfficialSource(
+        songId: Long,
+        quality: MusicQuality,
+        fallbackRequest: CrossProviderFallbackRequest?,
+        thirdPartyTried: Boolean,
+    ): ResolvedRequest = try {
+        val source = qualityClient.playbackSourceBlocking(
+            songId = songId,
+            requestedQuality = quality,
+        )
+        if (quality == MusicQualityRuntime.selected) {
+            CrossProviderPlaybackRuntime.clear(songId)
+        }
+        ResolvedRequest(Uri.parse(source.url))
+    } catch (error: NeteasePlaybackUnavailableException) {
+        val fallback = fallbackRequest
+            ?.copy(quality = quality.toCommonTier())
+            ?.let { crossProviderFallback?.resolve(it) }
+        if (fallback != null) {
+            MusicQualityRuntime.recordActual(
+                songId = songId,
+                requested = quality,
+                actual = fallback.actualQuality.toMusicQuality(quality),
+            )
+            if (quality == MusicQualityRuntime.selected) {
+                CrossProviderPlaybackRuntime.record(songId, fallback.source)
+            }
+            ResolvedRequest(
+                uri = Uri.parse(fallback.url),
+                headers = fallback.requestHeaders,
+                expiresAtEpochMs = fallback.expiresAtEpochMs,
+                cacheIdentity = "${fallback.source.storageValue}:${fallback.resourceId}",
+            )
+        } else if (thirdPartyTried) {
+            // 第三方优先模式下前面已经试过一次，避免重复请求。
+            throw error
+        } else {
+            resolveThirdParty(songId, fallbackRequest, quality) ?: throw error
+        }
+    }
+
+    /**
+     * 第三方解析链（CHKSZ → UNM 解灰 → LX 脚本）。
+     * 「第三方音乐源」开启且「遇到会员歌曲时再调用」关闭时在官方之前优先调用；
+     * 开启时只作为官方 + 跨平台兜底失败后的最后兜底。未配置的解析器直接返回 null。
      */
     private fun resolveThirdParty(
         songId: Long,
