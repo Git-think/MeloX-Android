@@ -1,0 +1,130 @@
+name: Build fork release
+
+# Builds a signed release APK from this fork's main and publishes it as a
+# GitHub release under the given tag. Use it to ship fork-only changes
+# (e.g. 0.6.5) without waiting for an upstream versioned release; the
+# mirror-releases workflow keeps handling upstream releases.
+#
+# Signing uses the same repository secrets as mirror-releases.yml and maps
+# onto the gradle properties meloxReleaseStoreFile/StorePassword/KeyAlias/
+# KeyPassword declared in android/app/build.gradle.kts. Without the secrets
+# the job fails with instructions instead of publishing an unsigned APK.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and publish (e.g. 0.6.5)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the release as prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            echo "::error::A release tag is required (e.g. 0.6.5)."
+            exit 1
+          fi
+          if ! printf '%s' "$TAG" | grep -qE '^(android-)?v?[0-9]+\.[0-9]+\.[0-9]+([A-Za-z0-9.-]*)$'; then
+            echo "::warning::Tag '${TAG}' is not version-shaped; the in-app update check only sees tags like 0.6.5."
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+
+      - name: Build signed release APK
+        env:
+          MELOX_RELEASE_KEYSTORE_B64: ${{ secrets.MELOX_RELEASE_KEYSTORE_B64 }}
+          ORG_GRADLE_PROJECT_meloxReleaseStorePassword: ${{ secrets.MELOX_RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_meloxReleaseKeyAlias: ${{ secrets.MELOX_RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_meloxReleaseKeyPassword: ${{ secrets.MELOX_RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$MELOX_RELEASE_KEYSTORE_B64" ] || [ -z "$ORG_GRADLE_PROJECT_meloxReleaseStorePassword" ] \
+            || [ -z "$ORG_GRADLE_PROJECT_meloxReleaseKeyAlias" ] || [ -z "$ORG_GRADLE_PROJECT_meloxReleaseKeyPassword" ]; then
+            echo "::error::Signing secrets are missing. Add MELOX_RELEASE_KEYSTORE_B64, MELOX_RELEASE_STORE_PASSWORD, MELOX_RELEASE_KEY_ALIAS and MELOX_RELEASE_KEY_PASSWORD under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/melox-release.jks"
+          echo "$MELOX_RELEASE_KEYSTORE_B64" | base64 -d > "$keystore"
+          export ORG_GRADLE_PROJECT_meloxReleaseStoreFile="$keystore"
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=2
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$apk" ]; then
+            echo "::error::Signed app-release.apk not found; the signing config was not applied."
+            ls -l android/app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          cp "$apk" "/tmp/MeloX-Android-${TAG}.apk"
+          new_sha=$(sha256sum "$apk" | awk '{print $1}')
+          bt="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/37.0.0"
+          new_cert=$("$bt/apksigner" verify --print-certs "$apk" \
+            | sed -n 's/.*SHA-256 digest: \([0-9A-Fa-f:]*\).*/\1/p' | head -1 | tr 'a-f' 'A-F')
+          echo "APK sha256=${new_sha}"
+          echo "APK cert SHA-256=${new_cert}"
+          if gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; replacing the APK asset."
+            gh release upload "$TAG" "/tmp/MeloX-Android-${TAG}.apk" --clobber --repo "${GITHUB_REPOSITORY}"
+          else
+            notes="$RUNNER_TEMP/release-notes.md"
+            {
+              echo "Fork build from main @ ${GITHUB_SHA:0:7}."
+              echo
+              echo "APK SHA-256:"
+              echo '```'
+              echo "$new_sha"
+              echo '```'
+              echo "Signing certificate SHA-256:"
+              echo '```'
+              echo "$new_cert"
+              echo '```'
+            } > "$notes"
+            args=(--repo "${GITHUB_REPOSITORY}" --title "MeloX Android ${TAG}" --notes-file "$notes")
+            if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+            gh release create "$TAG" "/tmp/MeloX-Android-${TAG}.apk" "${args[@]}"
+          fi
