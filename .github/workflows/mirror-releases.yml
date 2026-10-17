@@ -160,6 +160,11 @@ jobs:
           if grep -qE '[0-9a-fA-F]{64}' "$RUNNER_TEMP/release-notes.md"; then
             sed -E -i "s/[0-9a-fA-F]{64}/${new_sha}/g" "$RUNNER_TEMP/release-notes.md"
           fi
+          # 上游说明里证书以 “SHA-256 `hex`” 内联格式出现；上面的摘要替换会把它
+          # 一并换成 APK 摘要，这里再把它恢复成本 fork 的真实证书指纹。
+          if grep -qE 'SHA-256 `[0-9a-fA-F]{64}`' "$RUNNER_TEMP/release-notes.md"; then
+            sed -E -i "s/(SHA-256 \`)[0-9a-fA-F]{64}(\`)/\1${new_cert}\2/g" "$RUNNER_TEMP/release-notes.md"
+          fi
           if grep -qE '([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}' "$RUNNER_TEMP/release-notes.md"; then
             sed -E -i "s/([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}/${new_cert}/g" "$RUNNER_TEMP/release-notes.md"
           fi

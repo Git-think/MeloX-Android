@@ -109,6 +109,22 @@ jobs:
           echo "APK cert SHA-256=${new_cert}"
           if gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "Release ${TAG} already exists; replacing the APK asset."
+            # Refresh the digest recorded in the existing notes: swap the
+            # previous asset's sha256 for the new one before re-uploading.
+            notes="$RUNNER_TEMP/release-notes-replace.md"
+            gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "$notes"
+            old_digest=$(gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" --json assets \
+              --jq '.assets[] | select(.name | endswith(".apk")) | .digest' | head -1 | sed 's/^sha256://')
+            if [ -n "$old_digest" ] && [ "$old_digest" != "null" ]; then
+              cp "$notes" "$notes.orig"
+              sed -E -i "s/${old_digest}/${new_sha}/g" "$notes"
+              if ! cmp -s "$notes" "$notes.orig"; then
+                gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --notes-file "$notes"
+                echo "Refreshed the previous APK digest in the release notes."
+              else
+                echo "Release notes carry no previous APK digest; left untouched."
+              fi
+            fi
             gh release upload "$TAG" "/tmp/MeloX-Android-${TAG}.apk" --clobber --repo "${GITHUB_REPOSITORY}"
           else
             notes="$RUNNER_TEMP/release-notes.md"
