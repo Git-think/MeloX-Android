@@ -91,7 +91,7 @@ class MeloXSongWikiActivity : ComponentActivity() {
             )
         }
 
-        private fun Intent.toSong(): SearchSong? {
+        internal fun Intent.toSong(): SearchSong? {
             val id = getLongExtra(EXTRA_ID, -1L)
             if (id <= 0L) return null
             return SearchSong(
@@ -104,6 +104,12 @@ class MeloXSongWikiActivity : ComponentActivity() {
             )
         }
     }
+}
+
+@Composable
+internal fun MeloXSongWikiPage(intent: Intent, onBack: () -> Unit) {
+    val song = with(MeloXSongWikiActivity) { intent.toSong() } ?: return
+    MeloXSongWikiScreen(song, onBack)
 }
 
 @Composable

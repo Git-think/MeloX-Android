@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import com.lladlam.melox.ui.layout.LocalMeloXListDetail
+import com.lladlam.melox.ui.layout.LocalMeloXInDetailPane
+import com.lladlam.melox.ui.layout.MeloXAdaptiveDetail
+import com.lladlam.melox.ui.layout.openMeloXDetailPage
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -211,6 +216,8 @@ internal fun meloXQuantizedScale(scale: Float): Float =
  * @param progress 被覆盖的程度：0 = 前台，1 = 完全退到后面。
  */
 internal fun Modifier.meloXPageRecede(progress: () -> Float): Modifier =
+    composed {
+        if (LocalMeloXListDetail.current && !LocalMeloXInDetailPane.current) return@composed this
     // ⚠⚠ **必须是布局期位移，不能是 `graphicsLayer { translationX }`**（2026-10-02 改）。
     //   共享元素 morph 的两端 bounds 取自 `SharedTransitionLayout` 的 **lookahead 布局坐标**，
     //   而 `graphicsLayer` 的绘制期变换**不进 lookahead** ⇒ 旧页动了、卡片在屏上的实际位置变了，
@@ -228,6 +235,7 @@ internal fun Modifier.meloXPageRecede(progress: () -> Float): Modifier =
             //   RTL 下不镜像。
             placeable.place((-placeable.width * MeloXPageRecedeParallax * p).roundToInt(), 0)
         }
+    }
     }
 
 /**
@@ -308,6 +316,19 @@ internal fun MeloXInterruptiblePage(
     onBack: (() -> Unit)? = null,
     content: @Composable AnimatedVisibilityScope.() -> Unit,
 ) {
+    MeloXAdaptiveDetail(visible, onDismiss = onBack) { shown ->
+        MeloXInlinePage(shown, modifier, retreatProgress, onBack, content)
+    }
+}
+
+@Composable
+private fun MeloXInlinePage(
+    visible: Boolean,
+    modifier: Modifier,
+    retreatProgress: () -> Float,
+    onBack: (() -> Unit)?,
+    content: @Composable AnimatedVisibilityScope.() -> Unit,
+) {
     AnimatedContent(
         targetState = visible,
         transitionSpec = {
@@ -354,7 +375,7 @@ internal fun MeloXInterruptiblePage(
 }
 
 /**
- * 启动一个「整页推入」的页面 Activity。
+ * 主窗口内的详情交给自适应导航；从其它 Activity 打开时仍使用原生页面。
  *
  * ⚠⚠ **不要在这里做任何转场定制** —— `overridePendingTransition` / `ActivityOptions
  *   .makeCustomAnimation` / 主题里的 `windowAnimationStyle` 一个都不要用。转场是平台的活：
@@ -367,7 +388,7 @@ internal fun MeloXInterruptiblePage(
  * `windowAnimationStyle`。
  */
 internal fun Context.startMeloXPage(intent: Intent) {
-    startActivity(intent)
+    if (!openMeloXDetailPage(intent)) startActivity(intent)
 }
 
 /** 关闭一个页面 Activity。转场同样交给平台，配对地不要配 `overridePendingTransition`。 */

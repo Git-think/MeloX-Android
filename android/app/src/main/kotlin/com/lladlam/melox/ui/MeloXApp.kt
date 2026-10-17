@@ -12,8 +12,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.togetherWith
@@ -166,7 +164,6 @@ import com.lladlam.melox.ui.animation.meloXContentExit
 import com.lladlam.melox.ui.animation.MeloXPlayerRecede
 import com.lladlam.melox.ui.animation.meloXPageEnter
 import com.lladlam.melox.ui.animation.meloXPageExit
-import com.lladlam.melox.ui.account.MeloXNeteaseLoginActivity
 import com.lladlam.melox.ui.animation.sprungFrac
 import com.lladlam.melox.ui.glass.BOTTOM_GLASS_SURFACE_ALPHA
 import com.lladlam.melox.ui.glass.bottomGlassFallbackColor
@@ -180,6 +177,11 @@ import com.lladlam.melox.ui.glass.meloXGlassBackdrop
 import com.lladlam.melox.ui.glass.publicdemo.PublicDampedDragAnimation
 import com.lladlam.melox.ui.glass.publicdemo.PublicInteractiveHighlight
 import com.lladlam.melox.ui.layout.rememberMeloXWindowInfo
+import com.lladlam.melox.ui.layout.MeloXDetailPageOwner
+import com.lladlam.melox.ui.layout.MeloXDetailPaneState
+import com.lladlam.melox.ui.layout.MeloXListDetailLayout
+import com.lladlam.melox.ui.layout.meloXUsesListDetail
+import androidx.compose.ui.platform.LocalWindowInfo
 import com.lladlam.melox.ui.player.MeloXImmersivePlaybackEffect
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -245,6 +247,9 @@ fun MeloXApp(
 ) {
     val hostContext = LocalContext.current
     val context = hostContext.applicationContext
+    val detailPaneState = (hostContext as? MeloXDetailPageOwner)?.detailPaneState
+        ?: remember { MeloXDetailPaneState() }
+    val listDetailMode = meloXUsesListDetail(LocalWindowInfo.current.containerSize)
     var selectedSource by remember {
         mutableStateOf(MusicProviderSelectionStore.selectedSource(context))
     }
@@ -261,15 +266,8 @@ fun MeloXApp(
     var messagesVisible by remember { mutableStateOf(false) }
     BackHandler(enabled = messagesVisible) { messagesVisible = false }
     var recognitionVisible by remember { mutableStateOf(false) }
-    var loginReturnTab by remember { mutableStateOf(AppTab.Settings) }
-    // 网易云登录改为独立 Activity（MeloXNeteaseLoginActivity），走系统原生转场，与设置详情页一致。
-    // 登录成功回传 RESULT_OK，据此切到回跳 tab；取消则不切。
-    val neteaseLoginLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { if (it.resultCode == Activity.RESULT_OK) selectedTab = loginReturnTab }
     fun launchNeteaseLogin(returnTab: AppTab) {
-        loginReturnTab = returnTab
-        neteaseLoginLauncher.launch(Intent(hostContext, MeloXNeteaseLoginActivity::class.java))
+        detailPaneState.openLogin(hostContext) { selectedTab = returnTab }
     }
     var tabBarMinimized by rememberSaveable { mutableStateOf(false) }
     var scrollAccumulator by remember { mutableFloatStateOf(0f) }
@@ -847,15 +845,20 @@ fun MeloXApp(
             //     等于把「录制点在哪一层」变成了竞态 ⇒ 采样原点会在两处之间跳。
             Scaffold(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(tabBarMinimizeConnection),
+                    .fillMaxSize(),
                 contentWindowInsets = WindowInsets(),
                 containerColor = MaterialTheme.colorScheme.background,
                 ) { innerPadding ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding),
+                    Box(Modifier.fillMaxSize().padding(innerPadding)) {
+                    MeloXListDetailLayout(
+                        state = detailPaneState,
+                        session = neteaseSession,
+                        primaryModifier = Modifier.nestedScroll(tabBarMinimizeConnection),
+                        onSourceSelected = { source ->
+                            selectedSource = source
+                            libraryModalVisible = false
+                            heartModeLaunchAttempted = false
+                        },
                     ) {
                     val searchTabBackClear = remember { mutableStateOf(com.lladlam.melox.ui.search.SearchBackAction.SwitchToHome) }
                     var searchTabAction by remember { mutableStateOf(com.lladlam.melox.ui.search.SearchBackAction.SwitchToHome) }
@@ -911,7 +914,8 @@ fun MeloXApp(
                          AppTab.Search -> if (selectedSource == MusicSource.Netease) SearchScreen(
                              backClearSignal = searchTabBackClear,
                              onSearchBackState = { searchTabAction = it },
-                             onSearchExit = {
+                              onSearchExit = {
+                                  detailPaneState.clearPages()
                                  tabBarMinimized = false
                                  selectedTab = AppTab.Home
                              },
@@ -921,17 +925,15 @@ fun MeloXApp(
                             source = selectedSource,
                             onOpenTool = { route ->
                                 when (route) {
-                                    "Podcasts" -> selectedTab = AppTab.Podcasts
-                                    "Downloads" -> selectedTab = AppTab.Downloads
-                                    "Cloud" -> selectedTab = AppTab.Cloud
-                                    else -> {
-                                        // 设置详情是独立 Activity（平台转场），所以这里
-                                        // 直接启动它 + 把下层的主界面切到设置页，
-                                        // 退回时看到的就是设置列表。见 MeloXSettingsDetailActivity。
-                                        MeloXSettingsDetailActivity.launch(hostContext, route, selectedSource)
-                                        selectedTab = AppTab.Settings
-                                    }
-                                }
+                                     "Podcasts", "Downloads", "Cloud" -> detailPaneState.openTool(route)
+                                     else -> {
+                                         when (route) {
+                                             "Recognition" -> recognitionVisible = true
+                                             "Messages" -> messagesVisible = true
+                                             else -> MeloXSettingsDetailActivity.launch(hostContext, route, selectedSource)
+                                         }
+                                     }
+                                 }
                             },
                         )
                         AppTab.Explore -> if (selectedSource == MusicSource.Netease) MeloXExploreScreen() else ProviderExploreScreen(selectedSource)
@@ -954,8 +956,9 @@ fun MeloXApp(
                         AppTab.Cloud -> MeloXCloudMusicScreen()
                         AppTab.Settings -> ProviderSettingsHub(
                             currentSource = selectedSource,
-                            onSourceSelected = { source ->
-                                selectedSource = source
+                             onSourceSelected = { source ->
+                                 detailPaneState.clearPages()
+                                 selectedSource = source
                                 MusicProviderSelectionStore.setSelectedSource(context, source)
                                 tabBarMinimized = false
                                 libraryModalVisible = false
@@ -973,11 +976,12 @@ fun MeloXApp(
                                 }
                             },
                             onOpenServices = { MeloXProviderServicesActivity.launch(hostContext) },
-                            onOpenMessages = { messagesVisible = true },
-                        )
-                    } }
+                             onOpenMessages = { messagesVisible = true },
+                         )
+                     } }
+                     }
                     }
-                }
+                 }
             }
                 // 下沉时的压暗层：只罩住被缩小的页面本身，底部 chrome 与播放器不受影响。
                 // 与缩放窗口同源（同一条 recedeFraction），保证「缩多少 = 暗多少」。
@@ -1005,7 +1009,7 @@ fun MeloXApp(
             }
             val bottomBarTone = toneState.darkness(systemDark)
 
-            if (!messagesVisible) CompositionLocalProvider(
+            if ((!messagesVisible && detailPaneState.pages.isEmpty()) || listDetailMode) CompositionLocalProvider(
                 // ⚠ 底栏玻璃**恒**采样 bottomChromeBackdrop（底栏 / 迷你栏 / 搜索键 / 水珠统一）。
                 //   它的录制节点在**外层 recede Box** 上（`graphicsLayer` 之外，唯一一处平行层）：
                 //   **恒定挂载 + 每帧跟着转场进度重录**
@@ -1039,6 +1043,11 @@ fun MeloXApp(
                         //   明确强感、与收起落定的落定拍同款力度。只在 tab 真正切换时响
                         //   （维持展开态的重复点击不响、与 tabBarMinimized 变化的 LongPress 不叠加成双 buzz）。
                         if (tab != selectedTab) tabHaptic(HapticFeedbackType.LongPress)
+                        if (tab != selectedTab) {
+                            detailPaneState.clearPages()
+                            messagesVisible = false
+                            recognitionVisible = false
+                        }
                         tabBarMinimized = false
                         selectedTab = tab
                     },
@@ -1046,7 +1055,8 @@ fun MeloXApp(
                     minimized = tabBarMinimized,
                     visibleRootTabs = visibleRootTabs,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(if (listDetailMode) Alignment.BottomStart else Alignment.BottomCenter)
+                        .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
                         // 采样的目标矩形 = 底部 chrome 在窗口里的实际位置。
                         .onGloballyPositioned { toneState.updateBounds(it) },
                     miniPlayer = { compactProgress ->
@@ -1099,7 +1109,9 @@ fun MeloXApp(
                 enter = meloXPageEnter(veilColor = MaterialTheme.colorScheme.background),
                 exit = meloXPageExit(),
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxHeight()
+                    .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
+                    .align(Alignment.TopEnd)
                     .zIndex(15f),
             ) {
                 // 包一层只为把页面几何（含**系统屏幕圆角**）挂进 slide 变换内侧
@@ -1111,6 +1123,7 @@ fun MeloXApp(
                         settled = transition.currentState == transition.targetState,
                     ),
                 ) {
+                    BackHandler { messagesVisible = false }
                     MessagesScreen(onBack = { messagesVisible = false })
                 }
             }
@@ -1123,7 +1136,9 @@ fun MeloXApp(
                 enter = meloXPageEnter(veilColor = MaterialTheme.colorScheme.background),
                 exit = meloXPageExit(),
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxHeight()
+                    .fillMaxWidth(if (listDetailMode) 0.5f else 1f)
+                    .align(Alignment.TopEnd)
                     .zIndex(15f),
             ) {
                 Box(
@@ -1131,6 +1146,7 @@ fun MeloXApp(
                         settled = transition.currentState == transition.targetState,
                     ),
                 ) {
+                    BackHandler { recognitionVisible = false }
                     MeloXRecognitionOverlay(onBack = { recognitionVisible = false })
                 }
             }
@@ -1166,7 +1182,8 @@ fun MeloXApp(
                         //   ⇒ 动画从当前 fraction 连续回 1f，不跳变。
                         onReopen = openPlayer,
                         miniPlayerHitRect = miniPlayerHitRect,
-                        onNavigateSearch = { query, kind ->
+                         onNavigateSearch = { query, kind ->
+                             detailPaneState.clearPages()
                             if (selectedSource == MusicSource.Netease) {
                                 MeloXSearchLaunchBus.post(query, kind)
                             }
@@ -1288,8 +1305,7 @@ fun MeloXApp(
 
          }
 
-        // 网易云登录已改为独立 Activity（MeloXNeteaseLoginActivity），走系统原生转场，
-        // 与「设置 → 详情」这类页面完全一致；此处不再内嵌覆盖层。
+        // 全局弹窗独立于左右栏导航，保持覆盖整个窗口。
         clipboardTarget?.let { target ->
             MeloXAppDialog(
                 title = stringResource(R.string.app_clipboard_title),

@@ -37,6 +37,8 @@ import com.lladlam.melox.platform.lyricon.MeloXLyriconBridge
 import com.lladlam.melox.platform.xiaomi.HyperOsFocusBridge
 import com.lladlam.melox.ui.player.MeloXListenTogetherInviteActivity
 import com.lladlam.melox.ui.MeloXApp
+import com.lladlam.melox.ui.layout.MeloXDetailPageOwner
+import com.lladlam.melox.ui.layout.MeloXDetailPaneState
 import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
 import com.lladlam.melox.ui.theme.MeloXTheme
 import kotlinx.coroutines.delay
@@ -44,7 +46,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
+    override val detailPaneState = MeloXDetailPaneState()
     private var openNowPlayingRequest by mutableIntStateOf(0)
     private var clipboardLinkRequest by mutableStateOf<String?>(null)
     private var playbackConnectionEnabled by mutableStateOf(false)

@@ -38,7 +38,7 @@ data class MeloXWindowInfo(
 /** One shared window policy for phone, foldable and tablet page layouts. */
 @Composable
 fun rememberMeloXWindowInfo(): MeloXWindowInfo {
-    val containerSize = LocalWindowInfo.current.containerSize
+    val containerSize = LocalMeloXPaneSize.current ?: LocalWindowInfo.current.containerSize
     val density = LocalDensity.current
     val width = with(density) { containerSize.width.toDp().value.toInt() }
     val height = with(density) { containerSize.height.toDp().value.toInt() }
