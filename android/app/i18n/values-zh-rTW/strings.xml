@@ -319,6 +319,8 @@
     <string name="provider_third_party_consent_hint">需要先同意第三方音樂源使用協議；不受雲控管理</string>
     <string name="provider_membership_fallback">遇到會員歌曲時再呼叫</string>
     <string name="provider_membership_fallback_subtitle">優先使用官方音源，僅在會員/版權受限時嘗試第三方解析</string>
+    <string name="provider_meting">Meting 解析源</string>
+    <string name="provider_meting_missing">未設定服務位址 · 點擊設定</string>
     <string name="provider_chksz">Fuck Netease解析源</string>
     <string name="provider_chksz_missing">未配置 API Key · 點選配置</string>
     <string name="provider_chksz_configured">Fuck Netease API Key 已配置</string>
@@ -351,6 +353,11 @@
     <string name="provider_jellyfin_failed">Jellyfin 登入失敗</string>
     <string name="provider_connecting">連線中…</string>
     <string name="provider_connect">連線</string>
+    <string name="provider_meting_title">Meting API</string>
+    <string name="provider_meting_body">以 GET /api?server=…&amp;type=url&amp;id=… 呼叫 Meting（相容 metowolf/Meting）服務，解析網易雲、QQ音樂和酷狗歌曲的播放位址。請填寫你自建或公開服務的位址；僅在服務端要求鑑權時填寫 Auth 口令。設定僅儲存在本機，不屬於 MeloX 雲控。</string>
+    <string name="provider_meting_base_url">服務位址 Base URL</string>
+    <string name="provider_meting_auth">Auth 口令（選填）</string>
+    <string name="provider_meting_auth_hint">服務端未啟用鑑權可留空</string>
     <string name="provider_chksz_title">網易雲 SVIP 音樂解析</string>
     <string name="provider_chksz_body">使用 api.chksz.com 的網易雲、QQ音樂和酷狗音樂解析介面。請先前往 api.chksz.com 註冊賬號並在登入後獲取個人 API Key；目前該服務僅支援 LinuxDo 使用者註冊。API Base URL 亦可指向其他相容介面。API Key 僅儲存在本機，不屬於 MeloX 雲控。</string>
     <string name="provider_api_key_placeholder">請輸入個人 API Key</string>

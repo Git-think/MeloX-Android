@@ -49,6 +49,7 @@ import com.lladlam.melox.core.music.provider.ProviderAccountManager
 import com.lladlam.melox.core.music.provider.ThirdPartyMusicSourceConsentStore
 import com.lladlam.melox.core.provider.lxuser.LxUserSourceStore
 import com.lladlam.melox.core.provider.lxuser.ChkszConfigStore
+import com.lladlam.melox.core.provider.lxuser.MetingConfigStore
 import com.lladlam.melox.core.provider.lxuser.UnmConfigStore
 import com.lladlam.melox.core.provider.jellyfin.JellyfinApiClient
 import com.lladlam.melox.core.provider.jellyfin.JellyfinSessionStore
@@ -114,6 +115,10 @@ fun ProviderServicesScreen(
     var showLxImportDialog by remember { mutableStateOf(false) }
     var lxImportUrl by remember { mutableStateOf("") }
     var lxImportError by remember { mutableStateOf<String?>(null) }
+    var metingBaseUrl by remember { mutableStateOf(MetingConfigStore.readBaseUrl(context)) }
+    var metingAuth by remember { mutableStateOf(MetingConfigStore.readAuth(context)) }
+    var metingError by remember { mutableStateOf<String?>(null) }
+    var showMetingDialog by remember { mutableStateOf(false) }
     var chkszApiKey by remember { mutableStateOf(ChkszConfigStore.readApiKey(context)) }
     var chkszBaseUrl by remember { mutableStateOf(ChkszConfigStore.readBaseUrl(context)) }
     var chkszEnabled by remember { mutableStateOf(ChkszConfigStore.readEnabled(context)) }
@@ -439,6 +444,15 @@ fun ProviderServicesScreen(
                     showTopSeparator = false,
                 )
                 MeloXIosListRow(
+                    title = stringResource(R.string.provider_meting),
+                    subtitle = when {
+                        metingBaseUrl.isBlank() -> stringResource(R.string.provider_meting_missing)
+                        else -> metingBaseUrl
+                    },
+                    leading = { Spacer(Modifier.width(25.dp)) },
+                    onClick = { metingError = null; showMetingDialog = true },
+                )
+                MeloXIosListRow(
                     title = stringResource(R.string.provider_unm),
                     subtitle = when {
                         unmBaseUrl.isBlank() -> stringResource(R.string.provider_unm_missing)
@@ -704,6 +718,75 @@ fun ProviderServicesScreen(
                     },
                     modifier = Modifier.weight(1f), style = MeloXGlassButtonStyle.BorderedProminent,
                 ) { Text(if (jellyfinBusy) stringResource(R.string.provider_connecting) else stringResource(R.string.provider_connect)) }
+            }
+        }
+    }
+    if (showMetingDialog) {
+        MeloXGlassDialog(visible = true, onDismiss = { metingError = null; showMetingDialog = false }) {
+            Text(stringResource(R.string.provider_meting_title), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.provider_meting_body),
+                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+            Text(
+                stringResource(R.string.provider_meting_base_url),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+            )
+            MeloXGlassTextField(
+                value = metingBaseUrl,
+                onValueChange = { metingBaseUrl = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                placeholder = { Text("https://meting.example.com") },
+            )
+            Text(
+                stringResource(R.string.provider_meting_auth),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+                fontSize = 13.sp,
+            )
+            MeloXGlassTextField(
+                value = metingAuth,
+                onValueChange = { metingAuth = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                placeholder = { Text(stringResource(R.string.provider_meting_auth_hint)) },
+            )
+            metingError?.let {
+                Text(it, Modifier.padding(top = 7.dp), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MeloXGlassButton(
+                    onClick = {
+                        MetingConfigStore.clear(context)
+                        metingBaseUrl = MetingConfigStore.readBaseUrl(context)
+                        metingAuth = MetingConfigStore.readAuth(context)
+                        metingError = null
+                        showMetingDialog = false
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MeloXGlassButtonStyle.Plain,
+                ) { Text(stringResource(R.string.provider_clear)) }
+                MeloXGlassButton(
+                    onClick = {
+                        val baseUrl = metingBaseUrl.trim()
+                        if (baseUrl.isNotEmpty() && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                            metingError = context.getString(R.string.provider_invalid_http)
+                        } else {
+                            MetingConfigStore.writeBaseUrl(context, baseUrl)
+                            MetingConfigStore.writeAuth(context, metingAuth)
+                            metingBaseUrl = MetingConfigStore.readBaseUrl(context)
+                            metingAuth = MetingConfigStore.readAuth(context)
+                            metingError = null
+                            showMetingDialog = false
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MeloXGlassButtonStyle.BorderedProminent,
+                ) { Text(stringResource(R.string.provider_save)) }
             }
         }
     }

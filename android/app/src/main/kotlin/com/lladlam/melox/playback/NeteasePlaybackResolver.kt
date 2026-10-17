@@ -29,6 +29,7 @@ class NeteasePlaybackResolver(
     private val localSourceProvider: (Long) -> Uri? = { null },
     private val providerLocalSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val crossProviderFallback: CrossProviderPlaybackFallbackResolver? = null,
+    private val metingPlayback: MetingPlaybackResolver? = null,
     private val chkszPlayback: ChkszPlaybackResolver? = null,
     private val lxUserPlayback: LxUserPlaybackResolver? = null,
     private val unmPlayback: UnmPlaybackResolver? = null,
@@ -120,7 +121,7 @@ class NeteasePlaybackResolver(
         }
         return try {
             // 「遇到会员歌曲时再调用」关闭 ⇒ 第三方优先（含网易云曲目）：先向
-            // CHKSZ / UNM / LX 要一次链接，拿到即用，官方接口不再请求；
+            // Meting / CHKSZ / UNM / LX 要一次链接，拿到即用，官方接口不再请求；
             // 开启 ⇒ 官方优先，第三方只在官方明确失败后兜底。
             val thirdPartyFirst = thirdPartySourcesEnabled() && !thirdPartyOnlyForMembership()
             val resolved = if (thirdPartyFirst) {
@@ -201,7 +202,7 @@ class NeteasePlaybackResolver(
     }
 
     /**
-     * 第三方解析链（CHKSZ → UNM 解灰 → LX 脚本）。
+     * 第三方解析链（Meting → CHKSZ → UNM 解灰 → LX 脚本）。
      * 「第三方音乐源」开启且「遇到会员歌曲时再调用」关闭时在官方之前优先调用；
      * 开启时只作为官方 + 跨平台兜底失败后的最后兜底。未配置的解析器直接返回 null。
      */
@@ -212,6 +213,16 @@ class NeteasePlaybackResolver(
     ): ResolvedRequest? {
         if (!thirdPartySourcesEnabled()) return null
         val commonQuality = quality.toCommonTier()
+        runCatching { metingPlayback?.resolve(songId, commonQuality) }
+            .onFailure { Log.w(TAG, "Meting fallback failed song=$songId error=${it.javaClass.simpleName}") }
+            .getOrNull()?.let { result ->
+                Log.i(TAG, "Resolve success song=$songId stage=meting")
+                return ResolvedRequest(
+                    uri = Uri.parse(result.url),
+                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
+                    cacheIdentity = "meting:${metingPlayback?.cacheIdentity().orEmpty()}",
+                )
+            }
         runCatching { chkszPlayback?.resolve(songId, commonQuality) }
             .onFailure { Log.w(TAG, "CHKSZ fallback failed song=$songId error=${it.javaClass.simpleName}") }
             .getOrNull()?.let { result ->
@@ -380,6 +391,7 @@ class NeteasePlaybackResolver(
                 localSourceProvider = providerLocalSourceProvider,
                 authKeyProvider = ProviderPlaybackRuntime::authKey,
                 providerPlaybackEnabled = providerPlaybackEnabled,
+                metingPlayback = metingPlayback,
                 chkszPlayback = chkszPlayback,
                 lxUserPlayback = lxUserPlayback,
                 unmPlayback = unmPlayback,

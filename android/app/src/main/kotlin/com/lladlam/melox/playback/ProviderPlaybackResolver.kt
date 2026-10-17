@@ -34,6 +34,7 @@ class ProviderPlaybackResolver(
     private val localSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val authKeyProvider: (MusicSource) -> String = { "" },
     private val providerPlaybackEnabled: (MusicSource) -> Boolean = { true },
+    private val metingPlayback: MetingPlaybackResolver? = null,
     private val chkszPlayback: ChkszPlaybackResolver? = null,
     private val lxUserPlayback: LxUserPlaybackResolver? = null,
     private val unmPlayback: UnmPlaybackResolver? = null,
@@ -124,7 +125,7 @@ class ProviderPlaybackResolver(
                 "artists=${track.artistText.take(60)} durationMs=${track.durationMs} metadata=${track.providerMetadata.javaClass.simpleName}")
             Log.i(TAG, "Resolve start source=${source.storageValue} quality=${quality.name} thirdParty=${thirdPartySourcesEnabled()}")
             // 「遇到会员歌曲时再调用」关闭时维持第三方优先：官方之前先试
-            // CHKSZ（默认关闭）/ UNM 解灰 / LX 脚本；开启时等官方明确失败后再试。
+            // Meting（未配置时跳过）/ CHKSZ（默认关闭）/ UNM 解灰 / LX 脚本；开启时等官方明确失败后再试。
             val allowExternalResolver = source != MusicSource.Jellyfin
             if (allowExternalResolver && thirdPartySourcesEnabled() && !thirdPartyOnlyForMembership()) {
                 resolveThirdParty(track, quality, source)?.let { resolved ->
@@ -141,7 +142,7 @@ class ProviderPlaybackResolver(
             }
 
             /**
-             * 官方音源不可用时的统一兜底入口：第三方解析（CHKSZ / UNM / LX）只在
+             * 官方音源不可用时的统一兜底入口：第三方解析（Meting / CHKSZ / UNM / LX）只在
              * 「第三方音乐源」打开时参与；「遇到会员歌曲时再调用」开启时官方失败后
              * 才调用它们，关闭时已经在官方之前优先尝试过，避免重复等待。
              */
@@ -201,14 +202,21 @@ class ProviderPlaybackResolver(
     }
 
     /**
-     * 第三方解析链（CHKSZ → UNM 解灰 → LX 脚本）。
-     * CHKSZ 默认关闭；未配置的解析器会立即返回 null。UNM 只处理网易云曲目。
+     * 第三方解析链（Meting → CHKSZ → UNM 解灰 → LX 脚本）。
+     * Meting 未配置（服务器地址为空）时直接跳过；CHKSZ 默认关闭。UNM 只处理网易云曲目。
      */
     private fun resolveThirdParty(
         track: MusicTrack,
         quality: AudioQualityTier,
         source: MusicSource,
     ): ResolvedRequest? {
+        val meting = runCatching { metingPlayback?.resolve(track, quality) }
+            .onFailure { Log.w(TAG, "Meting stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
+            .getOrNull()
+        if (meting != null) {
+            Log.i(TAG, "Resolve success source=${source.storageValue} stage=meting")
+            return ResolvedRequest(Uri.parse(meting.url), emptyMap())
+        }
         val chksz = runCatching { chkszPlayback?.resolve(track, quality) }
             .onFailure { Log.w(TAG, "CHKSZ stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
             .getOrNull()

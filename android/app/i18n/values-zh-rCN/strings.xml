@@ -319,6 +319,8 @@
     <string name="provider_third_party_consent_hint">需要先同意第三方音乐源使用协议；不受云控管理</string>
     <string name="provider_membership_fallback">遇到会员歌曲时再调用</string>
     <string name="provider_membership_fallback_subtitle">优先使用官方音源，仅在会员/版权受限时尝试第三方解析</string>
+    <string name="provider_meting">Meting 解析源</string>
+    <string name="provider_meting_missing">未配置服务地址 · 点击配置</string>
     <string name="provider_chksz">Fuck Netease解析源</string>
     <string name="provider_chksz_missing">未配置 API Key · 点击配置</string>
     <string name="provider_chksz_configured">Fuck Netease API Key 已配置</string>
@@ -351,6 +353,11 @@
     <string name="provider_jellyfin_failed">Jellyfin 登录失败</string>
     <string name="provider_connecting">连接中…</string>
     <string name="provider_connect">连接</string>
+    <string name="provider_meting_title">Meting API</string>
+    <string name="provider_meting_body">通过 GET /api?server=…&amp;type=url&amp;id=… 调用 Meting（兼容 metowolf/Meting）服务，解析网易云、QQ音乐和酷狗歌曲的播放地址。请填写你自建或公共服务的地址；仅在服务端要求鉴权时填写 Auth 口令。配置仅保存在本机，不属于 MeloX 云控。</string>
+    <string name="provider_meting_base_url">服务地址 Base URL</string>
+    <string name="provider_meting_auth">Auth 口令（可选）</string>
+    <string name="provider_meting_auth_hint">服务端未启用鉴权可留空</string>
     <string name="provider_chksz_title">网易云 SVIP 音乐解析</string>
     <string name="provider_chksz_body">使用 api.chksz.com 的网易云、QQ音乐和酷狗音乐解析接口。请先前往 api.chksz.com 注册账号并在登录后获取个人 API Key；目前该服务仅支持 LinuxDo 用户注册。API Base URL 也可指向其他兼容接口。API Key 仅保存在本机，不属于 MeloX 云控。</string>
     <string name="provider_api_key_placeholder">请输入个人 API Key</string>
