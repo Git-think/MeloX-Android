@@ -1,6 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Türkçe taslak / Turkish draft: kapsanan anahtarlar çevrildi; eksikler İngilizceye düşer. -->
 <resources>
+    <string name="settings_split_screen">Bölünmüş ekran modu</string>
+    <string name="settings_split_screen_hint">Yatay ekranda ve uygun boyuttaki oynatıcı ekranlarında iki bölme kullanır. Kontrollerin konumunu ayrı ayrı ayarlayabilirsiniz.</string>
+    <string name="settings_split_navigation_position">Bölünmüş ekran gezinme konumu</string>
+    <string name="settings_split_mini_player_position">Bölünmüş ekran mini oynatıcı konumu</string>
+    <string name="settings_position_bottom_left">Sol alt</string>
+    <string name="settings_position_bottom_right">Sağ alt</string>
+    <string name="settings_position_left">Sol kenar (dikey)</string>
+    <string name="settings_position_right">Sağ kenar (dikey)</string>
+    <string name="settings_position_top_left">Sol üst</string>
+    <string name="settings_position_top_right">Sağ üst</string>
+    <string name="youtube_channel">YouTube kanalı</string>
+    <string name="youtube_refresh_login">YouTube oturumunu yenile</string>
+    <string name="youtube_refresh_login_hint">Oturumu güncellemek için yeniden giriş yapın</string>
+    <string name="youtube_session_expired">Oturum reddedildi. Müzik kitaplığına erişmek için yeniden giriş yapın.</string>
+    <string name="youtube_channels_loading">Kanallar yükleniyor…</string>
+    <string name="youtube_channels_empty">Kullanılabilir kanal yok</string>
+    <string name="settings_general_language">Uygulama dili</string>
+    <string name="settings_general_language_system">Sistemi takip et</string>
+    <string name="settings_general_language_legacy">Bu Android sürümünde sistem dili kullanılır. Sistem dili ayarlarını açmak için dokunun.</string>
     <string name="app_name">MeloX</string>
     <string name="tab_home">Ana sayfa</string>
     <string name="tab_explore">Keşfet</string>

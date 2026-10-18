@@ -1,5 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="settings_split_screen">Split-screen mode</string>
+    <string name="settings_split_screen_hint">Use two panes in landscape and on supported player screens. Position controls separately below.</string>
+    <string name="settings_split_navigation_position">Split-screen navigation position</string>
+    <string name="settings_split_mini_player_position">Split-screen mini-player position</string>
+    <string name="settings_position_bottom_left">Bottom left</string>
+    <string name="settings_position_bottom_right">Bottom right</string>
+    <string name="settings_position_left">Left edge (vertical)</string>
+    <string name="settings_position_right">Right edge (vertical)</string>
+    <string name="settings_position_top_left">Top left</string>
+    <string name="settings_position_top_right">Top right</string>
+    <string name="youtube_channel">YouTube channel</string>
+    <string name="youtube_refresh_login">Refresh YouTube login</string>
+    <string name="youtube_refresh_login_hint">Sign in again to refresh this session</string>
+    <string name="youtube_session_expired">Session rejected. Sign in again to restore library access.</string>
+    <string name="youtube_channels_loading">Loading channels…</string>
+    <string name="youtube_channels_empty">No channels available</string>
+    <string name="settings_general_language">App language</string>
+    <string name="settings_general_language_system">Follow system</string>
+    <string name="settings_general_language_legacy">Follows the system language on this Android version. Tap to open system language settings.</string>
     <string name="app_name">弥乐</string>
     <string name="tab_home">Home</string>
     <string name="tab_explore">Explore</string>

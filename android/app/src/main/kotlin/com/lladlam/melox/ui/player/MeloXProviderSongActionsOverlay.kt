@@ -66,6 +66,9 @@ import com.lladlam.melox.core.music.provider.MeloXMusicProviders
 import com.lladlam.melox.core.music.provider.PlaylistSyncCapability
 import com.lladlam.melox.core.music.provider.PlaylistWriteCapability
 import com.lladlam.melox.core.music.provider.ProviderAccountManager
+import com.lladlam.melox.core.music.provider.loadAllMusicPages
+import com.lladlam.melox.core.music.provider.MeloXLegacyUiBridge
+import com.lladlam.melox.playback.PlaybackCommands
 import com.lladlam.melox.core.network.MeloXSearchKind
 import com.lladlam.melox.core.provider.bilibili.BilibiliLyricOffsetStore
 import com.lladlam.melox.core.provider.local.LocalRecognitionCoordinator
@@ -95,7 +98,7 @@ private enum class ProviderSongActionPage {
  */
 @Composable
 internal fun MeloXProviderSongActionsOverlay(
-    state: MeloXPlaybackUiState,
+    state: MeloXPlaybackUiState?,
     identity: MusicResourceId,
     visible: Boolean,
     onDismiss: () -> Unit,
@@ -104,6 +107,8 @@ internal fun MeloXProviderSongActionsOverlay(
     // ★ 「天际歌词」入口（2026-10-07）。只有平板双栏传得进来，见
     //   [MeloXNowPlayingActionsSheet] 同名声明的注释；为 null 时本行不渲染。
     onShowSkyline: (() -> Unit)? = null,
+    track: MusicTrack? = null,
+    onEditPlaylistTrack: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -119,14 +124,16 @@ internal fun MeloXProviderSongActionsOverlay(
     val providerLoggedIn = remember(identity.source, visible) {
         accountManager.state(identity.source).loggedIn
     }
-    val actionTrack = remember(identity, state.title, state.artist, state.album, state.durationMs) {
-        MusicTrack(
+    val actionTrack = remember(identity, track, state?.title, state?.artist, state?.album, state?.durationMs) {
+        track ?: MusicTrack(
             id = identity,
-            title = state.title.ifBlank { "未知歌曲" },
+            title = state?.title.orEmpty().ifBlank { "未知歌曲" },
             artists = listOf(
-                MusicArtistRef(name = state.artist.ifBlank { "未知歌手" }),
+                MusicArtistRef(name = state?.artist.orEmpty().ifBlank { "未知歌手" }),
             ),
-            durationMs = state.durationMs.takeIf { it > 0L },
+            album = state?.album?.takeIf(String::isNotBlank)?.let { com.lladlam.melox.core.music.model.MusicAlbumRef(name = it) },
+            artworkUrl = state?.artworkUrl,
+            durationMs = state?.durationMs?.takeIf { it > 0L },
             providerMetadata = when (identity.source) {
                 MusicSource.Kugou -> ProviderTrackMetadata.Kugou(hash = identity.value)
                 MusicSource.Kuwo -> ProviderTrackMetadata.Kuwo(mid = identity.value.toLongOrNull() ?: 0L)
@@ -187,7 +194,7 @@ internal fun MeloXProviderSongActionsOverlay(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         ProviderActionHeader(
-                            state = state,
+                             track = actionTrack,
                             subtitle = when (target) {
                                 ProviderSongActionPage.Main -> stringResource(R.string.player_source_actions, identity.source.displayName)
                                 ProviderSongActionPage.Sleep -> stringResource(R.string.player_sleep_timer)
@@ -268,15 +275,17 @@ internal fun MeloXProviderSongActionsOverlay(
                                 if (downloadCapability != null) {
                                     ProviderActionItem(
                                         title = when {
-                                            downloaded -> stringResource(R.string.player_downloaded_local)
+                                            downloaded -> stringResource(R.string.player_delete_download)
                                             downloading -> stringResource(R.string.player_downloading)
                                             else -> stringResource(R.string.player_download_local)
                                         },
                                         symbol = if (downloaded) "✓" else "↓",
-                                        enabled = !downloaded && !downloading,
+                                        enabled = !downloading,
                                     ) {
-                                        downloadStore.start(actionTrack)
-                                        actionStatus = context.getString(R.string.player_download_queued, identity.source.displayName)
+                                        if (downloaded) downloadStore.remove(identity) else {
+                                            downloadStore.start(actionTrack)
+                                            actionStatus = context.getString(R.string.player_download_queued, identity.source.displayName)
+                                        }
                                     }
                                 }
 
@@ -293,7 +302,9 @@ internal fun MeloXProviderSongActionsOverlay(
                                         scope.launch {
                                             runCatching {
                                                 withContext(Dispatchers.IO) {
-                                                    playlistWriteCapability.writablePlaylists(page = 1, pageSize = 50).items
+                                                    loadAllMusicPages(key = { it.id }) { page ->
+                                                        playlistWriteCapability.writablePlaylists(page = page, pageSize = 50)
+                                                    }
                                                 }
                                             }.onSuccess { playlists ->
                                                 writablePlaylists = playlists
@@ -307,26 +318,33 @@ internal fun MeloXProviderSongActionsOverlay(
                                     }
                                 }
 
-                                ProviderActionItem(stringResource(R.string.player_sleep_timer), "◷") { page = ProviderSongActionPage.Sleep }
+                                if (state != null) ProviderActionItem(stringResource(R.string.player_sleep_timer), "◷") { page = ProviderSongActionPage.Sleep }
+                                ProviderActionItem(stringResource(R.string.player_play_next), "▷") {
+                                    PlaybackCommands.playNext(context, MeloXLegacyUiBridge.track(actionTrack))
+                                    onDismiss()
+                                }
                                 ProviderActionItem(stringResource(R.string.player_add_to_queue), "+") {
-                                    state.addCurrentToQueue()
+                                    PlaybackCommands.addToQueue(context, MeloXLegacyUiBridge.track(actionTrack))
                                     onDismiss()
                                 }
                                 ProviderActionItem(stringResource(R.string.player_system_share), "↗") {
-                                    shareProviderSong(context, state, identity)
+                                    shareProviderSong(context, actionTrack, identity)
                                     onDismiss()
                                 }
-                                if (identity.source != MusicSource.Bilibili && state.album.isNotBlank() && onNavigateSearch != null) {
-                                    ProviderActionItem(stringResource(R.string.player_go_album, state.album), "▣") {
-                                        val target = state.album
+                                onEditPlaylistTrack?.let { edit ->
+                                    ProviderActionItem(stringResource(R.string.playlist_actions), "•••") { onDismiss(); edit() }
+                                }
+                                if (identity.source != MusicSource.Bilibili && !actionTrack.album?.name.isNullOrBlank() && onNavigateSearch != null) {
+                                    ProviderActionItem(stringResource(R.string.player_go_album, actionTrack.album!!.name), "▣") {
+                                        val target = actionTrack.album.name
                                         MeloXSearchLaunchBus.post(target, MeloXSearchKind.Albums)
                                         onDismiss()
                                         onNavigateSearch(target, MeloXSearchKind.Albums)
                                     }
                                 }
-                                if (identity.source != MusicSource.Bilibili && state.artist.isNotBlank() && onNavigateSearch != null) {
-                                    ProviderActionItem(stringResource(R.string.player_go_artist, state.artist), "♬") {
-                                        val target = state.artist.substringBefore(" /")
+                                if (identity.source != MusicSource.Bilibili && actionTrack.artists.isNotEmpty() && onNavigateSearch != null) {
+                                    ProviderActionItem(stringResource(R.string.player_go_artist, actionTrack.artistText), "♬") {
+                                        val target = actionTrack.artists.first().name
                                         MeloXSearchLaunchBus.post(target, MeloXSearchKind.Artists)
                                         onDismiss()
                                         onNavigateSearch(target, MeloXSearchKind.Artists)
@@ -338,11 +356,11 @@ internal fun MeloXProviderSongActionsOverlay(
                             ProviderSongActionPage.Sleep -> {
                                 listOf(15, 30, 45, 60).forEach { minutes ->
                                     ProviderActionItem(stringResource(R.string.player_sleep_minutes, minutes), "◷") {
-                                        state.setSleepTimer(minutes)
+                                        state?.setSleepTimer(minutes)
                                         onDismiss()
                                     }
                                 }
-                                if (state.sleepTimerEndRealtimeMs > 0L) {
+                                if (state != null && state.sleepTimerEndRealtimeMs > 0L) {
                                     ProviderActionItem(stringResource(R.string.player_cancel_sleep), "×") {
                                         state.cancelSleepTimer()
                                         onDismiss()
@@ -515,7 +533,7 @@ private fun ProviderActionStatus(
 
 @Composable
 private fun ProviderActionHeader(
-    state: MeloXPlaybackUiState,
+    track: MusicTrack,
     subtitle: String,
 ) {
     val foreground = MaterialTheme.colorScheme.onSurface
@@ -524,14 +542,14 @@ private fun ProviderActionHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
-            model = state.artworkUrl,
+            model = track.artworkUrl,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.size(52.dp),
         )
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(
-                state.title.ifBlank { stringResource(R.string.player_now_playing) },
+                track.title.ifBlank { stringResource(R.string.player_now_playing) },
                 color = foreground,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
@@ -539,7 +557,7 @@ private fun ProviderActionHeader(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                state.artist.ifBlank { subtitle },
+                track.artistText,
                 color = foreground.copy(alpha = 0.58f),
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -580,7 +598,7 @@ private fun ProviderActionItem(
 
 private fun shareProviderSong(
     context: Context,
-    state: MeloXPlaybackUiState,
+    track: MusicTrack,
     identity: MusicResourceId,
 ) {
     val providerUrl = when (identity.source) {
@@ -598,8 +616,8 @@ private fun shareProviderSong(
         MusicSource.Local -> null
     }
     val text = buildString {
-        append(state.title.ifBlank { context.getString(R.string.player_now_playing) })
-        if (state.artist.isNotBlank()) append(" · ").append(state.artist)
+        append(track.title.ifBlank { context.getString(R.string.player_now_playing) })
+        if (track.artists.isNotEmpty()) append(" · ").append(track.artistText)
         providerUrl?.let { append('\n').append(it) }
     }
     val intent = Intent.createChooser(

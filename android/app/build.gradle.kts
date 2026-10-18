@@ -46,7 +46,7 @@ android {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
         targetSdk = 37
-        versionCode = 23
+        versionCode = 24
         versionName = "0.6.5"
         testInstrumentationRunner = "com.lladlam.melox.core.autosync.AutoSyncDeviceRunner"
         // One APK for real phones: both ARM architectures stay in the package,

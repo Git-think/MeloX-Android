@@ -166,6 +166,7 @@ data class MusicPlaylistSummary(
     val description: String? = null,
     val trackCount: Int? = null,
     val playCount: Long? = null,
+    val isEditable: Boolean? = null,
 )
 
 data class MusicPlaylistDetail(

@@ -359,6 +359,7 @@ internal fun MeloXIOSNowPlayingScene(
                         //   `edgeBlurMax = 0.dp`：竖屏只要渐隐、不要边缘模糊。
                         edgeFadeBottom = MeloXPortraitLyricsFadeBottom,
                         edgeFadeBottomTerminal = lyricsFadeTerminal,
+                        controlsRevealHeight = MeloXNowPlayingControlsHeight.dp,
                         edgeBlurMax = 0.dp,
                     )
                 }
@@ -1048,6 +1049,7 @@ private fun MeloXIOSLandscapeNowPlayingScene(
                                         // ⚠ 双栏恒 false：右列没有可隐藏的浮层，而隐藏会改歌词
                                         //   字号（见上方自动隐藏 LaunchedEffect 的注释）。
                                         isInterfaceHidden = !twoPane && !showsInterface,
+                                        controlsRevealHeight = if (twoPane) 0.dp else 56.dp,
                                         onInterfaceInteraction = {
                                             showsInterface = true
                                             activityGeneration += 1

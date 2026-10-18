@@ -248,24 +248,22 @@ object TtmlLyricsParser {
         if (candidates.isEmpty()) return null
         val language = preference.languageTag
         if (language != null) {
-            // 与系统语言同名的翻译轨优先；其次是任何非中文翻译，最后才退到第一条。
+            // Only a translation in the requested language is usable.
             candidates.firstOrNull { it.matchesLanguage(language) }?.let {
                 return SelectedTranslation(it.allText().trim(), exact = true)
             }
-            candidates.firstOrNull { !it.isChineseTranslation() }?.let {
-                return SelectedTranslation(it.allText().trim(), exact = false)
-            }
-            return SelectedTranslation(candidates.first().allText().trim(), exact = false)
+            return null
         }
         if (preference.script == MeloXLyricScript.Original) {
             return SelectedTranslation(candidates.first().allText().trim(), exact = false)
         }
         val wanted = if (preference.script == MeloXLyricScript.Traditional) "hant" else "hans"
         val opposite = if (wanted == "hant") "hans" else "hant"
-        candidates.firstOrNull { it.languageTag().contains(wanted) }?.let {
+        val chinese = candidates.filter { it.isChineseTranslation() || it.languageTag().isBlank() }
+        chinese.firstOrNull { it.languageTag().contains(wanted) }?.let {
             return SelectedTranslation(it.allText().trim(), exact = true)
         }
-        val fallback = candidates.firstOrNull { !it.languageTag().contains(opposite) } ?: candidates.first()
+        val fallback = chinese.firstOrNull { !it.languageTag().contains(opposite) } ?: chinese.firstOrNull() ?: return null
         return SelectedTranslation(fallback.allText().trim(), exact = false)
     }
 

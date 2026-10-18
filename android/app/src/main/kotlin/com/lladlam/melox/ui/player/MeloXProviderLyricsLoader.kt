@@ -138,6 +138,7 @@ internal object MeloXProviderLyricsLoader {
         val binding = if (auto && MeloXSettingsRuntime.lyricStrongBindingEnabled) {
             LyricBindingStore.read(appContext, resourceId)
         } else null
+        val preference = requestedLyricPreference()
         val cacheKey = lyricCacheKey(
             resourceId = resourceId,
             title = state.title,
@@ -146,6 +147,7 @@ internal object MeloXProviderLyricsLoader {
             automaticSelection = auto,
             bilibiliAlignment = bilibiliAlignment,
             binding = binding,
+            preference = preference,
         )
         cached(cacheKey)?.let { hit ->
             // Queue preloading caches line-timed documents before any caller asks
@@ -175,6 +177,7 @@ internal object MeloXProviderLyricsLoader {
             automaticSelection = auto,
             bilibiliAlignment = bilibiliAlignment,
             binding = binding,
+            preference = preference,
         )
         return loadSnapshot(appContext, cacheKey, snapshot, onUpgrade)
     }
@@ -412,7 +415,7 @@ internal object MeloXProviderLyricsLoader {
         return ratio >= AmllUpgradeMinLineRatio && ratio <= (1.0 / AmllUpgradeMinLineRatio)
     }
     private fun scripted(document: LyricsDocument): LyricsDocument =
-        MeloXLyricScriptConverter.convert(document, requestedLyricPreference().script)
+        applyLyricTranslationPreference(document, requestedLyricPreference())
 
     private suspend fun loadDocument(
         appContext: Context,
@@ -429,7 +432,7 @@ internal object MeloXProviderLyricsLoader {
         }
         if (snapshot.automaticSelection) {
             snapshot.binding?.let { binding ->
-                val bound = loadBinding(appContext, binding)
+                val bound = loadBinding(appContext, binding, snapshot.preference)
                 // Bindings created by the former source-first algorithm may
                 // point at line-timed NetEase lyrics. Do not let such a stale
                 // binding suppress a newly available QRC/YRC word timeline.
@@ -479,7 +482,7 @@ internal object MeloXProviderLyricsLoader {
         val amllResult = async {
             val track = neteaseTrackResult.await() ?: return@async null
             val id = track.id.value.toLongOrNull() ?: return@async null
-            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricPreference()) }
+            runCatching { AmlldbLyricsClient().lyrics(id, snapshot.preference) }
                 .onFailure { Log.w("MeloXBilibiliLyrics", "AMLL primary lyric failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.lines.isNotEmpty() }
                 ?.let { BilibiliLyricSourceResult("amll", it, track) }
@@ -532,7 +535,7 @@ internal object MeloXProviderLyricsLoader {
         val verificationAmllResult = async {
             val track = neteaseTrack ?: return@async null
             val id = track.id.value.toLongOrNull() ?: return@async null
-            runCatching { AmlldbLyricsClient().lyrics(id, requestedLyricPreference()) }
+            runCatching { AmlldbLyricsClient().lyrics(id, snapshot.preference) }
                 .onFailure { Log.w("MeloXBilibiliLyrics", "AMLL verification lyric failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.lines.isNotEmpty() }
                 ?.let { BilibiliLyricSourceResult("amll", it, track) }
@@ -750,7 +753,7 @@ internal object MeloXProviderLyricsLoader {
                 ?: findMatchedNeteaseTrack(appContext, snapshot)?.id?.value?.toLongOrNull()
                     ?.let(AmlldbLyricQuery::Netease)
                 ?: return ResolvedLyrics.Empty
-            val document = runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricPreference()) }
+            val document = runCatching { AmlldbLyricsClient().lyrics(query, snapshot.preference) }
                 .getOrDefault(LyricsDocument(emptyList()))
             return ResolvedLyrics(
                 document,
@@ -812,10 +815,10 @@ internal object MeloXProviderLyricsLoader {
         return ResolvedLyrics.Empty
     }
 
-    private suspend fun loadBinding(appContext: Context, binding: LyricBinding): LyricsDocument {
+    private suspend fun loadBinding(appContext: Context, binding: LyricBinding, preference: MeloXLyricPreference): LyricsDocument {
         if (binding.source == BoundLyricSource.AmlL) {
             val query = amlldbQuery(binding.resourceValue) ?: return LyricsDocument(emptyList())
-            return runCatching { AmlldbLyricsClient().lyrics(query, requestedLyricPreference()) }
+            return runCatching { AmlldbLyricsClient().lyrics(query, preference) }
                 .getOrDefault(LyricsDocument(emptyList()))
         }
         val providerSource = binding.provider ?: return LyricsDocument(emptyList())
@@ -936,6 +939,7 @@ internal object MeloXProviderLyricsLoader {
         val automaticSelection: Boolean,
         val bilibiliAlignment: Boolean,
         val binding: LyricBinding?,
+        val preference: MeloXLyricPreference = requestedLyricPreference(),
     ) {
         fun cacheKey(): String = lyricCacheKey(
             resourceId = resourceId,
@@ -945,6 +949,7 @@ internal object MeloXProviderLyricsLoader {
             automaticSelection = automaticSelection,
             bilibiliAlignment = bilibiliAlignment,
             binding = binding,
+            preference = preference,
         )
     }
 
@@ -955,8 +960,19 @@ internal object MeloXProviderLyricsLoader {
 
 internal data class AutoLyricCandidate(val priority: Int, val document: LyricsDocument, val binding: LyricBinding? = null)
 
-private fun requestedLyricPreference(): MeloXLyricPreference =
+internal fun requestedLyricPreference(): MeloXLyricPreference =
     MeloXLyricPreference.fromSetting(MeloXSettingsRuntime.lyricLanguage)
+
+internal fun applyLyricTranslationPreference(document: LyricsDocument, preference: MeloXLyricPreference): LyricsDocument {
+    // These endpoints supply Chinese translations, with no target-language API.
+    val chineseOnly = document.source in setOf(LyricSource.Netease, LyricSource.QQMusic, LyricSource.Kugou)
+    val selected = if (preference.languageTag != null && chineseOnly) document.copy(
+        lines = document.lines.map { line ->
+            line.copy(translation = null, accompaniment = line.accompaniment.map { it.copy(translation = null) })
+        },
+    ) else document
+    return MeloXLyricScriptConverter.convert(selected, preference.script)
+}
 
 internal enum class LyricAutoSource { AmlL, QQMusic, Netease, Current }
 
@@ -1067,6 +1083,7 @@ internal fun lyricCacheKey(
     automaticSelection: Boolean,
     bilibiliAlignment: Boolean = false,
     binding: LyricBinding? = null,
+    preference: MeloXLyricPreference = requestedLyricPreference(),
 ): String = buildString {
     append(if (automaticSelection) "auto-v$AutomaticSelectionCacheVersion" else "provider")
     append(':').append(resourceId.source.storageValue).append(':').append(resourceId.value)
@@ -1079,7 +1096,7 @@ internal fun lyricCacheKey(
     }
     if (resourceId.source == MusicSource.Bilibili) append(":alignment:").append(bilibiliAlignment)
     binding?.let { append(":bound:").append(it.stableKey()) }
-    append(":script:").append(MeloXLyricScript.fromSystem().name)
+    append(":translation-v2:").append(preference.cacheKey())
 }
 
 internal data class BilibiliLyricLoadPolicy(

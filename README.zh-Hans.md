@@ -1,4 +1,4 @@
-# 弥乐（MeloX Android）
+# 弥乐
 
 [English](README.md)
 
@@ -10,42 +10,46 @@
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 <p align="center">
-  <img src="docs/icon.png" width="128" alt="MeloX Android icon" />
+  <img src="docs/icon.png" width="128" alt="弥乐图标" />
 </p>
 
 <p align="center">
-  使用 Kotlin + Jetpack Compose 构建的 MeloX 原生 Android 迁移版
+  使用 Kotlin + Jetpack Compose 构建的弥乐原生 Android 迁移版
 </p>
 
 > [!IMPORTANT]
-> **MeloX Android 仍处于开发阶段。** 已完成当前 Android 平台范围内的核心功能迁移，并持续以 MeloX 主线作为行为基准；第三方接口、OEM 协议和不同系统版本仍可能带来兼容性变化。
+> **弥乐仍处于开发阶段。** 已完成当前 Android 平台范围内的核心功能迁移，并持续以弥乐主线作为行为基准；第三方接口、OEM 协议和不同系统版本仍可能带来兼容性变化。
 
-> MeloX Android 是非官方开源项目，与网易云音乐、小米、Apple 及其关联公司不存在隶属、合作或授权关系。
+> 弥乐是非官方开源项目，与网易云音乐、小米、Apple 及其关联公司不存在隶属、合作或授权关系。
 
 ## 当前版本：0.6.5
 
-`0.6.5` 新增签名热更新通道：文案覆盖与受限 QuickJS 脚本都随已签名的云控 payload 下发，文案与小逻辑修复不再需要发 APK；未授权云控、验签失败或脚本失败/超时时一律回落内置行为。
+`0.6.5`（`versionCode 24`，2026-10-18）新增可配置分屏与 Dock / 迷你播放器独立位置，补齐多音乐源公共功能接线和 YouTube Music 账号、音乐库与歌单能力，恢复应用语言设置，修复歌词翻译语言及返回交互，并保留签名热更新通道。
 
-- 下载与完整更新日志：[GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.6.5)
+- **设置 → 通用**新增默认开启的分屏开关；Dock 与迷你播放器可分别选择左下、右下、左上、右上、左侧竖向或右侧竖向。同位置保持竖屏间距并联动收缩，分开放置时不随滚动单独收缩。
+- 搜索、集合详情、歌曲菜单、下载及歌单编辑按音乐源实际能力接入公共 UI；YouTube Music 补齐频道切换、可写歌单过滤与后续页读取，并修复请求地区和浏览器会话认证。
+- 所有音乐源共用歌词获取链，统一匹配、绑定、缓存与翻译语言选择；切换语言后当前歌曲重新加载，纯歌词页底部点按唤出控制区而不误跳进度。
+
+- 下载与完整更新日志：[GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/v0.6.5)
 - 详细版本记录：[CHANGELOG.md](CHANGELOG.md)
 - 本次版本说明：[CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
-> 第三方音乐源由用户自行导入并依赖外部服务。发布前用于测试的第三方音源均出现接口失效、限流、DNS/证书错误或返回地址不可播放等情况，因此 MeloX 无法保证任意第三方源可用。若遇到问题，请前往“设置 → 关于”，拉到页面底部导出 MeloX 全部日志，并发送至 `lladlam114@gmail.com`。日志可能包含账号状态、歌曲信息、请求地址或其他隐私数据，请在发送前自行检查。
+> 第三方音乐源由用户自行导入并依赖外部服务。发布前用于测试的第三方音源均出现接口失效、限流、DNS/证书错误或返回地址不可播放等情况，因此弥乐无法保证任意第三方源可用。若遇到问题，请前往“设置 → 关于”，拉到页面底部导出弥乐全部日志，并发送至 `lladlam114@gmail.com`。日志可能包含账号状态、歌曲信息、请求地址或其他隐私数据，请在发送前自行检查。
 
 ## 项目说明
 
-MeloX Android 基于 [lladlam/MeloX](https://github.com/lladlam/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。
+弥乐 Android 版基于 [lladlam/MeloX](https://github.com/lladlam/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。
 
 本仓库是 [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android) 的 fork：本仓库的 Release 从这里的代码构建，并使用 fork 自己的签名密钥。
 
-项目目标不是使用 WebView 套壳，而是尽可能使用 Android 原生能力重新实现 MeloX：
+项目目标不是使用 WebView 套壳，而是尽可能使用 Android 原生能力重新实现弥乐：
 
 - 使用 **Kotlin + Jetpack Compose** 重建界面与交互；
 - 使用 **AndroidX Media3 / ExoPlayer** 实现播放、后台音频与系统媒体会话；
 - 将 iOS 独有能力映射到 Android 平台能力；
 - 在小米 HyperOS 上提供可选的焦点通知 / 超级岛适配，同时保持普通 Android 设备可用；
-- 尽可能复刻 MeloX / Apple Music 风格的播放器、歌词、音乐库与过渡动画；
+- 尽可能复刻弥乐 / Apple Music 风格的播放器、歌词、音乐库与过渡动画；
 - Apple Watch 相关功能不在 Android 版本的兼容范围内。
 
 Root 权限不是应用正常运行的必要条件；平台增强功能应尽量通过标准 Android 或 OEM 能力实现，并在不支持时降级。
@@ -91,7 +95,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 
 ### 音质
 
-当前按照 MeloX 的音质模型接入网易云音乐播放接口：
+当前按照弥乐的音质模型接入网易云音乐播放接口：
 
 - 标准：`standard`
 - 高品质：`exhigh`
@@ -139,7 +143,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - vivo 设备自动尝试接入 OriginOS 原子岛；不提供单独开关，不支持该能力的设备自动保留标准 Android 媒体通知。该适配使用阿里云文档所述的 `notification.superx.*` 本地通知扩展，不依赖 EMAS 远程推送。
 - 支持导入 LX Music 兼容的 JavaScript 音乐源，并在受限 QuickJS 运行时中解析播放地址。
 - 可配置 Meting API（兼容 metowolf/Meting）服务作为默认第三方解析源，优先解析网易云、QQ音乐和酷狗歌曲；旧版内置的 CHKSZ 解析源保留为可选开关。在「音乐服务」里填写 Meting 服务地址（服务端要求鉴权时再填 Auth 口令），或配置 CHKSZ 的 API Key。解析顺序：Meting → CHKSZ → UNM → LX 脚本。
-- 第三方解析失败时才回退到对应平台的原生播放；歌词仍由 MeloX 自己的歌词路线处理。
+- 第三方解析失败时才回退到对应平台的原生播放；歌词仍由弥乐自己的歌词路线处理。
 
 ## 平台范围
 
@@ -163,7 +167,7 @@ Liquid Glass 在 Android 上使用 Kyant0 `AndroidLiquidGlass` 的原生 Backdro
 
 ## iOS → Android 平台映射
 
-| MeloX / iOS | MeloX Android |
+| 弥乐 / iOS | 弥乐 Android |
 | --- | --- |
 | SwiftUI | Jetpack Compose |
 | NavigationStack | Navigation Compose |
@@ -217,7 +221,7 @@ GitHub Actions 会在 `main` 分支代码更新时自动构建 Debug APK。正�
 
 ## Release 签名验证
 
-GitHub Releases 中的正式 APK 使用 MeloX 发布证书签名。证书 SHA-256 指纹为：
+GitHub Releases 中的正式 APK 使用弥乐发布证书签名。证书 SHA-256 指纹为：
 
 ```text
 DF:CC:A9:86:5B:87:A4:02:D3:41:98:5A:48:EB:13:2B:D8:67:9D:FA:6D:9D:50:2F:36:5D:D1:62:10:A5:EB:E9
@@ -252,11 +256,11 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 
 ## 开源项目与特别鸣谢
 
-MeloX Android 的主体代码来自 MeloX 的 Android 迁移工作，同时直接使用或参考了以下开源项目。**各项目仍分别遵循其自己的许可证；MeloX Android 的 GPLv3 不会替代第三方项目原有许可证。**
+弥乐 Android 版的主体代码来自弥乐的 Android 迁移工作，同时直接使用或参考了以下开源项目。**各项目仍分别遵循其自己的许可证；弥乐 Android 版的 GPLv3 不会替代第三方项目原有许可证。**
 
 ### 上游项目
 
-- [lladlam/MeloX](https://github.com/lladlam/MeloX) — 本项目的上游 MeloX，实现、界面、交互与网易云音乐业务逻辑的主要迁移来源；主体采用 GPLv3。
+- [lladlam/MeloX](https://github.com/lladlam/MeloX) — 本项目的上游弥乐，实现、界面、交互与网易云音乐业务逻辑的主要迁移来源；主体采用 GPLv3。
 
 ### Android 直接依赖
 
@@ -272,25 +276,25 @@ MeloX Android 的主体代码来自 MeloX 的 Android 迁移工作，同时直�
 
 ### Liquid Glass / Backdrop 实现来源
 
-Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) 的 `backdrop` 组件；`MeloXBackdropComponents.kt` 基于其官方 `LiquidButton` 与 `LiquidBottomTabs` 示例适配，在保留 MeloX iOS 尺寸和布局的前提下提供折射、模糊、按压高光与底栏选中透镜。
+Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) 的 `backdrop` 组件；`MeloXBackdropComponents.kt` 基于其官方 `LiquidButton` 与 `LiquidBottomTabs` 示例适配，在保留弥乐 iOS 尺寸和布局的前提下提供折射、模糊、按压高光与底栏选中透镜。
 
 当前玻璃效果仍属于实验性实现，视觉与兼容性会继续调整。
 
 ### API 与 UI 参考项目
 
-- [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — 一个基于 Mei 的仿 Apple Music 网易云音乐客户端，为 MeloX Android 提供 UI 参考。
+- [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — 一个基于 Mei 的仿 Apple Music 网易云音乐客户端，为弥乐 Android 版提供 UI 参考。
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API Python 客户端，为 Spotify API 接入提供参考。
 - [bromothymolb/bilibili-api-zoku](https://github.com/bromothymolb/bilibili-api-zoku) — Bilibili API 调用与常用功能整合项目，为 Bilibili API 接入提供参考。
 
-### 上游 MeloX 的参考来源
+### 上游弥乐的参考来源
 
-上游 MeloX 还特别鸣谢了以下项目；Android 迁移版在歌词 / 网易云接口等部分通过上游实现间接继承了这些设计与研究成果：
+上游弥乐还特别鸣谢了以下项目；Android 迁移版在歌词 / 网易云接口等部分通过上游实现间接继承了这些设计与研究成果：
 
 - [jayfunc/BetterLyrics](https://github.com/jayfunc/BetterLyrics) — 逐字歌词渲染、光效与动效参考；
 - [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — 网易云 YRC 逐字歌词解析参考；
 - [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — 网易云接口与播放器实现参考。
 
-如后续 Android 版本迁移 PV Tool、BeatNet 或其他 MeloX 功能，将继续按照上游项目要求保留对应的独立许可证与署名。
+如后续 Android 版本迁移 PV Tool、BeatNet 或其他弥乐功能，将继续按照上游项目要求保留对应的独立许可证与署名。
 
 ## 贡献指南
 
@@ -323,16 +327,26 @@ Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/An
 
 本项目出于学习、研究与开源交流目的开发。
 
-- MeloX Android 不以绕过付费、版权、地区限制或网易云音乐服务限制为目标；
+- 弥乐不以绕过付费、版权、地区限制或网易云音乐服务限制为目标；
 - 使用者应自行遵守所在地法律法规、网易云音乐服务条款以及音乐内容的版权要求；
 - 项目调用的第三方服务接口可能发生变化，开发者不保证持续可用；
 - 本项目按许可证所述不提供任何担保，使用本项目产生的风险由使用者自行承担。
 
 ## 许可证
 
-MeloX Android 主体代码按照与上游 MeloX 相同的 **GNU General Public License version 3（GPLv3）** 发布，完整条款见 [LICENSE](LICENSE)。
+弥乐主体代码按照与上游弥乐相同的 **GNU General Public License version 3（GPLv3）** 发布，完整条款见 [LICENSE](LICENSE)。
 
 复制、修改或分发本项目时，请遵守 GPLv3 关于源代码提供、版权声明、修改说明以及同许可证分发等要求。
+
+## 赞助致谢
+
+感谢以下朋友对弥乐的赞助与支持！
+
+| 赞助者 | 赞助金额 |
+| --- | --- |
+| 爱发电用户\_26d40 | 50 元 |
+| 爱发电用户\_aec4c | 6 元（包月） |
+| Bai | 5 元 |
 
 ## 友情链接
 

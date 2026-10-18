@@ -3445,6 +3445,10 @@ object YouTube {
             innerTube.pageId = value
         }
 
+    var authUser: String
+        get() = innerTube.authUser
+        set(value) { innerTube.authUser = value }
+
     suspend fun accountInfo(): Result<AccountInfo> =
         runCatching {
             innerTube

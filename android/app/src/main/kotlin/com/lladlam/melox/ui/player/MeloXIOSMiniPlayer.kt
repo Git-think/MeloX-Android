@@ -97,6 +97,7 @@ fun MeloXIOSMiniPlayer(
     state: MeloXPlaybackUiState,
     onExpand: () -> Unit,
     compactProgress: Float = 0f,
+    vertical: Boolean = false,
     dynamicGlassEnabled: Boolean = true,
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
@@ -442,7 +443,7 @@ fun MeloXIOSMiniPlayer(
     // 播放栏高度固定 48dp，与底栏收缩态的两侧按钮/搜索键完全等高。
     // 之前用 lerpDp(45,48) 且外层 Box 未定高，会随 compact 与 sharedBounds
     // 测量出更高/更矮的玻璃壳；这里统一钉死 48dp。
-    val miniHeight = 48.dp
+    val miniHeight = if (vertical) lerpDp(236.dp, 48.dp, compact) else 48.dp
 
     Box(
         modifier = Modifier
@@ -511,6 +512,63 @@ fun MeloXIOSMiniPlayer(
             val miniContentShape: Shape? =
                 if (expansionProgress > 0.001f) null else Capsule()
 
+            if (vertical) {
+                val artworkModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+                    with(sharedTransitionScope) {
+                        Modifier.sharedElement(
+                            rememberSharedContentState(sharedPlayerArtworkKey(shownMediaId)),
+                            animatedVisibilityScope,
+                            boundsTransform = sharedSinkBoundsTransform,
+                            renderInOverlayDuringTransition = true,
+                            zIndexInOverlay = 99f,
+                        )
+                    }
+                } else Modifier
+                if (compact > .75f) {
+                    Box(Modifier.fillMaxSize().clickable(
+                        enabled = !isTransitioning || closingIntent,
+                        interactionSource = null, indication = null, onClick = onExpand,
+                    ), contentAlignment = Alignment.Center) {
+                        Artwork(shownArtwork, Modifier.size(36.dp).then(artworkModifier)
+                            .then(artworkClipRadius?.let { Modifier.clip(it) } ?: Modifier))
+                    }
+                } else {
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().clickable(
+                            enabled = !isTransitioning || closingIntent,
+                            interactionSource = null, indication = null, onClick = onExpand,
+                        ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Artwork(shownArtwork, Modifier.size(40.dp).then(artworkModifier)
+                            .graphicsLayer { scaleX = sharedArtworkScale; scaleY = sharedArtworkScale }
+                            .then(artworkClipRadius?.let { Modifier.clip(it) } ?: Modifier))
+                        Text(shownTitle.ifBlank { stringResource(R.string.player_now_playing) },
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            fontSize = titleFontSize, lineHeight = titleLineHeight,
+                            modifier = Modifier.graphicsLayer { alpha = miniChromeAlpha })
+                        Text(shownArtist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = artistFontSize, lineHeight = artistLineHeight,
+                            modifier = Modifier.graphicsLayer { alpha = miniChromeAlpha })
+                    }
+                    MiniVectorButton(
+                        kind = if (state.isPlaying) MiniGlyph.Pause else MiniGlyph.Play,
+                        enabled = !isTransitioning, onClick = state::togglePlayPause,
+                        size = 40.dp, iconSize = controlIconSize, visualAlpha = miniChromeAlpha,
+                    )
+                    MiniVectorButton(
+                        kind = MiniGlyph.Forward,
+                        enabled = !isTransitioning && (state.hasNext || state.repeatMode != 0),
+                        onClick = state::next, size = 40.dp, iconSize = controlIconSize, visualAlpha = miniChromeAlpha,
+                    )
+                }
+                }
+            } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -807,6 +865,7 @@ fun MeloXIOSMiniPlayer(
                 }
             }
         }
+            }
         }
     }
 }

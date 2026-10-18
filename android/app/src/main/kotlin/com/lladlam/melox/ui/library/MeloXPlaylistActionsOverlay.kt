@@ -72,6 +72,11 @@ internal fun MeloXPlaylistActionsOverlay(
     onAnalyzePlaylist: () -> Unit,
     sortMode: MeloXPlaylistSortMode = MeloXPlaylistSortMode.Original,
     onSortModeChanged: (MeloXPlaylistSortMode) -> Unit = {},
+    providerCollection: Boolean = false,
+    canDownload: Boolean = true,
+    onEdit: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
+    playlistManagement: Boolean = true,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext
@@ -85,7 +90,7 @@ internal fun MeloXPlaylistActionsOverlay(
     var sortMenuVisible by remember(playlist.id, visible) { mutableStateOf(false) }
 
     LaunchedEffect(visible, playlist.id) {
-        if (!visible) return@LaunchedEffect
+        if (!visible || providerCollection || !playlistManagement) return@LaunchedEffect
         runCatching {
             val profile = account.accountProfile()
             withContext(Dispatchers.IO) { client.userPlaylistsBlocking(profile.userId) }.any { it.id == playlist.id }
@@ -112,10 +117,16 @@ internal fun MeloXPlaylistActionsOverlay(
             Text(playlist.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
             message?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp)) }
             MeloXIosGroupedList(surfaceColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                PlaylistActionRow(stringResource(R.string.playlist_share), MeloXSymbol.Share, false) { sharePlaylist(context, playlist); onDismiss() }
-                PlaylistActionRow(stringResource(R.string.playlist_batch_download), MeloXSymbol.Download, true) { onDismiss(); onBatchDownload() }
-                PlaylistActionRow(stringResource(R.string.playlist_analyze), MeloXSymbol.Refresh, true) { onDismiss(); onAnalyzePlaylist() }
-                PlaylistActionRow(stringResource(if (subscribed == true) R.string.playlist_unsubscribe else R.string.playlist_subscribe), if (subscribed == true) MeloXSymbol.Check else MeloXSymbol.Plus, true) {
+                PlaylistActionRow(stringResource(R.string.playlist_share), MeloXSymbol.Share, false) {
+                    if (onShare != null) onShare() else sharePlaylistFromDetail(context, playlist)
+                    onDismiss()
+                }
+                if (canDownload) PlaylistActionRow(stringResource(R.string.playlist_batch_download), MeloXSymbol.Download, true) { onDismiss(); onBatchDownload() }
+                if (!providerCollection && playlistManagement) PlaylistActionRow(stringResource(R.string.playlist_analyze), MeloXSymbol.Refresh, true) { onDismiss(); onAnalyzePlaylist() }
+                onEdit?.let { edit ->
+                    PlaylistActionRow(stringResource(R.string.playlist_actions), MeloXSymbol.Ellipsis, true) { onDismiss(); edit() }
+                }
+                if (!providerCollection && playlistManagement) PlaylistActionRow(stringResource(if (subscribed == true) R.string.playlist_unsubscribe else R.string.playlist_subscribe), if (subscribed == true) MeloXSymbol.Check else MeloXSymbol.Plus, true) {
                     if (busy) return@PlaylistActionRow
                     val desired = subscribed != true
                     busy = true

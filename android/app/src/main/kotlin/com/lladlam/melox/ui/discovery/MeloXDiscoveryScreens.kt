@@ -2,6 +2,7 @@ package com.lladlam.melox.ui.discovery
 
 import com.lladlam.melox.ui.layout.LocalMeloXListDetail
 import com.lladlam.melox.ui.layout.rememberMeloXDetailSelection
+import com.lladlam.melox.core.music.provider.loadAllMusicPages
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -1784,6 +1785,7 @@ private fun DiscoveryCollectionDetail(
     val context = LocalContext.current.applicationContext
     var tracks by remember(collection.key) { mutableStateOf<List<DiscoveryTrack>?>(null) }
     var error by remember(collection.key) { mutableStateOf<String?>(null) }
+    var refreshVersion by remember(collection.key) { mutableStateOf(0) }
     BackHandler(onBack = onBack)
 
     // ⚠ 2026-10-16：排行榜详情此前是「裸 LazyColumn」—— **整页没有任何背景**。
@@ -1798,18 +1800,43 @@ private fun DiscoveryCollectionDetail(
     }
     val foreground = if (palette.prefersDarkAppearance) Color.White else Color.Black
 
-    LaunchedEffect(collection.key) {
+    LaunchedEffect(collection.key, refreshVersion) {
+        tracks = null
+        error = null
         runCatching {
             withContext(Dispatchers.IO) {
                 val ranking = (collection as DiscoveryCollection.ProviderRanking).ranking
                 val provider = MeloXMusicProviders.create(context).require(ranking.id.source)
                 val capability = provider as? RankingCapability
                     ?: throw IllegalStateException("${ranking.id.source.displayName} 当前不提供排行榜详情")
-                capability.rankingTracks(ranking, page = 1, pageSize = 150)
-                    .items.map { DiscoveryTrack.Provider(it) }
+                loadAllMusicPages(key = { it.id }) { page ->
+                    capability.rankingTracks(ranking, page = page, pageSize = 150)
+                }.map { DiscoveryTrack.Provider(it) }
             }
         }.onSuccess { tracks = it }
             .onFailure { error = it.message ?: "内容加载失败" }
+    }
+
+    tracks?.let { values ->
+        val ranking = (collection as DiscoveryCollection.ProviderRanking).ranking
+                MeloXUnifiedSongListDetailScreen(
+                    playlist = NeteasePlaylistSummary(
+                        id = ranking.id.hashCode().toLong(),
+                        name = collection.title,
+                        coverUrl = collection.artworkUrl,
+                        creatorName = collection.creatorName,
+                        description = collection.description,
+                        trackCount = values.size,
+                    ),
+                    songs = values.mapNotNull { (it as? DiscoveryTrack.Provider)?.track }.map(MeloXLegacyUiBridge::track),
+                    onBack = onBack,
+                    sharedTransitionScope = sharedTransitionScope,
+                    animatedVisibilityScope = animatedVisibilityScope,
+                    artworkSharedKey = artworkSharedKey ?: discoveryCollectionArtworkSharedKey(collection),
+                    source = ranking.id.source,
+                    onRefresh = { refreshVersion++ },
+                )
+        return
     }
 
     // 状态栏避让改放 contentPadding（打在 LazyColumn 的 modifier 上会把内容裁在状态栏下缘）
@@ -1882,32 +1909,17 @@ private fun DiscoveryCollectionDetail(
                                 fontSize = 13.sp,
                             )
                         }
-                        val value = tracks.orEmpty()
-                        if (value.isNotEmpty()) {
-                            Text(
-                                stringResource(R.string.home_play_all),
-                                modifier = Modifier
-                                    .padding(top = 15.dp)
-                                    .clip(RoundedCornerShape(22.dp))
-                                    .background(Accent)
-                                    .clickable { playDiscoveryQueue(context, value, value.first()) }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
                     }
                 }
             }
             collection.description?.takeIf(String::isNotBlank)?.let { description ->
                 item { Text(description, color = foreground.copy(alpha = .55f), fontSize = 13.sp, lineHeight = 19.sp) }
             }
-            val value = tracks
             when {
-                value != null -> items(value, key = DiscoveryTrack::key) { song ->
-                    SongRow(song, contentColor = foreground) { playDiscoveryQueue(context, value, song) }
+                error != null -> item {
+                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.account_retry), Modifier.clickable { refreshVersion++ }.padding(12.dp), color = foreground)
                 }
-                error != null -> item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
                 else -> item {
                     Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = Accent)

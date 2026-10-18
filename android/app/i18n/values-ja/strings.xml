@@ -1,5 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="settings_split_screen">分割画面モード</string>
+    <string name="settings_split_screen_hint">横向き画面と対応サイズの再生画面を2ペインで表示します。各コントロールの位置を個別に設定できます。</string>
+    <string name="settings_split_navigation_position">分割画面のナビゲーション位置</string>
+    <string name="settings_split_mini_player_position">分割画面のミニプレーヤー位置</string>
+    <string name="settings_position_bottom_left">左下</string>
+    <string name="settings_position_bottom_right">右下</string>
+    <string name="settings_position_left">左端（縦向き）</string>
+    <string name="settings_position_right">右端（縦向き）</string>
+    <string name="settings_position_top_left">左上</string>
+    <string name="settings_position_top_right">右上</string>
+    <string name="youtube_channel">YouTube チャンネル</string>
+    <string name="youtube_refresh_login">YouTube に再ログイン</string>
+    <string name="youtube_refresh_login_hint">再ログインしてセッションを更新します</string>
+    <string name="youtube_session_expired">認証情報が拒否されました。音楽ライブラリにアクセスするには再ログインしてください。</string>
+    <string name="youtube_channels_loading">チャンネルを読み込み中…</string>
+    <string name="youtube_channels_empty">利用可能なチャンネルがありません</string>
+    <string name="settings_general_language">アプリの言語</string>
+    <string name="settings_general_language_system">システムに従う</string>
+    <string name="settings_general_language_legacy">この Android バージョンではシステム言語に従います。タップしてシステムの言語設定を開きます。</string>
     <string name="app_name">弥乐</string>
     <string name="tab_home">ホーム</string>
     <string name="tab_explore">見つける</string>

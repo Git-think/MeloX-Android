@@ -24,9 +24,13 @@
 
 ## Current version: 0.6.5
 
-`0.6.5` adds a signed hot-update channel: UI text overrides and sandboxed QuickJS behaviour hooks delivered inside the already-signed remote config, so copy and small logic fixes no longer need an APK. Everything falls back to the built-in text and logic when consent is off, the config is unverified, or a hook fails or times out.
+`0.6.5` (versionCode **24**, 2026-10-18) adds configurable split-screen layouts, independent Dock / mini-player placement, shared multi-provider actions, and YouTube Music account and library improvements. It also restores application language selection, fixes lyric translation language routing, and retains the signed hot-update channel.
 
-- Download and full notes: [GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.6.5)
+- **Settings → General** offers the default-on split-screen switch and separate Dock / mini-player placement: four corners or vertical left/right edges. Matching positions collapse together on scroll; separate positions remain expanded.
+- Shared provider menus respect real search, collection, download and playlist-write capabilities. YouTube Music gains channel selection, editable-playlist filtering and continuation paging, plus region and browser-session authentication fixes.
+- All providers share lyric matching, bindings, caching and translation-language selection. Changing the language reloads the current track, and immersive bottom-area taps reveal controls without seeking.
+
+- Download and full notes: [GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/v0.6.5)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
@@ -305,6 +309,16 @@ This project is for learning, research, and open-source exchange.
 The MeloX Android code is released under the same **GNU General Public License version 3 (GPLv3)** as upstream MeloX. See [LICENSE](LICENSE).
 
 Copying, modifying, or distributing this project requires compliance with GPLv3, including source availability, copyright notices, change notices, and same-license distribution.
+
+## Sponsors
+
+Thank you to the following sponsors for supporting MeloX Android!
+
+| Sponsor | Contribution |
+| --- | --- |
+| Afdian user\_26d40 | CNY 50 |
+| Afdian user\_aec4c | CNY 6 (monthly) |
+| Bai | CNY 5 |
 
 ## Links
 

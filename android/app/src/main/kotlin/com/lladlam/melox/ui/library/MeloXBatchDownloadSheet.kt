@@ -37,6 +37,10 @@ import com.lladlam.melox.core.audio.MusicQuality
 import com.lladlam.melox.core.audio.MusicQualityPreferences
 import com.lladlam.melox.core.download.MeloXDownloadPlaylistRef
 import com.lladlam.melox.core.download.MeloXDownloadStore
+import com.lladlam.melox.core.download.MeloXProviderDownloadStore
+import com.lladlam.melox.core.music.provider.MeloXMusicProviders
+import com.lladlam.melox.core.music.provider.DownloadCapability
+import com.lladlam.melox.core.music.model.AudioQualityTier
 import com.lladlam.melox.core.model.SearchSong
 import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
@@ -57,9 +61,14 @@ fun MeloXBatchDownloadSheet(
     if (!visible) return
     val context = LocalContext.current.applicationContext
     val store = remember(context) { MeloXDownloadStore.get(context) }
-    var selectedIds by remember(songs) { mutableStateOf(songs.map(SearchSong::id).toSet()) }
+    val providerStore = remember(context) { MeloXProviderDownloadStore.get(context) }
+    val downloadableSongs = remember(songs) {
+        val providers = MeloXMusicProviders.create(context)
+        songs.filter { song -> song.providerTrack?.let { providers.require(it.id.source) is DownloadCapability } ?: true }
+    }
+    var selectedIds by remember(downloadableSongs) { mutableStateOf(downloadableSongs.map(SearchSong::id).toSet()) }
     var quality by remember { mutableStateOf(MusicQualityPreferences.read(context)) }
-    val selectedSongs = remember(songs, selectedIds) { songs.filter { it.id in selectedIds } }
+    val selectedSongs = remember(downloadableSongs, selectedIds) { downloadableSongs.filter { it.id in selectedIds } }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -99,17 +108,17 @@ fun MeloXBatchDownloadSheet(
                         }
                     }
                     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(stringResource(R.string.download_song_progress, selectedIds.size, songs.size), fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.download_song_progress, selectedIds.size, downloadableSongs.size), fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (selectedIds.size == songs.size) stringResource(R.string.library_deselect_all) else stringResource(R.string.library_select_all),
+                            if (selectedIds.size == downloadableSongs.size) stringResource(R.string.library_deselect_all) else stringResource(R.string.library_select_all),
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.clickable {
-                                selectedIds = if (selectedIds.size == songs.size) emptySet() else songs.map(SearchSong::id).toSet()
+                                selectedIds = if (selectedIds.size == downloadableSongs.size) emptySet() else downloadableSongs.map(SearchSong::id).toSet()
                             },
                         )
                     }
                 }
-                items(songs, key = SearchSong::id) { song ->
+                items(downloadableSongs, key = SearchSong::id) { song ->
                     val selected = song.id in selectedIds
                     MeloXIosListRow(
                         title = song.name,
@@ -129,7 +138,11 @@ fun MeloXBatchDownloadSheet(
                 ) { Text(stringResource(R.string.action_cancel)) }
                 MeloXGlassButton(
                     onClick = {
-                        selectedSongs.forEach { store.start(it, quality, sourcePlaylist) }
+                        selectedSongs.forEach { song ->
+                            val track = song.providerTrack
+                            if (track == null) store.start(song, quality, sourcePlaylist)
+                            else providerStore.start(track, quality.toProviderTier())
+                        }
                         onDismiss()
                     },
                     modifier = Modifier.weight(1f),
@@ -139,4 +152,13 @@ fun MeloXBatchDownloadSheet(
             }
         }
     }
+}
+
+private fun MusicQuality.toProviderTier(): AudioQualityTier = when (this) {
+    MusicQuality.Standard -> AudioQualityTier.Standard
+    MusicQuality.High -> AudioQualityTier.High
+    MusicQuality.Lossless -> AudioQualityTier.Lossless
+    MusicQuality.HiResolution -> AudioQualityTier.HiResolution
+    MusicQuality.HighDefinitionSurround, MusicQuality.ImmersiveSurround -> AudioQualityTier.Immersive
+    MusicQuality.UltraClearMaster -> AudioQualityTier.Master
 }

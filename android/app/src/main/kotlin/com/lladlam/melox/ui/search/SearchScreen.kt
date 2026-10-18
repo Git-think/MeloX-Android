@@ -2,6 +2,7 @@ package com.lladlam.melox.ui.search
 
 import com.lladlam.melox.ui.layout.LocalMeloXListDetail
 import com.lladlam.melox.ui.layout.rememberMeloXDetailSelection
+import com.lladlam.melox.ui.library.MeloXProviderArtistDetailScreen
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -1282,6 +1283,8 @@ private fun ProviderSearchSongResults(
 ) {
     val context = LocalContext.current
     val providerDownloads = remember(context) { MeloXProviderDownloadStore.get(context) }
+    val providers = remember(context) { MeloXMusicProviders.create(context) }
+    var actionTrack by remember { mutableStateOf<MusicTrack?>(null) }
     LazyColumn(
         state = state,
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = MeloXBottomContentClearance),
@@ -1304,15 +1307,23 @@ private fun ProviderSearchSongResults(
                 SearchSwipeSongRow(
                     song = MeloXLegacyUiBridge.track(track),
                     onPlay = { onPlay(track) },
-                    onMore = null,
-                    endAction = MeloXSwipeAction(stringResource(R.string.search_download_local), MeloXSymbol.Download, Color(0xFF0EA5E9)) {
+                    onMore = { actionTrack = track },
+                    endAction = if (providers.require(track.id.source) is com.lladlam.melox.core.music.provider.DownloadCapability) MeloXSwipeAction(stringResource(R.string.search_download_local), MeloXSymbol.Download, Color(0xFF0EA5E9)) {
                         providerDownloads.start(track)
-                    },
+                    } else null,
                     sourceLabel = track.id.source.displayName.takeIf { showSource },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f))
             }
         }
+    }
+    actionTrack?.let { track ->
+        MeloXSongActionsOverlay(
+            song = MeloXLegacyUiBridge.track(track),
+            queue = values.map(MeloXLegacyUiBridge::track),
+            visible = true,
+            onDismiss = { actionTrack = null },
+        )
     }
 }
 
@@ -1635,6 +1646,10 @@ private fun SearchCollectionDetail(
                 )
                 return
             }
+            if (value is ProviderSearchDestination.Artist) {
+                MeloXProviderArtistDetailScreen(artist = value.value, onBack = onBack)
+                return
+            }
         }
     }
     val context = LocalContext.current
@@ -1746,7 +1761,7 @@ private fun SearchCollectionDetail(
                     SearchSwipeSongRow(
                         song = MeloXLegacyUiBridge.track(track),
                         onPlay = { ProviderPlaybackCommands.playQueue(context, providerTracks, track.id) },
-                        onMore = null,
+                        onMore = { selectedActionSong = MeloXLegacyUiBridge.track(track) },
                         endAction = MeloXSwipeAction(stringResource(R.string.search_download_local), MeloXSymbol.Download, Color(0xFF0EA5E9)) {
                             MeloXProviderDownloadStore.get(context).start(track)
                         },

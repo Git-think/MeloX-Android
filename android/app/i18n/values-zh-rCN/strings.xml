@@ -1,5 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="settings_split_screen">分屏模式</string>
+    <string name="settings_split_screen_hint">横屏及符合尺寸条件的播放页使用双栏布局，下方可分别调整控件位置。</string>
+    <string name="settings_split_navigation_position">分屏底部导航栏位置</string>
+    <string name="settings_split_mini_player_position">分屏迷你播放器位置</string>
+    <string name="settings_position_bottom_left">左下</string>
+    <string name="settings_position_bottom_right">右下</string>
+    <string name="settings_position_left">左边（贴边竖向）</string>
+    <string name="settings_position_right">右边（贴边竖向）</string>
+    <string name="settings_position_top_left">左上</string>
+    <string name="settings_position_top_right">右上</string>
+    <string name="youtube_channel">YouTube 频道</string>
+    <string name="youtube_refresh_login">刷新 YouTube 登录</string>
+    <string name="youtube_refresh_login_hint">重新登录以更新当前会话</string>
+    <string name="youtube_session_expired">登录凭据已被拒绝，请重新登录以恢复音乐库访问。</string>
+    <string name="youtube_channels_loading">正在加载频道…</string>
+    <string name="youtube_channels_empty">暂无可用频道</string>
+    <string name="settings_general_language">应用语言</string>
+    <string name="settings_general_language_system">跟随系统</string>
+    <string name="settings_general_language_legacy">当前 Android 版本跟随系统语言，点击打开系统语言设置。</string>
         <string name="app_name">弥乐</string>
     <string name="tab_home">首页</string>
     <string name="tab_explore">发现</string>

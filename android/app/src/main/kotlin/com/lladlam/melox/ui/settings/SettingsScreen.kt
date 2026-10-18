@@ -181,28 +181,31 @@ import kotlinx.coroutines.CancellationException
 
 // ⚠ 必须 public：`MeloXSettingsDetailActivity.launch(context, route, source)` 是 public 的
 //   Activity 入口，签名里出现 internal 类型会直接编译不过（public 函数暴露 internal 类型）。
-enum class SettingsRoute(val title: String) {
-    Playback("播放"),
-    PlayerAppearance("外观"),
-    Lyrics("歌词"),
-    SystemPlayback("系统歌词显示"),
-    SkylineLyrics("全屏天际歌词"),
-    FloatingLyrics("悬浮窗歌词"),
-    ContentFeatures("功能模块"),
+enum class SettingsRoute(private val fallbackTitle: String, private val titleRes: Int = 0) {
+    Playback("播放", R.string.settings_route_playback),
+    PlayerAppearance("外观", R.string.settings_route_appearance),
+    Lyrics("歌词", R.string.settings_route_lyrics),
+    SystemPlayback("系统歌词显示", R.string.settings_route_system_playback),
+    SkylineLyrics("全屏天际歌词", R.string.settings_route_skyline),
+    FloatingLyrics("悬浮窗歌词", R.string.settings_route_floating),
+    ContentFeatures("功能模块", R.string.settings_route_features),
     Blocklist("屏蔽管理"),
-    Recognition("听歌识曲"),
-    Messages("私信与站内分享"),
-    ListenTogether("一起听"),
-    Content("内容"),
-    Storage("存储管理"),
-    TabLayout("页面与标签栏"),
-    General("通用"),
-    RemoteConfig("远程兼容性配置"),
-    About("关于 MeloX"),
-    Legal("隐私政策与免责声明"),
-    Privacy("隐私与本地算法"),
-    Developer("开发者选项"),
-    Experimental("测试功能尝鲜"),
+    Recognition("听歌识曲", R.string.settings_route_recognition),
+    Messages("私信与站内分享", R.string.settings_route_messages),
+    ListenTogether("一起听", R.string.settings_route_listen_together),
+    Content("内容", R.string.settings_route_content),
+    Storage("存储管理", R.string.settings_route_storage),
+    TabLayout("页面与标签栏", R.string.settings_route_tabs),
+    General("通用", R.string.settings_route_general),
+    RemoteConfig("远程兼容性配置", R.string.settings_route_remote_config),
+    About("关于 MeloX", R.string.settings_route_about),
+    Legal("隐私政策与免责声明", R.string.settings_route_legal),
+    Privacy("隐私与本地算法", R.string.settings_route_privacy),
+    Developer("开发者选项", R.string.settings_route_developer),
+    Experimental("测试功能尝鲜", R.string.settings_route_experimental);
+
+    val title: String
+        @Composable get() = if (titleRes == 0) fallbackTitle else stringResource(titleRes)
 }
 
 private data class SettingsItem(
@@ -216,7 +219,7 @@ private data class SettingsSection(val title: String, val items: List<SettingsIt
 
 private val SettingsSections = listOf(
     SettingsSection("应用", listOf(
-        SettingsItem(SettingsRoute.General, "主题、启动行为与链接处理", "⚙", "主题 浅色 深色 跟随系统 默认页面 剪贴板"),
+        SettingsItem(SettingsRoute.General, "语言、主题、启动行为与链接处理", "⚙", "语言 language 简体 繁體 English 日本語 Türkçe 主题 浅色 深色 跟随系统 默认页面 剪贴板 分屏 split screen 双栏 底部栏 导航栏 迷你播放器 miniplayer 左下 右下 左边 右边 左上 右上"),
         SettingsItem(SettingsRoute.PlayerAppearance, "背景、封面动画与屏幕常亮", "✦", "模糊 色彩 饱和度 封面 自动锁屏"),
         SettingsItem(SettingsRoute.Content, "地区、歌单信息和发现内容", "▦", "华语 欧美 韩国 日本 播放量 内容"),
         SettingsItem(SettingsRoute.Playback, "音质、播放行为与自动混音", "♫", "高品质 无损 上一首 页面记忆 心动模式 交叉淡化 播放"),
@@ -321,7 +324,11 @@ fun SettingsScreen(
 
         visibleSections.forEach { section ->
             Text(
-                section.title,
+                stringResource(when (section.title) {
+                    "应用" -> R.string.settings_section_app
+                    "扩展" -> R.string.settings_section_more
+                    else -> R.string.settings_section_about
+                }),
                 modifier = Modifier.padding(start = 8.dp, bottom = 8.dp, top = 8.dp),
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.48f),
                 fontSize = 13.sp,
@@ -2585,6 +2592,31 @@ private fun GeneralSettings(context: android.content.Context) {
     var theme by remember { mutableStateOf(MeloXSettingsRuntime.themeMode) }
     var swipeFullAction by remember { mutableStateOf(MeloXSettingsRuntime.swipeFullAction) }
     SettingsGlassGroup {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val localeManager = context.getSystemService(android.app.LocaleManager::class.java)
+            val selectedLanguage = localeManager.applicationLocales.toLanguageTags()
+            MeloXSettingsDropdown(
+                title = stringResource(R.string.settings_general_language),
+                selected = selectedLanguage,
+                items = listOf(
+                    "" to stringResource(R.string.settings_general_language_system),
+                    "zh-Hans" to "简体中文",
+                    "zh-Hant" to "繁體中文",
+                    "en" to "English",
+                    "ja" to "日本語",
+                    "tr" to "Türkçe",
+                ),
+                onSelected = { localeManager.applicationLocales = android.os.LocaleList.forLanguageTags(it) },
+                grouped = true,
+            )
+        } else {
+            MeloXIosListRow(
+                title = stringResource(R.string.settings_general_language),
+                subtitle = stringResource(R.string.settings_general_language_legacy),
+                onClick = { context.startActivity(Intent(AndroidSettings.ACTION_LOCALE_SETTINGS)) },
+                showTopSeparator = false,
+            )
+        }
         MeloXSettingsDropdown(
             title = stringResource(R.string.settings_general_theme),
             selected = theme,
@@ -2596,6 +2628,38 @@ private fun GeneralSettings(context: android.content.Context) {
             onSelected = { theme = it; MeloXSettingsPreferences.setString(context, "theme_mode", it.name) },
             grouped = true,
         )
+        SettingsToggleRow(
+            context,
+            stringResource(R.string.settings_split_screen),
+            "general_split_screen",
+            true,
+            stringResource(R.string.settings_split_screen_hint),
+            grouped = true,
+        )
+        if (MeloXSettingsRuntime.splitScreenEnabled) {
+            val positions = listOf(
+                MeloXSplitChromePosition.BottomLeft to stringResource(R.string.settings_position_bottom_left),
+                MeloXSplitChromePosition.BottomRight to stringResource(R.string.settings_position_bottom_right),
+                MeloXSplitChromePosition.Left to stringResource(R.string.settings_position_left),
+                MeloXSplitChromePosition.Right to stringResource(R.string.settings_position_right),
+                MeloXSplitChromePosition.TopLeft to stringResource(R.string.settings_position_top_left),
+                MeloXSplitChromePosition.TopRight to stringResource(R.string.settings_position_top_right),
+            )
+            MeloXSettingsDropdown(
+                title = stringResource(R.string.settings_split_navigation_position),
+                selected = MeloXSettingsRuntime.splitNavigationPosition,
+                items = positions,
+                onSelected = { MeloXSettingsPreferences.setString(context, "general_split_navigation_position", it.name) },
+                grouped = true,
+            )
+            MeloXSettingsDropdown(
+                title = stringResource(R.string.settings_split_mini_player_position),
+                selected = MeloXSettingsRuntime.splitMiniPlayerPosition,
+                items = positions,
+                onSelected = { MeloXSettingsPreferences.setString(context, "general_split_mini_player_position", it.name) },
+                grouped = true,
+            )
+        }
         var defaultTab by remember { mutableStateOf(MeloXSettingsRuntime.defaultTab) }
         MeloXSettingsDropdown(
             title = stringResource(R.string.settings_general_launch),
