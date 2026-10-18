@@ -760,6 +760,10 @@ class MeloXPlaybackService : MediaSessionService() {
                 player?.currentMediaItem?.mediaId
             }
             if (currentMediaId != item.mediaId) return@launch
+            if (autoMixAnalyzer.hasPersistentAnalysis(item.analysisSongId())) {
+                Log.i(TAG, "Background audio analysis cached: ${item.mediaId}")
+                return@launch
+            }
             val independent = MeloXAudioAnalysisPreferences.independentLineEnabled(this@MeloXPlaybackService)
             val analysisItem = if (independent) item.copyWithStandardAnalysisUri() else item
             runCatching {
@@ -906,14 +910,21 @@ class MeloXPlaybackService : MediaSessionService() {
 
     private suspend fun analyzeSmartQueueItem(item: MediaItem): MeloXAutoMixTrackAnalysis {
         val standardItem = item.copyWithStandardAnalysisUri()
-        val songId = standardItem.analysisSongId()
         MeloXAudioAnalysisLoad.begin()
-        val file = try {
-            mediaPrefetcher.materialize(standardItem)
-        } catch (error: Throwable) {
+        return try {
+            analyzeFullTrack(standardItem, standardItem.analysisSongId())
+        } finally {
             MeloXAudioAnalysisLoad.end()
-            throw error
         }
+    }
+
+    /**
+     * 整曲分析（0..MAX 窗口）：已持久化的结果直接复用——不下载、不解码；缺失时才按
+     * 标准音质落盘分析一次。已分析过的曲目重复播放/换歌单不会再产生下载请求。
+     */
+    private suspend fun analyzeFullTrack(item: MediaItem, songId: Long): MeloXAutoMixTrackAnalysis {
+        autoMixAnalyzer.persistentFullAnalysis(songId)?.let { return it }
+        val file = mediaPrefetcher.materialize(item)
         return try {
             autoMixAnalyzer.analyze(
                 songId = songId,
@@ -923,7 +934,6 @@ class MeloXPlaybackService : MediaSessionService() {
             )
         } finally {
             file.delete()
-            MeloXAudioAnalysisLoad.end()
         }
     }
 
@@ -1596,43 +1606,20 @@ class MeloXPlaybackService : MediaSessionService() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     withTimeout(20_000L) {
-                        Log.i(TAG, "AutoMix materializing analysis sources: outgoing=$outgoingId, incoming=$incomingId")
-                        val outgoingFile = mediaPrefetcher.materialize(outgoingAnalysisItem)
-                        val incomingFile = mediaPrefetcher.materialize(incomingAnalysisItem)
-                        Log.i(TAG, "AutoMix materialized analysis sources: outgoingBytes=${outgoingFile.length()}, incomingBytes=${incomingFile.length()}")
-                        try {
-                            val (outgoing, incomingAnalysis) = coroutineScope {
-                                val outgoingDeferred = async {
-                                        autoMixAnalyzer.analyze(
-                                            outgoingId,
-                                            android.net.Uri.fromFile(outgoingFile),
-                                            windowStartMs = 0L,
-                                            windowDurationMs = Long.MAX_VALUE,
-                                        )
-                                }
-                                val incomingDeferred = async {
-                                        autoMixAnalyzer.analyze(
-                                            incomingId,
-                                            android.net.Uri.fromFile(incomingFile),
-                                            windowStartMs = 0L,
-                                            windowDurationMs = Long.MAX_VALUE,
-                                        )
-                                }
-                                outgoingDeferred.await() to incomingDeferred.await()
-                            }
-                            val plan = MeloXAutoMixTransitionScorer.plan(settings, outgoing, incomingAnalysis)
-                                ?: error(
-                                    "analysis rejected: outgoing=${"%.3f".format(outgoing.confidence)}/" +
-                                        "${"%.1f".format(outgoing.bpm)} BPM, incoming=" +
-                                        "${"%.3f".format(incomingAnalysis.confidence)}/" +
-                                        "${"%.1f".format(incomingAnalysis.bpm)} BPM, " +
-                                        "minimum=${"%.3f".format(settings.minimumConfidence)}",
-                                )
-                            Triple(plan, outgoing, incomingAnalysis)
-                        } finally {
-                            outgoingFile.delete()
-                            incomingFile.delete()
+                        val (outgoing, incomingAnalysis) = coroutineScope {
+                            val outgoingDeferred = async { analyzeFullTrack(outgoingAnalysisItem, outgoingId) }
+                            val incomingDeferred = async { analyzeFullTrack(incomingAnalysisItem, incomingId) }
+                            outgoingDeferred.await() to incomingDeferred.await()
                         }
+                        val plan = MeloXAutoMixTransitionScorer.plan(settings, outgoing, incomingAnalysis)
+                            ?: error(
+                                "analysis rejected: outgoing=${"%.3f".format(outgoing.confidence)}/" +
+                                    "${"%.1f".format(outgoing.bpm)} BPM, incoming=" +
+                                    "${"%.3f".format(incomingAnalysis.confidence)}/" +
+                                    "${"%.1f".format(incomingAnalysis.bpm)} BPM, " +
+                                    "minimum=${"%.3f".format(settings.minimumConfidence)}",
+                            )
+                        Triple(plan, outgoing, incomingAnalysis)
                     }
             }
             }
