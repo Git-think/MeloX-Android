@@ -158,9 +158,15 @@ class MeloXAutoMixAudioAnalyzer(private val context: Context) {
             persistentStore.get("$ANALYSIS_VERSION|$songId|-30000|30000") != null
     }
 
-    fun hasPersistentFullAnalysis(songId: Long): Boolean {
-        if (!MeloXAudioAnalysisPreferences.persistentEnabled(context)) return false
-        return persistentStore.get("$ANALYSIS_VERSION|$songId|0|${Long.MAX_VALUE}") != null
+    fun hasPersistentFullAnalysis(songId: Long): Boolean = persistentFullAnalysis(songId) != null
+
+    /**
+     * 已持久化的整曲分析（0..MAX 窗口）。返回非空时调用方无需再下载/解码音源，
+     * 直接复用即可。
+     */
+    fun persistentFullAnalysis(songId: Long): MeloXAutoMixTrackAnalysis? {
+        if (!MeloXAudioAnalysisPreferences.persistentEnabled(context)) return null
+        return persistentStore.get("$ANALYSIS_VERSION|$songId|0|${Long.MAX_VALUE}")
     }
 
     fun clear() {
