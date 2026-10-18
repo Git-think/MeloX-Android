@@ -17,6 +17,9 @@ class ChkszApiClient(
     private val baseUrlProvider: () -> String = { ChkszConfigStore.DefaultBaseUrl },
     private val httpClient: OkHttpClient = com.lladlam.melox.core.network.MeloXHttpClient.shared,
 ) {
+    /** 429 冷却：被限流后的一段时间内不再发请求，避免跳过连锁对每首歌重砸。 */
+    private val rateLimitGuard = ChkszRateLimitGuard()
+
     fun resolveNetease(songId: Long, quality: AudioQualityTier): String? = request(
         "163_music",
         mapOf(
@@ -43,6 +46,11 @@ class ChkszApiClient(
 
     private fun request(endpoint: String, params: Map<String, String>): String? {
         val key = apiKeyProvider().trim().takeIf(String::isNotBlank) ?: return null
+        val nowMs = System.currentTimeMillis()
+        if (rateLimitGuard.shouldSkip(nowMs)) {
+            Log.i(TAG, "CHKSZ rate-limited; skipping request endpoint=$endpoint")
+            return null
+        }
         val url = buildUrl(endpoint, params, key) ?: return null
         val request = Request.Builder().url(url)
             .header("User-Agent", "MeloX/0.4.5")
@@ -52,6 +60,7 @@ class ChkszApiClient(
         return try {
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
+                    if (response.code == 429) rateLimitGuard.recordRateLimited(nowMs)
                     Log.w(TAG, "CHKSZ response failed endpoint=$endpoint code=${response.code}")
                     return@use null
                 }
@@ -108,4 +117,26 @@ private fun AudioQualityTier.toChkszSize(): String = when (this) {
     AudioQualityTier.Lossless -> "flac"
     AudioQualityTier.HiResolution -> "hires"
     AudioQualityTier.Immersive, AudioQualityTier.Master -> "master"
+}
+
+/**
+ * CHKSZ 429（限流）短期冷却：命中后的一段时间内不再发起请求，
+ * 避免「无音源跳过连锁」对每一首歌继续砸同一个被限流的接口。
+ */
+internal class ChkszRateLimitGuard(
+    private val cooldownMs: Long = DEFAULT_COOLDOWN_MS,
+) {
+    @Volatile
+    private var blockedUntilMs = 0L
+
+    fun shouldSkip(nowMs: Long): Boolean = nowMs < blockedUntilMs
+
+    fun recordRateLimited(nowMs: Long) {
+        blockedUntilMs = nowMs + cooldownMs
+    }
+
+    companion object {
+        /** 默认冷却时长：3 分钟。 */
+        const val DEFAULT_COOLDOWN_MS = 3 * 60 * 1000L
+    }
 }
