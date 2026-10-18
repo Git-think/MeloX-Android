@@ -61,7 +61,16 @@ class ChkszApiClient(
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     if (response.code == 429) rateLimitGuard.recordRateLimited(nowMs)
-                    Log.w(TAG, "CHKSZ response failed endpoint=$endpoint code=${response.code}")
+                    // 把服务端返回的简短原因也带上：限额/并发/上游故障的说明
+                    // 通常就在响应体里，否则日志里只剩一个裸的状态码。
+                    val detail = runCatching {
+                        response.peekBody(256).string()
+                    }.getOrNull().orEmpty().trim().replace('\n', ' ').take(200)
+                    Log.w(
+                        TAG,
+                        "CHKSZ response failed endpoint=$endpoint code=${response.code} " +
+                            "params=${redactedChkszParams(params)} body=$detail",
+                    )
                     return@use null
                 }
                 findUrl(JSONObject(response.body.string()))
@@ -118,6 +127,12 @@ private fun AudioQualityTier.toChkszSize(): String = when (this) {
     AudioQualityTier.HiResolution -> "hires"
     AudioQualityTier.Immersive, AudioQualityTier.Master -> "master"
 }
+
+/** 日志用：去掉 apikey，避免个人密钥进入日志。 */
+internal fun redactedChkszParams(params: Map<String, String>): String =
+    params.entries
+        .filterNot { it.key.equals("apikey", ignoreCase = true) }
+        .joinToString(",") { "${it.key}=${it.value}" }
 
 /**
  * CHKSZ 429（限流）短期冷却：命中后的一段时间内不再发起请求，
