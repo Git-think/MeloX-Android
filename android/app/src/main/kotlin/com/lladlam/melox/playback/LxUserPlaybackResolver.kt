@@ -64,7 +64,10 @@ class LxUserPlaybackResolver(
             else -> return null
         }
         val song = standardMusicInfo(track, sourceCode, AudioQualityTier.Standard.toLxQuality())
-        for (record in LxUserSourceStore.list(appContext)) {
+        // 未安装任何 LX 用户源时直接跳过：不初始化运行时，也不做任何请求。
+        val sources = LxUserSourceStore.list(appContext)
+        if (sources.isEmpty()) return null
+        for (record in sources) {
             val script = LxUserSourceStore.script(appContext, record.id) ?: continue
             val result = runCatching {
                 val runtime = LxUserRuntime.session(record.id, script)
@@ -128,6 +131,11 @@ class LxUserPlaybackResolver(
         val title = track.title
         val artist = track.artistText
         if (title.isBlank() || artist.isBlank()) return null
+        // 未安装任何 LX 用户源时整档短路：不打「LX resolve start」日志、
+        // 不初始化运行时、也不做任何请求（非网易云曲目原本还会先发一次
+        // 「匹配网易云」的搜索请求，同样没有意义）。
+        val lxSources = LxUserSourceStore.list(appContext)
+        if (lxSources.isEmpty()) return null
         val resourceId = track.id.value
         val lxQuality = quality.toLxQuality()
         val song = standardMusicInfo(track, sourceCode, lxQuality)
@@ -148,7 +156,7 @@ class LxUserPlaybackResolver(
             "quality" to lxQuality,
             "musicInfo" to song,
         )
-        for (record in LxUserSourceStore.list(appContext)) {
+        for (record in lxSources) {
             val script = LxUserSourceStore.script(appContext, record.id) ?: continue
             var phase = "load"
                     runCatching {
@@ -198,7 +206,7 @@ class LxUserPlaybackResolver(
         if (track.id.source != MusicSource.Netease) {
             resolveViaNeteaseMatch(track, quality)?.let { return it }
         }
-        Log.i(TAG, "LX unresolved source=${track.id.source.storageValue} scripts=${LxUserSourceStore.list(appContext).size}")
+        Log.i(TAG, "LX unresolved source=${track.id.source.storageValue} scripts=${lxSources.size}")
         return null
     }
 
