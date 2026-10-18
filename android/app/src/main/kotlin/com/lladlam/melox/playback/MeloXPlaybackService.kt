@@ -795,11 +795,10 @@ class MeloXPlaybackService : MediaSessionService() {
         if (smartQueueGeneration != snapshot.generation) {
             smartQueueJob?.cancel()
             smartQueueGeneration = snapshot.generation
-            // 限额：只分析「当前这首 + 后面最靠前的 N 首」候选。analyzeSmartQueueItem 每首都要
-            // 把整曲按标准音质 materialize 落盘再算 BPM——不限额的话，播一个几百首的歌单等于把
-            // 整个歌单再下载分析一遍，且候选里还混着 startIndex 之前的历史条目（永远不会轮到）。
-            // 没分析的条目留在时间线里按原顺序播（bestAnalyzedMatch 只认 analyses 里的条目），
-            // 表现是 DJ 衔接在 N 首之后退化为原顺序，队列面板照常是满列表。
+            // 分析范围（池）：只纳入「当前这首 + 后面最靠前的 N 首」，历史条目永远不会轮到
+            // 播放、不纳入。真正的下载/分析按滚动窗口进行（见 ensureSmartQueueAnalysis）——
+            // 不在开播时一次性全量拉取：换一个歌单就是几十次整曲请求，既慢又容易触发上游
+            // 风控/限流。没分析的条目留在时间线里按原顺序播（bestAnalyzedMatch 只认 analyses）。
             val limit = currentAutoMixSettings().smartQueueAnalysisLimit
             val targets = if (limit < 0) snapshot.futureItems else snapshot.futureItems.take(limit)
             val analysisTargets = targets.mapTo(mutableSetOf()) { it.mediaId }
@@ -807,51 +806,62 @@ class MeloXPlaybackService : MediaSessionService() {
             MeloXSmartQueueBuilder.setAnalysisTargets(snapshot.generation, analysisTargets)
             Log.i(
                 TAG,
-                "Smart Queue analysis limited: ${analysisTargets.size} track(s) analyzed " +
+                "Smart Queue analysis pool: ${analysisTargets.size} track(s) " +
                     "of ${snapshot.items.size} remaining candidates (limit=$limit)",
             )
-            smartQueueJob = serviceScope.launch(Dispatchers.IO) {
-                val limiter = Semaphore(SMART_QUEUE_ANALYSIS_CONCURRENCY)
-                coroutineScope {
-                    (listOf(currentItem) + targets)
-                        .distinctBy(MediaItem::mediaId)
-                        .forEachIndexed { index, item ->
-                            launch {
-                                limiter.withPermit {
-                                    runCatching { analyzeSmartQueueItem(item) }
-                                        .onSuccess { analysis ->
-                                            MeloXSmartQueueBuilder.recordAnalysis(
-                                                snapshot.generation,
-                                                item.mediaId,
-                                                analysis,
-                                            )
-                                            val role = if (index == 0) "source" else "candidate"
-                                            Log.i(
-                                                TAG,
-                                                "Smart Queue $role ready: ${item.mediaId}, " +
-                                                    "bpm=${"%.1f".format(analysis.bpm)}, " +
-                                                    "confidence=${"%.3f".format(analysis.confidence)}",
-                                            )
-                                            withContext(Dispatchers.Main.immediate) {
-                                                commitSmartQueueChain(snapshot.generation, sourceId)
-                                            }
-                                        }
-                                        .onFailure {
-                                            if (it is kotlinx.coroutines.CancellationException) throw it
-                                            MeloXSmartQueueBuilder.recordFailure(snapshot.generation, item.mediaId)
-                                            Log.w(TAG, "Smart Queue analysis failed: ${item.mediaId}", it)
-                                        }
+        }
+        ensureSmartQueueAnalysis(active, snapshot.generation, sourceId)
+        smartQueueSourceId = sourceId
+        commitSmartQueueChain(snapshot.generation, sourceId)
+    }
+
+    /**
+     * 滚动预分析：保证播放位置往后 [SMART_QUEUE_ANALYSIS_WINDOW] 首以内、尚未分析过的候选
+     * 得到分析，随播放推进逐首补齐。已分析过的曲目命中持久缓存、不会重复下载，因此
+     * 换歌单/开播只花窗口内几次请求，而不是按「分析上限」一次性全量请求。
+     */
+    private fun ensureSmartQueueAnalysis(active: ExoPlayer, generation: Long, sourceId: String) {
+        if (smartQueueJob?.isActive == true) return
+        val current = active.currentMediaItemIndex
+        if (current !in 0 until active.mediaItemCount) return
+        val end = minOf(current + SMART_QUEUE_ANALYSIS_WINDOW, active.mediaItemCount - 1)
+        val window = (current..end)
+            .map(active::getMediaItemAt)
+            .distinctBy(MediaItem::mediaId)
+            .filter { MeloXSmartQueueBuilder.needsAnalysis(generation, it.mediaId) }
+        if (window.isEmpty()) return
+        smartQueueJob = serviceScope.launch(Dispatchers.IO) {
+            val limiter = Semaphore(SMART_QUEUE_ANALYSIS_CONCURRENCY)
+            coroutineScope {
+                window.forEach { item ->
+                    launch {
+                        limiter.withPermit {
+                            runCatching { analyzeSmartQueueItem(item) }
+                                .onSuccess { analysis ->
+                                    MeloXSmartQueueBuilder.recordAnalysis(generation, item.mediaId, analysis)
+                                    Log.i(
+                                        TAG,
+                                        "Smart Queue analysis ready: ${item.mediaId}, " +
+                                            "bpm=${"%.1f".format(analysis.bpm)}, " +
+                                            "confidence=${"%.3f".format(analysis.confidence)}",
+                                    )
+                                    withContext(Dispatchers.Main.immediate) {
+                                        commitSmartQueueChain(generation, sourceId)
+                                    }
+                                }
+                                .onFailure {
+                                    if (it is kotlinx.coroutines.CancellationException) throw it
+                                    MeloXSmartQueueBuilder.recordFailure(generation, item.mediaId)
+                                    Log.w(TAG, "Smart Queue analysis failed: ${item.mediaId}", it)
                                 }
                         }
                     }
                 }
-                withContext(Dispatchers.Main.immediate) {
-                    commitSmartQueueChain(snapshot.generation, sourceId)
-                }
+            }
+            withContext(Dispatchers.Main.immediate) {
+                commitSmartQueueChain(generation, sourceId)
             }
         }
-        smartQueueSourceId = sourceId
-        commitSmartQueueChain(snapshot.generation, sourceId)
     }
 
     private fun commitSmartQueueChain(expectedGeneration: Long, initialSourceId: String) {
@@ -2117,6 +2127,9 @@ class MeloXPlaybackService : MediaSessionService() {
         const val AUTOMIX_ENVELOPE_INTERVAL_MS = 20L
         const val AUTOMIX_FAILURE_COOLDOWN_MS = 30_000L
         const val SMART_QUEUE_ANALYSIS_CONCURRENCY = 2
+
+        /** 滚动预分析窗口：只保证播放位置往后这么多首以内的候选有分析结果。 */
+        const val SMART_QUEUE_ANALYSIS_WINDOW = 6
         const val ANALYSIS_FALLBACK_GUARD_MS = 1_200L
         const val ANALYSIS_WINDOW_MS = 30_000L
         const val ACTIVE_MONITOR_INTERVAL_MS = 100L
