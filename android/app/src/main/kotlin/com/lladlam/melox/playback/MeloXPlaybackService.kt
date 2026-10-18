@@ -1770,9 +1770,15 @@ class MeloXPlaybackService : MediaSessionService() {
     private fun skipForwardFromUnavailable(active: ExoPlayer): Boolean {
         // 单曲循环：Media3 眼里「下一首」就是自己 ⇒ 跳过去还是这首，只会无限打转。
         if (active.repeatMode == Player.REPEAT_MODE_ONE) return false
-        // 整队都无音源 ⇒ 别再跳了，否则 error → skip → error 会一直转下去。
-        // 连续跳过上限 = 队列长度（跳完一圈还没播起来，就说明确实一首都播不了）。
-        if (unavailableSkipStreak >= active.mediaItemCount.coerceAtLeast(1)) {
+        // 连续多首无音源就停下：每跳过一首都会对下一首重跑一整轮解析
+        // （第三方 + 官方）。早前把上限设成「队列长度」，长歌单遇到大面积
+        // 失败（例如接口限流）时会一路扫完整个歌单、打出几十上百次请求——
+        // 既放大故障又把限流续得更久。现在只保留少量自动跳过余量。
+        val skipLimit = minOf(
+            MAX_UNAVAILABLE_SKIP_STREAK,
+            active.mediaItemCount.coerceAtLeast(1),
+        )
+        if (unavailableSkipStreak >= skipLimit) {
             Log.w(TAG, "Skipped $unavailableSkipStreak unavailable items in a row; stop to avoid a loop")
             unavailableSkipStreak = 0
             return false
@@ -2132,6 +2138,8 @@ class MeloXPlaybackService : MediaSessionService() {
         const val ACTION_CUSTOM_VIVO_FAVORITE = "com.vivo.media.action.FAVORITE"
         const val AUTOPLAY_PRELOAD_MS = 60_000L
         const val AUTOPLAY_RETRY_MS = 15_000L
+        /** 连续跳过「无音源」曲目的上限：超过即停止自动跳过，避免扫整张歌单。 */
+        const val MAX_UNAVAILABLE_SKIP_STREAK = 5
         const val PREFETCH_TRACK_COUNT = 3
         const val PLAYBACK_MAINTENANCE_INTERVAL_MS = 1_000L
         const val QUEUE_POSITION_PERSIST_INTERVAL_MS = 2_000L
