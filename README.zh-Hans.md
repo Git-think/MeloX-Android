@@ -46,7 +46,7 @@
 
 ## 项目说明
 
-弥乐 Android 版基于 [lladlam/MeloX](https://github.com/lladlam/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。
+弥乐 Android 版基于 [MeloX](https://github.com/youshen2/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。iOS ／ macOS 版 MeloX 由 [youshen2](https://github.com/youshen2) 制作，并非 Android 版维护者开发。
 
 项目目标不是使用 WebView 套壳，而是尽可能使用 Android 原生能力重新实现弥乐：
 
@@ -265,7 +265,7 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 
 ### 上游项目
 
-- [lladlam/MeloX](https://github.com/lladlam/MeloX) — 本项目的上游弥乐，实现、界面、交互与网易云音乐业务逻辑的主要迁移来源；主体采用 GPLv3。
+- [youshen2/MeloX](https://github.com/youshen2/MeloX) — 由 [youshen2](https://github.com/youshen2) 制作的 iOS ／ macOS 原版弥乐，实现、界面、交互与网易云音乐业务逻辑的主要迁移来源；主体采用 GPLv3。
 
 ### Android 直接依赖
 
