@@ -17,6 +17,13 @@
   使用 Kotlin + Jetpack Compose 构建的弥乐原生 Android 迁移版
 </p>
 
+## 桌面版
+
+**Windows** 与 **Linux** 版本已处于最终验证阶段。想使用 Windows 版本的朋友，欢迎 Star 这两个项目：
+
+- [MeloX-Windows](https://github.com/lladlam/MeloX-Windows)
+- [MeloX-Linux](https://github.com/lladlam/MeloX-Linux)
+
 > [!IMPORTANT]
 > **弥乐仍处于开发阶段。** 已完成当前 Android 平台范围内的核心功能迁移，并持续以弥乐主线作为行为基准；第三方接口、OEM 协议和不同系统版本仍可能带来兼容性变化。
 

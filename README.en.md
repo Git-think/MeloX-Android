@@ -17,6 +17,13 @@
   Native Android port of MeloX, built with Kotlin and Jetpack Compose
 </p>
 
+## Desktop editions
+
+The **Windows** and **Linux** editions are in their final verification stage. If you would like to use the Windows edition, please Star both projects:
+
+- [MeloX-Windows](https://github.com/lladlam/MeloX-Windows)
+- [MeloX-Linux](https://github.com/lladlam/MeloX-Linux)
+
 > [!IMPORTANT]
 > **MeloX Android is still in development.** Core features for the current Android scope have been migrated and continue to follow the MeloX mainline. Third-party APIs, OEM protocols, and OS versions can still change compatibility.
 
