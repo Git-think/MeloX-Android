@@ -17,6 +17,13 @@
   使用 Kotlin + Jetpack Compose 构建的弥乐原生 Android 迁移版
 </p>
 
+## 桌面版
+
+**Windows** 与 **Linux** 版本已处于最终验证阶段。想使用 Windows 版本的朋友，欢迎 Star 这两个项目：
+
+- [MeloX-Windows](https://github.com/lladlam/MeloX-Windows)
+- [MeloX-Linux](https://github.com/lladlam/MeloX-Linux)
+
 > [!IMPORTANT]
 > **弥乐仍处于开发阶段。** 已完成当前 Android 平台范围内的核心功能迁移，并持续以弥乐主线作为行为基准；第三方接口、OEM 协议和不同系统版本仍可能带来兼容性变化。
 
@@ -39,7 +46,7 @@
 
 ## 项目说明
 
-弥乐 Android 版基于 [lladlam/MeloX](https://github.com/lladlam/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。
+弥乐 Android 版基于 [MeloX](https://github.com/youshen2/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。iOS ／ macOS 版 MeloX 由 [youshen2](https://github.com/youshen2) 制作，并非 Android 版维护者开发。
 
 本仓库是 [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android) 的 fork：本仓库的 Release 从这里的代码构建，并使用 fork 自己的签名密钥。
 
@@ -260,7 +267,7 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 
 ### 上游项目
 
-- [lladlam/MeloX](https://github.com/lladlam/MeloX) — 本项目的上游弥乐，实现、界面、交互与网易云音乐业务逻辑的主要迁移来源；主体采用 GPLv3。
+- [youshen2/MeloX](https://github.com/youshen2/MeloX) — 由 [youshen2](https://github.com/youshen2) 制作的 iOS ／ macOS 原版弥乐，实现、界面、交互与网易云音乐业务逻辑的主要迁移来源；主体采用 GPLv3。
 
 ### Android 直接依赖
 

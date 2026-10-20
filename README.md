@@ -17,6 +17,13 @@
   Native Android port of MeloX, built with Kotlin and Jetpack Compose
 </p>
 
+## Desktop editions
+
+The **Windows** and **Linux** editions are in their final verification stage. If you would like to use the Windows edition, please Star both projects:
+
+- [MeloX-Windows](https://github.com/lladlam/MeloX-Windows)
+- [MeloX-Linux](https://github.com/lladlam/MeloX-Linux)
+
 > [!IMPORTANT]
 > **MeloX Android is still in development.** Core features for the current Android scope have been migrated and continue to follow the MeloX mainline. Third-party APIs, OEM protocols, and OS versions can still change compatibility.
 
@@ -38,7 +45,7 @@
 
 ## About
 
-MeloX Android is a native Android port of the design, interaction, and business logic in [lladlam/MeloX](https://github.com/lladlam/MeloX).
+MeloX Android is a native Android port of the design, interaction, and business logic in [MeloX](https://github.com/youshen2/MeloX), the iOS / macOS client created by [youshen2](https://github.com/youshen2). The iOS version is not made by the Android maintainer.
 
 This repository is the Git-think fork of [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android): releases here are built from this fork's code and signed with this fork's key.
 
@@ -259,7 +266,7 @@ MeloX Android comes from the MeloX Android migration and also uses or references
 
 ### Upstream
 
-- [lladlam/MeloX](https://github.com/lladlam/MeloX) — upstream MeloX and the main source of implementation, interface, interaction, and NetEase logic. Mostly GPLv3.
+- [youshen2/MeloX](https://github.com/youshen2/MeloX) — the original iOS / macOS MeloX, created by [youshen2](https://github.com/youshen2), and the main source of implementation, interface, interaction, and NetEase logic. Mostly GPLv3.
 
 ### Direct Android dependencies
 
