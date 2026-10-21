@@ -96,7 +96,8 @@ Root is not required. Platform extras use standard Android or OEM APIs and degra
 - Artwork and dynamic color background;
 - AutoMix dual-player preload, analysis, transition planning, tempo matching, fades, and EQ envelope;
 - 10-band equalizer from 31 Hz to 16 kHz, presets, system or player volume, and a sleep timer;
-- Shared-element player transitions, expand and collapse, and landscape player.
+- Shared-element player transitions, expand and collapse, and landscape player;
+- Tap the now-playing title for a glass menu to open the artist, album, or current queue.
 
 ### Quality
 

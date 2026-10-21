@@ -100,6 +100,11 @@
     <string name="player_remove_song_failed">Couldn\'t remove the song</string>
     <string name="player_go_album">Go to album: %1$s</string>
     <string name="player_go_artist">Go to artist: %1$s</string>
+    <string name="player_go_artist_short">Go to artist</string>
+    <string name="player_go_album_short">Go to album</string>
+    <string name="player_go_playlist_short">Go to playlist</string>
+    <string name="player_queue_count">Queue · %1$d songs</string>
+    <string name="player_title_menu_failed">Couldn\'t load song details</string>
     <string name="song_detail_title">Song details</string>
     <string name="song_detail_play">Play</string>
     <string name="song_detail_like">Favorite</string>

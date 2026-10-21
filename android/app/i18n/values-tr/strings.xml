@@ -108,6 +108,11 @@
     <string name="player_remove_song_failed">Şarkı kaldırılamadı</string>
     <string name="player_go_album">Albüme git: %1$s</string>
     <string name="player_go_artist">Sanatçıya git: %1$s</string>
+    <string name="player_go_artist_short">Sanatçıya git</string>
+    <string name="player_go_album_short">Albüme git</string>
+    <string name="player_go_playlist_short">Çalma listesine git</string>
+    <string name="player_queue_count">Kuyruk · %1$d şarkı</string>
+    <string name="player_title_menu_failed">Şarkı bilgileri yüklenemedi</string>
     <string name="player_sleep_minutes">%1$d dakika sonra</string>
     <string name="player_sleep_remaining">Yaklaşık %1$d dakika kaldı</string>
     <string name="player_sleep_end_at">Yaklaşık %1$s civarında durur</string>

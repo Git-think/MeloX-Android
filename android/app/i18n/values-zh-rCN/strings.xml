@@ -100,6 +100,11 @@
     <string name="player_remove_song_failed">移除歌曲失败</string>
     <string name="player_go_album">前往专辑：%1$s</string>
     <string name="player_go_artist">前往艺人：%1$s</string>
+    <string name="player_go_artist_short">前往艺人</string>
+    <string name="player_go_album_short">前往专辑</string>
+    <string name="player_go_playlist_short">前往播放列表</string>
+    <string name="player_queue_count">播放队列 · %1$d 首</string>
+    <string name="player_title_menu_failed">歌曲信息加载失败</string>
     <string name="song_detail_title">歌曲详情</string>
     <string name="song_detail_play">播放</string>
     <string name="song_detail_like">收藏</string>

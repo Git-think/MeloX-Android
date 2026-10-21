@@ -100,6 +100,11 @@
     <string name="player_remove_song_failed">曲を削除できませんでした</string>
     <string name="player_go_album">アルバムへ: %1$s</string>
     <string name="player_go_artist">アーティストへ: %1$s</string>
+    <string name="player_go_artist_short">アーティストへ</string>
+    <string name="player_go_album_short">アルバムへ</string>
+    <string name="player_go_playlist_short">プレイリストへ</string>
+    <string name="player_queue_count">再生キュー · %1$d 曲</string>
+    <string name="player_title_menu_failed">曲情報を読み込めませんでした</string>
     <string name="song_detail_title">曲の詳細</string>
     <string name="song_detail_play">再生</string>
     <string name="song_detail_like">お気に入り</string>
