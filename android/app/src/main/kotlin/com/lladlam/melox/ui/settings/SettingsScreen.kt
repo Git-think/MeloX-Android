@@ -10,7 +10,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.StatFs
 import android.provider.Settings as AndroidSettings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.clickable
@@ -68,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -170,6 +173,7 @@ import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigSource
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigConsent
 import com.lladlam.melox.ui.legal.MeloXCloudControlConsentDialog
+import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
@@ -1454,6 +1458,32 @@ private fun AnalysisCacheSettings(context: android.content.Context) {
 
 @Composable
 private fun PlayerAppearanceSettings(context: android.content.Context) {
+    val scope = rememberCoroutineScope()
+    val pickCustomBackground = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val imported = withContext(Dispatchers.IO) {
+                MeloXCustomBackgroundStore.import(context, uri, MeloXSettingsRuntime.customBackgroundPath)
+            }
+            if (imported == null) {
+                Toast.makeText(context, R.string.settings_custom_background_failed, Toast.LENGTH_SHORT).show()
+            } else {
+                MeloXSettingsPreferences.setString(context, "player_custom_background_path", imported)
+                MeloXSettingsPreferences.setString(
+                    context,
+                    "player_background_mode",
+                    MeloXPlayerBackgroundMode.CustomImage.name,
+                )
+            }
+        }
+    }
+    val pickCustomBackgroundImage: () -> Unit = {
+        pickCustomBackground.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+        )
+    }
     LyricsStringChoiceSetting(
         context,
         stringResource(R.string.settings_player_shell),
@@ -1483,13 +1513,71 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
                 MeloXPlayerBackgroundMode.FlowingLight to stringResource(R.string.settings_bg_flowing_light),
                 MeloXPlayerBackgroundMode.AppleLyrics to stringResource(R.string.settings_bg_apple_lyrics),
                 MeloXPlayerBackgroundMode.BlurredArtwork to stringResource(R.string.settings_bg_blurred_artwork),
+                MeloXPlayerBackgroundMode.CustomImage to stringResource(R.string.settings_bg_custom_image),
             ),
             onSelected = {
                 MeloXSettingsPreferences.setString(context, "player_background_mode", it.name)
                 MeloXSettingsRuntime.flowingBackdropEnabled = it != MeloXPlayerBackgroundMode.BlurredArtwork
+                if (it == MeloXPlayerBackgroundMode.CustomImage &&
+                    MeloXSettingsRuntime.customBackgroundPath == null
+                ) {
+                    pickCustomBackgroundImage()
+                }
             },
             grouped = true,
         )
+        if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage) {
+            val customBackgroundPath = MeloXSettingsRuntime.customBackgroundPath
+            MeloXIosListRow(
+                title = stringResource(
+                    if (customBackgroundPath == null) {
+                        R.string.settings_custom_background_pick
+                    } else {
+                        R.string.settings_custom_background_change
+                    },
+                ),
+                subtitle = stringResource(R.string.settings_custom_background_note),
+                leading = {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .08f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (customBackgroundPath == null) {
+                            MeloXSymbolIcon(
+                                MeloXSymbol.Plus,
+                                Modifier.size(18.dp),
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = .55f),
+                            )
+                        } else {
+                            AsyncImage(
+                                model = File(customBackgroundPath),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                },
+                onClick = pickCustomBackgroundImage,
+            )
+            if (customBackgroundPath != null) {
+                MeloXIosListRow(
+                    title = stringResource(R.string.settings_custom_background_remove),
+                    onClick = {
+                        MeloXCustomBackgroundStore.delete(customBackgroundPath)
+                        MeloXSettingsPreferences.setString(context, "player_custom_background_path", "")
+                        MeloXSettingsPreferences.setString(
+                            context,
+                            "player_background_mode",
+                            MeloXPlayerBackgroundMode.BlurredArtwork.name,
+                        )
+                    },
+                )
+            }
+        }
         // 流光背景专属调参：只在「取色流动光影」模式下出现（上游 0.6.2 d9b0714，
         // 标签按本地惯例写死中文，不走 stringResource）。
         if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.FlowingLight) {

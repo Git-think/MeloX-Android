@@ -751,6 +751,11 @@ fun MeloXIOSNowPlayingSharedHost(
                             artworkUrl = state.artworkUrl,
                             isPlaying = expansionProgress > 0.72f,
                         )
+                    } else if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage) {
+                        MeloXCustomImageBackdrop(
+                            path = MeloXSettingsRuntime.customBackgroundPath,
+                            artworkUrl = state.artworkUrl,
+                        )
                     } else {
                         MeloXBlurredArtworkBackdrop(state.artworkUrl)
                     }

@@ -18,6 +18,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.lladlam.melox.core.lyrics.LyricLine
+import com.lladlam.melox.ui.settings.MeloXCustomBackgroundStore
 import com.lladlam.melox.ui.settings.MeloXPlayerBackgroundMode
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import java.io.File
@@ -66,6 +67,12 @@ internal suspend fun shareLyricImage(
         MeloXPlayerBackgroundMode.BlurredArtwork -> {
             canvas.drawColor(Color.rgb(28, 28, 30))
             cover?.let { source -> drawCenterCrop(canvas, source, RectF(0f, 0f, width.toFloat(), height.toFloat()), 145) }
+        }
+        MeloXPlayerBackgroundMode.CustomImage -> {
+            canvas.drawColor(Color.rgb(28, 28, 30))
+            MeloXCustomBackgroundStore.decodeSampled(MeloXSettingsRuntime.customBackgroundPath, width)?.let { source ->
+                drawCenterCrop(canvas, source, RectF(0f, 0f, width.toFloat(), height.toFloat()), 145)
+            }
         }
     }
     val overlay = Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 0f, height.toFloat(), Color.argb(25, 255, 255, 255), Color.argb(185, 0, 0, 0), android.graphics.Shader.TileMode.CLAMP) }
