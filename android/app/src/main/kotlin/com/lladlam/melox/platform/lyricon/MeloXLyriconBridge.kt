@@ -50,8 +50,19 @@ object MeloXLyriconBridge {
     @Synchronized
     fun start(context: Context) {
         if (started) return
-        started = true
+        // Lyricon is an optional external lyrics provider. On ROMs where its
+        // service/binding is unavailable, provider creation can throw during
+        // startup (issue #90). Never let optional external integration crash
+        // the whole app; the built-in lyric panels remain fully functional.
+        runCatching {
+            startInternal(context)
+            started = true
+        }.onFailure { error ->
+            android.util.Log.w("MeloXLyricon", "Lyricon unavailable; skipping bridge", error)
+        }
+    }
 
+    private fun startInternal(context: Context) {
         val appContext = context.applicationContext
         val lyriconProvider = LyriconFactory.createProvider(appContext).apply {
             autoSync = true
