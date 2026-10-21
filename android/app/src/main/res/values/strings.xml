@@ -1223,6 +1223,12 @@
     <string name="settings_bg_flowing_light">Flowing color light (original)</string>
     <string name="settings_bg_apple_lyrics">Apple three-layer lyrics background</string>
     <string name="settings_bg_blurred_artwork">Static blurred artwork</string>
+    <string name="settings_bg_custom_image">Custom image</string>
+    <string name="settings_custom_background_pick">Choose image</string>
+    <string name="settings_custom_background_change">Change image</string>
+    <string name="settings_custom_background_note">The picked image gets the same blur and dim treatment as the static blurred artwork, keeping the lyrics readable.</string>
+    <string name="settings_custom_background_remove">Remove custom image</string>
+    <string name="settings_custom_background_failed">Couldn\'t import this image</string>
     <string name="settings_flowing_backdrop">Flowing light background</string>
     <string name="settings_flowing_backdrop_note">When off, a blurred artwork background is used.</string>
     <string name="settings_flowing_speed">Flow speed</string>

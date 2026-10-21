@@ -114,6 +114,11 @@ fun MeloXIOSNowPlayingV2(
                 )
             } else if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.FlowingLight) {
                 MeloXFlowingLightBackdrop(artworkUrl = state.artworkUrl, isPlaying = state.isPlaying)
+            } else if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage) {
+                MeloXCustomImageBackdrop(
+                    path = MeloXSettingsRuntime.customBackgroundPath,
+                    artworkUrl = state.artworkUrl,
+                )
             } else {
                 MeloXBlurredArtworkBackdrop(state.artworkUrl)
             }

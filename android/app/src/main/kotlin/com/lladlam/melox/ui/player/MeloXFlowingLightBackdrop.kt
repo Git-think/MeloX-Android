@@ -46,13 +46,26 @@ internal fun MeloXBlurredArtworkBackdrop(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val appInForeground = MeloXAppVisibility.isForeground
     val artworkModel = remember(context, artworkUrl) {
         ImageRequest.Builder(context).data(artworkUrl).size(320, 320).crossfade(220).build()
     }
+    MeloXBlurredBackdrop(artworkModel, modifier)
+}
+
+/**
+ * Shared renderer for the blurred artwork and custom-image backdrops: the
+ * same 38dp blur, 18% overscan and Apple-style legibility scrims. Routing the
+ * custom image through this renderer keeps lyric contrast identical to the
+ * established mode instead of exposing a flatter, brighter background.
+ */
+@Composable
+internal fun MeloXBlurredBackdrop(
+    model: Any?,
+    modifier: Modifier = Modifier,
+) {
     androidx.compose.foundation.layout.Box(modifier.fillMaxSize()) {
         AsyncImage(
-            model = artworkModel,
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.18f; scaleY = 1.18f }.blur(38.dp),
