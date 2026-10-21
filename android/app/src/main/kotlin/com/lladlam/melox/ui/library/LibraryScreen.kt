@@ -201,8 +201,48 @@ private enum class MeloXLibraryPage(@androidx.annotation.StringRes val titleRes:
     Podcasts(R.string.library_page_podcasts),
     Cloud(R.string.library_page_cloud),
     History(R.string.library_page_history),
-    Downloads(R.string.library_page_downloads),
+    Downloads(R.string.library_page_downloads);
+
+    /** Mirrors iOS `LibraryView.searchable`: cloud has its own whole-drive search. */
+    val supportsLibrarySearch: Boolean
+        get() = this == Songs || this == Playlists || this == Albums ||
+            this == Artists || this == History
 }
+
+@Composable
+private fun MeloXLibrarySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .meloXLiquidButton(
+                shape = RoundedCornerShape(20.dp),
+                surfaceColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .055f),
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        if (query.isBlank()) {
+            Text(
+                stringResource(R.string.library_search_hint),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .4f),
+            )
+        }
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private fun librarySearchMatches(query: String, vararg fields: String?): Boolean =
+    query.isBlank() || fields.any { field ->
+        field?.contains(query, ignoreCase = true) == true
+    }
 
 /**
  * Presentation capability gate only. A page is present when the active source
@@ -273,6 +313,7 @@ fun LibraryScreen(
     }
     val onDetailSelected = rememberMeloXDetailSelection()
     var selectedPage by remember(source, forcedPageName) { mutableStateOf(initialLibraryPage) }
+    var librarySearchQuery by remember(source) { mutableStateOf("") }
     var selectedPlaylist by remember(source, session.cookie) { mutableStateOf<NeteasePlaylistSummary?>(null) }
     var savedAlbums by remember(source) { mutableStateOf<List<MusicAlbumSummary>>(emptyList()) }
     var followedArtists by remember(source) { mutableStateOf<List<MusicArtistSummary>>(emptyList()) }
@@ -522,6 +563,14 @@ fun LibraryScreen(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
 
+                    if (selectedPage.supportsLibrarySearch) {
+                        MeloXLibrarySearchField(
+                            query = librarySearchQuery,
+                            onQueryChange = { librarySearchQuery = it },
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 6.dp),
+                        )
+                    }
+
                     if (errorMessage != null && snapshot == null) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -551,13 +600,63 @@ fun LibraryScreen(
                         }
                     } else {
                         val data = snapshot ?: NeteaseLibrarySnapshot(emptyList(), emptyList(), emptyList())
+                        val libraryQuery = librarySearchQuery.trim()
+                        val filteredLikedSongs = remember(data.likedSongs, libraryQuery) {
+                            data.likedSongs.filter { song ->
+                                librarySearchMatches(
+                                    libraryQuery,
+                                    song.name,
+                                    song.artists,
+                                    song.album,
+                                )
+                            }
+                        }
+                        val filteredRecentSongs = remember(data.recentSongs, libraryQuery) {
+                            data.recentSongs.filter { song ->
+                                librarySearchMatches(
+                                    libraryQuery,
+                                    song.name,
+                                    song.artists,
+                                    song.album,
+                                )
+                            }
+                        }
+                        val filteredPlaylists = remember(data.playlists, libraryQuery) {
+                            data.playlists.filter { playlist ->
+                                librarySearchMatches(
+                                    libraryQuery,
+                                    playlist.name,
+                                    playlist.creatorName,
+                                    playlist.description,
+                                    playlist.providerPlaylist?.description,
+                                )
+                            }
+                        }
+                        val filteredSavedAlbums = remember(savedAlbums, libraryQuery) {
+                            savedAlbums.filter { album ->
+                                librarySearchMatches(
+                                    libraryQuery,
+                                    album.title,
+                                    album.artists.joinToString(" / ") { it.name },
+                                )
+                            }
+                        }
+                        val filteredFollowedArtists = remember(followedArtists, libraryQuery) {
+                            followedArtists.filter { artist ->
+                                librarySearchMatches(
+                                    libraryQuery,
+                                    artist.name,
+                                    artist.description,
+                                )
+                            }
+                        }
                         when (selectedPage) {
                             MeloXLibraryPage.Songs -> MeloXLibrarySongsPage(
-                                songs = data.likedSongs,
+                                songs = filteredLikedSongs,
                                 onPlay = { song ->
                                     PlaybackCommands.playQueue(
                                         context = context,
-                                        songs = data.likedSongs,
+                                        songs = filteredLikedSongs,
                                         selectedSongId = song.id,
                                         onFailure = { errorMessage = it.message ?: "播放失败" },
                                     )
@@ -565,7 +664,7 @@ fun LibraryScreen(
                                 onPlayAll = {
                                     PlaybackCommands.playAll(
                                         context = context,
-                                        songs = data.likedSongs,
+                                        songs = filteredLikedSongs,
                                         onFailure = { errorMessage = it.message ?: "播放失败" },
                                     )
                                 },
@@ -583,7 +682,7 @@ fun LibraryScreen(
                             )
 
                             MeloXLibraryPage.Playlists -> MeloXLibraryPlaylistsPage(
-                                playlists = data.playlists,
+                                playlists = filteredPlaylists,
                                 localRecommendations = localRecommendations,
                                 onLocalRecommendationsClick = {
                                     onDetailSelected()
@@ -644,17 +743,17 @@ fun LibraryScreen(
                             }
 
                             MeloXLibraryPage.History -> MeloXLibrarySongsPage(
-                                songs = data.recentSongs,
+                                songs = filteredRecentSongs,
                                 onPlay = { song ->
                                     PlaybackCommands.playQueue(
-                                        context = context, songs = data.recentSongs, selectedSongId = song.id,
+                                        context = context, songs = filteredRecentSongs, selectedSongId = song.id,
                                         onFailure = { errorMessage = it.message ?: "播放失败" },
                                     )
                                 },
                                 onPlayAll = {
                                     PlaybackCommands.playAll(
                                         context = context,
-                                        songs = data.recentSongs,
+                                        songs = filteredRecentSongs,
                                         onFailure = { errorMessage = it.message ?: "播放失败" },
                                     )
                                 },
@@ -663,7 +762,7 @@ fun LibraryScreen(
                             MeloXLibraryPage.Downloads -> MeloXLibraryDownloadsPage(downloadStore)
 
                             MeloXLibraryPage.Albums -> MeloXLibraryCoverListPage(
-                                rows = savedAlbums.map { album ->
+                                rows = filteredSavedAlbums.map { album ->
                                     MeloXLibraryCoverRow(
                                         key = album.id.value,
                                         title = album.title,
@@ -678,12 +777,12 @@ fun LibraryScreen(
                                     selectedPlaylist = null
                                     selectedArtist = null
                                     showLocalRecommendations = false
-                                    selectedAlbum = savedAlbums.getOrNull(index)
+                                    selectedAlbum = filteredSavedAlbums.getOrNull(index)
                                 },
                             )
 
                             MeloXLibraryPage.Artists -> MeloXLibraryCoverListPage(
-                                rows = followedArtists.map { artist ->
+                                rows = filteredFollowedArtists.map { artist ->
                                     MeloXLibraryCoverRow(
                                         key = artist.id.value,
                                         title = artist.name,
@@ -698,7 +797,7 @@ fun LibraryScreen(
                                     selectedPlaylist = null
                                     selectedAlbum = null
                                     showLocalRecommendations = false
-                                    selectedArtist = followedArtists.getOrNull(index)
+                                    selectedArtist = filteredFollowedArtists.getOrNull(index)
                                 },
                             )
                         }

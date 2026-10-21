@@ -30,6 +30,13 @@
 -keep class org.mozilla.classfile.ClassFileWriter
 -dontwarn org.mozilla.javascript.tools.**
 
+# ONNX Runtime calls Java methods/fields by name from native code
+# (convertToTensorInfo -> GetMethodID). R8 must not rename or remove the
+# ai.onnxruntime classes or AutoSync crashes in release builds.
+-keep class ai.onnxruntime.** { *; }
+-keepclassmembers class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
 # Rhino JS engine references desktop APIs that are unavailable on Android.
 -dontwarn java.beans.BeanDescriptor
 -dontwarn java.beans.BeanInfo

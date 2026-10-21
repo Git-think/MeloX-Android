@@ -109,6 +109,8 @@
     <string name="player_go_album">Albüme git: %1$s</string>
     <string name="player_go_artist">Sanatçıya git: %1$s</string>
     <string name="player_sleep_minutes">%1$d dakika sonra</string>
+    <string name="player_sleep_remaining">Yaklaşık %1$d dakika kaldı</string>
+    <string name="player_sleep_end_at">Yaklaşık %1$s civarında durur</string>
     <string name="player_cancel_sleep">Zamanlayıcıyı iptal et</string>
     <string name="player_loading_playlists">Çalma listeleri yükleniyor</string>
     <string name="player_new_playlist">Yeni çalma listesi</string>

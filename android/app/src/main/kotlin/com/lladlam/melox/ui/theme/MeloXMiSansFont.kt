@@ -15,6 +15,10 @@ val MeloXLanTingProFontFamily = FontFamily(
     Font(R.font.mi_lan_pro, weight = FontWeight.Normal),
 )
 
+/**
+ * SF Pro is used **only** as the icon font. The regular UI keeps
+ * XiaomiLTPro / MiLanPro for every language, exactly as before.
+ */
 val LocalMeloXFontFamily = compositionLocalOf<FontFamily> { MeloXLanTingProFontFamily }
 
 @Composable

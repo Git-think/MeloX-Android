@@ -39,12 +39,41 @@ class BilibiliProvider(
     override suspend fun userPlaylists(page: Int, pageSize: Int): MusicPage<MusicPlaylistSummary> {
         val session = sessionProvider()
         if (!session.isLoggedIn) return MusicPage(emptyList(), page, pageSize, 0)
-        val list = cachedGet(
+        val created = cachedGet(
             "folders", "/x/v3/fav/folder/created/list-all",
             mapOf("up_mid" to session.userId, "type" to "2"), BilibiliApiCache.Folders,
-        )
-            .data().optJSONArray("list") ?: JSONArray()
-        val all = list.objects().mapNotNull { item ->
+        ).data().optJSONArray("list") ?: JSONArray()
+        // The library must also show folders collected from other users. The
+        // old implementation only read `created/list-all`, so an account whose
+        // favorites were all collected appeared as an empty playlist page.
+        val collected = buildList {
+            var page = 1
+            while (page <= 5) {
+                val response = runCatching {
+                    cachedGet(
+                        "folders-collected",
+                        "/x/v3/fav/folder/collected/list",
+                        mapOf(
+                            "up_mid" to session.userId,
+                            "pn" to page.toString(),
+                            "ps" to "40",
+                            "platform" to "web",
+                        ),
+                        BilibiliApiCache.Folders,
+                    )
+                }.getOrNull() ?: break
+                val pageItems = response.data().optJSONArray("list") ?: JSONArray()
+                if (pageItems.length() == 0) break
+                addAll(pageItems.objects())
+                if (pageItems.length() < 40) break
+                page++
+            }
+        }
+        val list = JSONArray().also { array ->
+            created.objects().forEach { array.put(it) }
+            collected.forEach { array.put(it) }
+        }
+        val all = list.objects().distinctBy { it.optLong("id") }.mapNotNull { item ->
             val id = item.optLong("id").takeIf { it > 0 } ?: return@mapNotNull null
             MusicPlaylistSummary(
                 MusicResourceId(source, id.toString()), item.optString("title"), secure(item.optString("cover")),

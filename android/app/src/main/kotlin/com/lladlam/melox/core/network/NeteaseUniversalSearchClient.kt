@@ -178,16 +178,11 @@ class NeteaseUniversalSearchClient(
         val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }?.takeIf(String::isNotBlank) ?: "music.mp3"
-        val extension = displayName.substringAfterLast('.', "mp3").lowercase().ifBlank { "mp3" }
-        val mimeType = resolver.getType(uri)?.takeIf { it.startsWith("audio/") }
-            ?: when (extension) {
-                "flac" -> "audio/flac"
-                "m4a", "mp4" -> "audio/mp4"
-                "aac" -> "audio/aac"
-                "wav" -> "audio/wav"
-                "ogg", "oga", "opus" -> "audio/ogg"
-                else -> "audio/mpeg"
-            }
+        val extension = displayName.substringAfterLast('.', "mp3")
+            .lowercase()
+            .filter(Char::isLetterOrDigit)
+            .take(8)
+            .ifBlank { "mp3" }
         val stem = displayName.substringBeforeLast('.').filterNot(Char::isWhitespace).replace('.', '_').ifBlank { "music" }
         val temporary = java.io.File.createTempFile("melox-cloud-", ".$extension", context.cacheDir)
         try {
@@ -207,21 +202,34 @@ class NeteaseUniversalSearchClient(
                 }
                 digest.digest().joinToString("") { "%02x".format(it) }
             }
+            // Match iOS CloudUploadFile.prepare: missing or malformed tags are
+            // not an upload failure, they simply fall back to file metadata.
             val metadata = MediaMetadataRetriever()
-            val (title, artist, album) = try {
-                metadata.setDataSource(context, uri)
+            val extractedMetadata = runCatching {
+                metadata.setDataSource(temporary.absolutePath)
                 Triple(
-                    metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.takeIf(String::isNotBlank) ?: displayName.substringBeforeLast('.'),
-                    metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.takeIf(String::isNotBlank) ?: "未知艺术家",
-                    metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.takeIf(String::isNotBlank) ?: "未知专辑",
+                    metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                    metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST),
+                    metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM),
                 )
-            } finally {
-                runCatching { metadata.release() }
-            }
+            }.getOrNull()
+            runCatching { metadata.release() }
             val cloudFilename = cleanCloudMetadata(displayName, "music.$extension", 255)
-            val cloudTitle = cleanCloudMetadata(title, stem, 200)
-            val cloudArtist = cleanCloudMetadata(artist, "未知艺术家", 200)
-            val cloudAlbum = cleanCloudMetadata(album, "未知专辑", 200)
+            val cloudTitle = cleanCloudMetadata(
+                extractedMetadata?.first?.takeIf(String::isNotBlank) ?: displayName.substringBeforeLast('.'),
+                stem,
+                200,
+            )
+            val cloudArtist = cleanCloudMetadata(
+                extractedMetadata?.second?.takeIf(String::isNotBlank) ?: "未知艺术家",
+                "未知艺术家",
+                200,
+            )
+            val cloudAlbum = cleanCloudMetadata(
+                extractedMetadata?.third?.takeIf(String::isNotBlank) ?: "未知专辑",
+                "未知专辑",
+                200,
+            )
             val bitrate = 999_000
             val check = try {
                 eapi(
@@ -247,7 +255,10 @@ class NeteaseUniversalSearchClient(
                 .takeIf(String::isNotBlank)
                 ?: throw IOException("云盘资源令牌缺少 resourceId")
             var transferResourceId: String? = null
-            if (check.optBoolean("needUpload", false)) {
+            val needUpload = check.optBoolean("needUpload", false) ||
+                check.optString("needUpload").equals("true", ignoreCase = true) ||
+                check.optInt("needUpload", 0) != 0
+            if (needUpload) {
                 val bucket = "jd-musicrep-privatecloud-audio-public"
                 // NOS transfer tokens are issued via WEAPI.  The EAPI token
                 // above is only for cloud metadata; using it for the upload
@@ -274,15 +285,16 @@ class NeteaseUniversalSearchClient(
                 val token = uploadToken.optString("token").takeIf(String::isNotBlank)
                     ?: throw IOException("NOS 上传令牌缺少 token")
                 transferResourceId = uploadToken.optString("resourceId").takeIf(String::isNotBlank)
-                // Match the upstream NOS uploader exactly: object keys are
-                // path-like and only their slash separators are escaped.
-                val encodedKey = objectKey.replace("/", "%2F")
+                // iOS NeteaseDirectClient uploadToNOS percent-encodes the whole
+                // path-like object key (slashes included) and always sends
+                // audio/mpeg, independent of the local container type.
+                val encodedKey = encodeCloudNosObjectKey(objectKey)
                 val uploadUrl = "${uploadHost.trimEnd('/')}/$bucket/$encodedKey?offset=0&complete=true&version=1.0"
-                val requestBody = temporary.asRequestBody(mimeType.toMediaType())
+                val requestBody = temporary.asRequestBody("audio/mpeg".toMediaType())
                 val uploadRequest = Request.Builder().url(uploadUrl)
                     .header("x-nos-token", token)
                     .header("Content-MD5", md5)
-                    .header("Content-Type", mimeType)
+                    .header("Content-Type", "audio/mpeg")
                     .header("Content-Length", temporary.length().toString())
                     .post(requestBody)
                     .build()
@@ -687,3 +699,11 @@ class NeteaseUniversalSearchClient(
     private fun aes(data: ByteArray, key: ByteArray): ByteArray = Cipher.getInstance("AES/ECB/PKCS5Padding").run { init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES")); doFinal(data) }
     private fun ByteArray.toHex() = joinToString("") { "%02X".format(it) }
 }
+
+/**
+ * NOS object keys are path-like. iOS percent-encodes the complete key (slashes
+ * included) before appending it to the upload host, so keep the same wire form
+ * instead of escaping only `/`.
+ */
+internal fun encodeCloudNosObjectKey(objectKey: String): String =
+    URLEncoder.encode(objectKey, Charsets.UTF_8.name()).replace("+", "%20")

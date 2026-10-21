@@ -10,7 +10,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.StatFs
 import android.provider.Settings as AndroidSettings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.clickable
@@ -68,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -170,6 +173,7 @@ import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigSource
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigConsent
 import com.lladlam.melox.ui.legal.MeloXCloudControlConsentDialog
+import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
@@ -1454,6 +1458,32 @@ private fun AnalysisCacheSettings(context: android.content.Context) {
 
 @Composable
 private fun PlayerAppearanceSettings(context: android.content.Context) {
+    val scope = rememberCoroutineScope()
+    val pickCustomBackground = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val imported = withContext(Dispatchers.IO) {
+                MeloXCustomBackgroundStore.import(context, uri, MeloXSettingsRuntime.customBackgroundPath)
+            }
+            if (imported == null) {
+                Toast.makeText(context, R.string.settings_custom_background_failed, Toast.LENGTH_SHORT).show()
+            } else {
+                MeloXSettingsPreferences.setString(context, "player_custom_background_path", imported)
+                MeloXSettingsPreferences.setString(
+                    context,
+                    "player_background_mode",
+                    MeloXPlayerBackgroundMode.CustomImage.name,
+                )
+            }
+        }
+    }
+    val pickCustomBackgroundImage: () -> Unit = {
+        pickCustomBackground.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+        )
+    }
     LyricsStringChoiceSetting(
         context,
         stringResource(R.string.settings_player_shell),
@@ -1483,13 +1513,71 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
                 MeloXPlayerBackgroundMode.FlowingLight to stringResource(R.string.settings_bg_flowing_light),
                 MeloXPlayerBackgroundMode.AppleLyrics to stringResource(R.string.settings_bg_apple_lyrics),
                 MeloXPlayerBackgroundMode.BlurredArtwork to stringResource(R.string.settings_bg_blurred_artwork),
+                MeloXPlayerBackgroundMode.CustomImage to stringResource(R.string.settings_bg_custom_image),
             ),
             onSelected = {
                 MeloXSettingsPreferences.setString(context, "player_background_mode", it.name)
                 MeloXSettingsRuntime.flowingBackdropEnabled = it != MeloXPlayerBackgroundMode.BlurredArtwork
+                if (it == MeloXPlayerBackgroundMode.CustomImage &&
+                    MeloXSettingsRuntime.customBackgroundPath == null
+                ) {
+                    pickCustomBackgroundImage()
+                }
             },
             grouped = true,
         )
+        if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage) {
+            val customBackgroundPath = MeloXSettingsRuntime.customBackgroundPath
+            MeloXIosListRow(
+                title = stringResource(
+                    if (customBackgroundPath == null) {
+                        R.string.settings_custom_background_pick
+                    } else {
+                        R.string.settings_custom_background_change
+                    },
+                ),
+                subtitle = stringResource(R.string.settings_custom_background_note),
+                leading = {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .08f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (customBackgroundPath == null) {
+                            MeloXSymbolIcon(
+                                MeloXSymbol.Plus,
+                                Modifier.size(18.dp),
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = .55f),
+                            )
+                        } else {
+                            AsyncImage(
+                                model = File(customBackgroundPath),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                },
+                onClick = pickCustomBackgroundImage,
+            )
+            if (customBackgroundPath != null) {
+                MeloXIosListRow(
+                    title = stringResource(R.string.settings_custom_background_remove),
+                    onClick = {
+                        MeloXCustomBackgroundStore.delete(customBackgroundPath)
+                        MeloXSettingsPreferences.setString(context, "player_custom_background_path", "")
+                        MeloXSettingsPreferences.setString(
+                            context,
+                            "player_background_mode",
+                            MeloXPlayerBackgroundMode.BlurredArtwork.name,
+                        )
+                    },
+                )
+            }
+        }
         // 流光背景专属调参：只在「取色流动光影」模式下出现（上游 0.6.2 d9b0714，
         // 标签按本地惯例写死中文，不走 stringResource）。
         if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.FlowingLight) {
@@ -2952,6 +3040,7 @@ private fun AboutSettings(context: android.content.Context) {
     var versionTapCount by remember { mutableIntStateOf(0) }
     var lastVersionTapAt by remember { mutableStateOf(0L) }
     var showCatEgg by remember { mutableStateOf(false) }
+    var showReleaseNotes by remember { mutableStateOf(false) }
     var downloadSource by remember { mutableStateOf(githubRouting.selectedSource()) }
     val exportLogsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -3007,6 +3096,36 @@ private fun AboutSettings(context: android.content.Context) {
             Text(hotText("about.maintainer", stringResource(R.string.settings_about_maintainer)), modifier = Modifier.padding(top=14.dp), fontWeight=FontWeight.SemiBold)
             Text(hotText("about.upstream", stringResource(R.string.settings_about_upstream)), modifier = Modifier.padding(top=5.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha=.58f))
             }
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    SettingsGlassGroup {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.settings_about_sponsors_title),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            listOf(
+                stringResource(R.string.settings_about_sponsor_26d40) to stringResource(R.string.settings_about_sponsor_amount_50),
+                stringResource(R.string.settings_about_sponsor_aec4c) to stringResource(R.string.settings_about_sponsor_amount_6_monthly),
+                stringResource(R.string.settings_about_sponsor_bai) to stringResource(R.string.settings_about_sponsor_amount_5),
+            ).forEach { (name, amount) ->
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f))
+                    Text(amount, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .52f), fontSize = 13.sp)
+                }
+            }
+            Text(
+                stringResource(R.string.settings_about_sponsors_note),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .46f),
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+            )
         }
     }
     if (showCatEgg) {
@@ -3208,6 +3327,10 @@ private fun AboutSettings(context: android.content.Context) {
         }
     }
     Spacer(Modifier.height(14.dp))
+    SettingsActionButton(stringResource(R.string.settings_about_release_notes)) {
+        showReleaseNotes = true
+    }
+    Spacer(Modifier.height(10.dp))
     SettingsActionButton(stringResource(R.string.settings_about_github)) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Git-think/MeloX-Android"))) }
     }
@@ -3273,6 +3396,37 @@ private fun AboutSettings(context: android.content.Context) {
                     exportingLogs = true
                     exportLogsLauncher.launch("MeloX-logs-${System.currentTimeMillis()}.txt")
                 }
+            }
+        }
+    }
+    if (showReleaseNotes) {
+        val notes = remember { MeloXReleaseNotesCatalog.current() }
+        MeloXGlassDialog(visible = true, onDismiss = { showReleaseNotes = false }) {
+            Text(stringResource(R.string.settings_release_notes_title), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.settings_release_notes_version, notes.version),
+                modifier = Modifier.padding(top = 6.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f),
+                fontSize = 13.sp,
+            )
+            Column(
+                Modifier
+                    .padding(top = 12.dp)
+                    .height(320.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                notes.entries.forEach { entry ->
+                    Text(
+                        "• $entry",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f),
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                    )
+                }
+            }
+            SettingsActionButton(stringResource(R.string.action_done), Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                showReleaseNotes = false
             }
         }
     }
