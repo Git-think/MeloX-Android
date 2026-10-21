@@ -12,7 +12,7 @@ enum class MeloXSwipeFullAction { PlayNext, AddToQueue }
 enum class MeloXLyricAnnotationDisplayMode { FocusedLine, AllLines }
 enum class MeloXLyricsStyle { AppleMusic, Eva, TextPV }
 enum class MeloXLyricsRenderingQuality { Low, Balanced, High }
-enum class MeloXPlayerBackgroundMode { FlowingLight, AppleLyrics, BlurredArtwork }
+enum class MeloXPlayerBackgroundMode { FlowingLight, AppleLyrics, BlurredArtwork, CustomImage }
 enum class MeloXPlayerShell { AppleMusic, Classic }
 enum class MeloXTextPVStyle {
     BlueBold, KineticSplit, BluePlane, CyberGrunge, Geometric, RainCity,
@@ -90,6 +90,9 @@ object MeloXSettingsRuntime {
     var flowingLightBrightness by mutableStateOf(1f)
         internal set
     var playerBackgroundMode by mutableStateOf(MeloXPlayerBackgroundMode.FlowingLight)
+        internal set
+    /** Absolute path of the imported image used by [MeloXPlayerBackgroundMode.CustomImage]. */
+    var customBackgroundPath by mutableStateOf<String?>(null)
         internal set
     var playerShell by mutableStateOf(MeloXPlayerShell.AppleMusic)
         internal set
@@ -457,6 +460,8 @@ object MeloXSettingsRuntime {
         flowingLightSpeed = MeloXSettingsPreferences.float(app, "player_flowing_speed", 1f).coerceIn(.25f, 2f)
         flowingLightSaturation = MeloXSettingsPreferences.float(app, "player_flowing_saturation", 1f).coerceIn(0f, 2f)
         flowingLightBrightness = MeloXSettingsPreferences.float(app, "player_flowing_brightness", 1f).coerceIn(.4f, 1.6f)
+        customBackgroundPath = MeloXSettingsPreferences.string(app, "player_custom_background_path", "")
+            .takeIf { it.isNotBlank() && java.io.File(it).isFile }
         playerShell = runCatching {
             MeloXPlayerShell.valueOf(MeloXSettingsPreferences.string(app, "player_shell", MeloXPlayerShell.AppleMusic.name))
         }.getOrDefault(MeloXPlayerShell.AppleMusic)
@@ -965,6 +970,8 @@ object MeloXSettingsPreferences {
                 MeloXSettingsRuntime.flowingBackdropEnabled =
                     MeloXSettingsRuntime.playerBackgroundMode != MeloXPlayerBackgroundMode.BlurredArtwork
             }
+            "player_custom_background_path" -> MeloXSettingsRuntime.customBackgroundPath =
+                value.takeIf { it.isNotBlank() }
             "player_shell" -> MeloXSettingsRuntime.playerShell = runCatching {
                 MeloXPlayerShell.valueOf(value)
             }.getOrDefault(MeloXPlayerShell.AppleMusic)

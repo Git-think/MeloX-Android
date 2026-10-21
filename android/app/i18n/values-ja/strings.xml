@@ -1223,6 +1223,12 @@
     <string name="settings_bg_flowing_light">流れる色の光（オリジナル）</string>
     <string name="settings_bg_apple_lyrics">Apple の 3 層歌詞背景</string>
     <string name="settings_bg_blurred_artwork">静止したぼかしアートワーク</string>
+    <string name="settings_bg_custom_image">カスタム画像</string>
+    <string name="settings_custom_background_pick">画像を選択</string>
+    <string name="settings_custom_background_change">画像を変更</string>
+    <string name="settings_custom_background_note">選択した画像には「静止したぼかしアートワーク」と同じぼかしと暗さを適用し、歌詞を読みやすく保ちます。</string>
+    <string name="settings_custom_background_remove">カスタム画像を削除</string>
+    <string name="settings_custom_background_failed">この画像を読み込めませんでした</string>
     <string name="settings_flowing_backdrop">流れる光の背景</string>
     <string name="settings_flowing_backdrop_note">オフにすると、ぼかしたアートワークを背景に使います。</string>
     <string name="settings_flowing_speed">流れる速さ</string>
