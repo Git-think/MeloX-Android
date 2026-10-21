@@ -354,13 +354,27 @@ internal fun MeloXProviderSongActionsOverlay(
                             }
 
                             ProviderSongActionPage.Sleep -> {
-                                listOf(15, 30, 45, 60).forEach { minutes ->
+                                listOf(15, 30, 45, 60, 90).forEach { minutes ->
                                     ProviderActionItem(stringResource(R.string.player_sleep_minutes, minutes), "◷") {
                                         state?.setSleepTimer(minutes)
                                         onDismiss()
                                     }
                                 }
                                 if (state != null && state.sleepTimerEndRealtimeMs > 0L) {
+                                    val remainingMinutes = ((state.sleepTimerEndRealtimeMs - System.currentTimeMillis()) / 60_000L)
+                                        .coerceAtLeast(1L).toInt()
+                                    ProviderActionItem(
+                                        stringResource(R.string.player_sleep_remaining, remainingMinutes),
+                                        "◷",
+                                    ) {}
+                                    ProviderActionItem(
+                                        stringResource(
+                                            R.string.player_sleep_end_at,
+                                            android.text.format.DateFormat.getTimeFormat(context)
+                                                .format(java.util.Date(state.sleepTimerEndRealtimeMs)),
+                                        ),
+                                        "◷",
+                                    ) {}
                                     ProviderActionItem(stringResource(R.string.player_cancel_sleep), "×") {
                                         state.cancelSleepTimer()
                                         onDismiss()

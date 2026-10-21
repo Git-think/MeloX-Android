@@ -44,6 +44,7 @@ import com.lladlam.melox.core.audio.MusicQuality
 import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.download.MeloXProviderDownloadStore
 import com.lladlam.melox.core.library.NeteaseLibraryClient
+import com.lladlam.melox.core.network.NeteaseMusicOperationsClient
 import com.lladlam.melox.core.model.SearchSong
 import com.lladlam.melox.core.network.MeloXNetworkAvailability
 import com.lladlam.melox.core.network.NeteaseSearchClient
@@ -323,6 +324,22 @@ class MeloXPlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             playerCommand: Int,
         ): Int {
+            // The in-app previous button and the notification/MediaSession
+            // previous button must obey the same "restart after 5 seconds"
+            // preference. Media3's default uses a 3-second threshold, which is
+            // why disabling the setting only worked inside the app.
+            if (playerCommand == Player.COMMAND_SEEK_TO_PREVIOUS) {
+                val player = session.player
+                val restartAfterFiveSeconds = MeloXSettingsRuntime.previousRestartsAfterFiveSeconds
+                if (restartAfterFiveSeconds && player.currentPosition >= 5_000L) {
+                    player.seekTo(0L)
+                } else if (player.hasPreviousMediaItem()) {
+                    player.seekToPreviousMediaItem()
+                } else {
+                    player.seekTo(0L)
+                }
+                return SessionResult.RESULT_SUCCESS
+            }
             return when (MeloXAutoMixTransportPolicy.action(
                 command = playerCommand,
                 hasPreparedMix = hasPreparedMix(),
@@ -2017,6 +2034,19 @@ class MeloXPlaybackService : MediaSessionService() {
                     .setDisplayName("收藏")
                     .setIconResId(android.R.drawable.ic_menu_gallery)
                     .build(),
+                // HyperOS 4 may only surface shuffle/repeat from the slot-based
+                // custom layout. These are standard player commands, so the
+                // session executes them without a custom handler.
+                CommandButton.Builder()
+                    .setPlayerCommand(Player.COMMAND_SET_SHUFFLE_MODE)
+                    .setDisplayName("随机播放")
+                    .setIconResId(android.R.drawable.ic_menu_sort_by_size)
+                    .build(),
+                CommandButton.Builder()
+                    .setPlayerCommand(Player.COMMAND_SET_REPEAT_MODE)
+                    .setDisplayName("循环模式")
+                    .setIconResId(android.R.drawable.ic_menu_rotate)
+                    .build(),
             )
             session.setCustomLayout(buttons)
             Log.i(TAG, "Published ${buttons.size} custom actions on MediaSession")
@@ -2043,7 +2073,35 @@ class MeloXPlaybackService : MediaSessionService() {
     private suspend fun handleSystemFavoriteToggle(outcome: (String) -> Unit = {}) {
         val active = player ?: return outcome("no player")
         val item = active.currentMediaItem ?: return outcome("no current item")
-        val identity = PlaybackTrackIdentity.fromMediaItem(item) ?: return outcome("unresolvable identity")
+        val identity = PlaybackTrackIdentity.fromMediaItem(item)
+        if (identity == null) {
+            // NetEase legacy MediaItems use the numeric song id as mediaId and
+            // have no provider identity. They are still the most common case,
+            // so the system favorite button must not silently do nothing.
+            val songId = item.mediaId.toLongOrNull()?.takeIf { it > 0L }
+                ?: return outcome("unresolvable identity")
+            val cookie = { NeteaseSessionStore.readCookie(this) }
+            val session = NeteaseSessionStore(this)
+            if (session.profile == null) session.refreshProfile()
+            val userId = session.profile?.userId
+            val currentlyFavorite = userId != null && runCatching {
+                NeteaseLibraryClient(cookieProvider = cookie)
+                    .likedSongIdsBlocking(userId)
+                    .contains(songId)
+            }.getOrDefault(false)
+            val targetFavorite = !currentlyFavorite
+            runCatching {
+                NeteaseMusicOperationsClient(cookieProvider = cookie)
+                    .setSongLiked(songId, targetFavorite)
+            }.onSuccess {
+                Log.i(TAG, "System favorite toggled for NetEase song $songId -> $targetFavorite")
+                outcome("favorited=$targetFavorite")
+            }.onFailure { error ->
+                Log.w(TAG, "System favorite toggle failed for NetEase song $songId", error)
+                outcome("failed: ${error.message}")
+            }
+            return
+        }
         val registry = ProviderPlaybackRuntime.registryOrNull() ?: return outcome("no provider registry")
         val provider = registry[identity.source]
         val favoriteCapability = provider as? FavoriteCapability ?: return outcome("provider has no FavoriteCapability: ${identity.source.displayName}")

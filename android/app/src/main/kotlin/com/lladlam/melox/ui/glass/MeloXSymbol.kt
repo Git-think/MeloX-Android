@@ -117,6 +117,13 @@ enum class MeloXSymbolVariant {
     Fill,
 }
 
+/**
+ * Full SF Pro contains the SF Symbols PUA glyphs, but four newer symbols used
+ * by MeloX are absent from this build. Keep the old subset as a tiny fallback
+ * for exactly those glyphs.
+ */
+private val MeloSfSubsetOnlyCodePoints = setOf(0x101411, 0x10163F, 0x10173E, 0x101EEF)
+
 private val MeloXSfSymbolCodePoints = mapOf(
     "house" to 0x10039E,
     "safari" to 0x1003AC,
@@ -695,13 +702,21 @@ internal object MeloSfTypefaceCache {
     private val lock = Any()
     private val cache = HashMap<Int, android.graphics.Typeface>()
 
-    fun obtain(context: android.content.Context, weight: Int): android.graphics.Typeface? {
-        synchronized(lock) { cache[weight]?.let { return it } }
-        // 在锁外加载（149KB 小字体，读取期间不阻塞其他 weight 的命中者）。
-        val font = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.sf_pro_subset)
-            ?: return null
+    fun obtain(
+        context: android.content.Context,
+        weight: Int,
+        subsetOnly: Boolean = false,
+    ): android.graphics.Typeface? {
+        val key = weight or if (subsetOnly) 0x10000 else 0
+        synchronized(lock) { cache[key]?.let { return it } }
+        // The full SF Pro file also contains the symbol PUA glyphs. Only the
+        // four newer symbols missing from that font use the old subset.
+        val font = androidx.core.content.res.ResourcesCompat.getFont(
+            context,
+            if (subsetOnly) R.font.sf_pro_subset else R.font.sf_pro_vf,
+        ) ?: return null
         val typeface = android.graphics.Typeface.create(font, weight)
-        synchronized(lock) { cache.putIfAbsent(weight, typeface) }
+        synchronized(lock) { cache.putIfAbsent(key, typeface) }
         return typeface
     }
 }
@@ -771,8 +786,9 @@ private fun SfGlyphIcon(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val typeface = androidx.compose.runtime.remember(context, weight) {
-        MeloSfTypefaceCache.obtain(context, weight.weight)
+    val subsetOnly = codePoint in MeloSfSubsetOnlyCodePoints
+    val typeface = androidx.compose.runtime.remember(context, weight, subsetOnly) {
+        MeloSfTypefaceCache.obtain(context, weight.weight, subsetOnly)
     }
     // 保持原实现的 fail-fast：字体加载失败在组合期抛，而不是拖到绘制期 NPE。
     val paintTypeface = typeface ?: error("SF Symbols font could not be loaded")

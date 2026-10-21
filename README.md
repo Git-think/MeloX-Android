@@ -80,7 +80,8 @@ Root is not required. Platform extras use standard Android or OEM APIs and degra
 - NetEase cloud drive read, search, upload, playback, and delete;
 - Multi-select download, per-download quality, offline lyrics, auto cache, and storage repair;
 - App-private offline copies, optional MediaStore export, and a local library by song, artist, album, and folder;
-- Play directly from the library or search results.
+- Play directly from the library or search results;
+- Library-wide search across songs, playlists, albums, artists, and recent playback.
 
 ### Player
 
@@ -135,7 +136,7 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Listen Together rooms, members, progress, and queue sync;
 - Contacts, conversations, text messages, and in-app sharing;
 - Microphone recording, NetEase audio fingerprinting, and continuous recognition;
-- First-run guide, clipboard link detection, page ordering, and feature switches;
+- First-run welcome and account pages, in-app release notes, sponsor acknowledgements, clipboard link detection, page ordering, and feature switches;
 - GitHub version check, update prompt, license, and settings reset.
 
 ### Third-party music sources
@@ -282,6 +283,8 @@ MeloX Android comes from the MeloX Android migration and also uses or references
 
 The Android app depends on the `backdrop` component from [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass). `MeloXBackdropComponents.kt` adapts the official `LiquidButton` and `LiquidBottomTabs` samples while keeping MeloX iOS sizes and layout.
 
+SF Pro / SF Symbols are Apple Inc. system fonts used only for the app's icon glyphs. Normal UI text stays on XiaomiLTPro / MiLanPro. They are not covered by GPLv3; see [SF-Pro-NOTICE.md](docs/SF-Pro-NOTICE.md).
+
 The glass effect is still experimental.
 
 ### API and UI references
@@ -297,8 +300,9 @@ Upstream MeloX also credits these projects. The Android port inherits parts of t
 - [jayfunc/BetterLyrics](https://github.com/jayfunc/BetterLyrics) — word-synced lyric rendering, glow, and motion;
 - [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — NetEase YRC parsing;
 - [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — NetEase API and player reference.
+- [DanteAlighieri13210914/pv-tool](https://github.com/DanteAlighieri13210914/pv-tool) — original Text PV templates and effects, ported under the PV Tool Non-Commercial License.
 
-If a later Android version migrates PV Tool, BeatNet, or other MeloX features, their separate licenses and attribution will be kept as required upstream.
+Text PV / PV Tool, BeatNet, and other MeloX features keep their separate licenses and attribution as required upstream.
 
 ## Contributing
 

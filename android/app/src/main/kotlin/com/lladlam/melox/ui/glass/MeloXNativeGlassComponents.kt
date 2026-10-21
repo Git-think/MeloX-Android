@@ -111,7 +111,9 @@ fun MeloXGlassButton(
         MeloXGlassButtonStyle.Bordered -> tint
         MeloXGlassButtonStyle.BorderedProminent -> MeloXSystemColors.Red
         MeloXGlassButtonStyle.Plain -> Color.Transparent
-        MeloXGlassButtonStyle.Destructive -> MeloXSystemColors.Red
+        // Do not paint a full-strength red tint over the destructive surface;
+        // the label is already red, which made "退出" disappear on the dialog.
+        MeloXGlassButtonStyle.Destructive -> Color.Transparent
     }
     val buttonSurface = when {
         surfaceColor != Color.Unspecified -> surfaceColor

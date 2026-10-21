@@ -2952,6 +2952,7 @@ private fun AboutSettings(context: android.content.Context) {
     var versionTapCount by remember { mutableIntStateOf(0) }
     var lastVersionTapAt by remember { mutableStateOf(0L) }
     var showCatEgg by remember { mutableStateOf(false) }
+    var showReleaseNotes by remember { mutableStateOf(false) }
     var downloadSource by remember { mutableStateOf(githubRouting.selectedSource()) }
     val exportLogsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -3007,6 +3008,36 @@ private fun AboutSettings(context: android.content.Context) {
             Text(hotText("about.maintainer", stringResource(R.string.settings_about_maintainer)), modifier = Modifier.padding(top=14.dp), fontWeight=FontWeight.SemiBold)
             Text(hotText("about.upstream", stringResource(R.string.settings_about_upstream)), modifier = Modifier.padding(top=5.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha=.58f))
             }
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    SettingsGlassGroup {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.settings_about_sponsors_title),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            listOf(
+                stringResource(R.string.settings_about_sponsor_26d40) to stringResource(R.string.settings_about_sponsor_amount_50),
+                stringResource(R.string.settings_about_sponsor_aec4c) to stringResource(R.string.settings_about_sponsor_amount_6_monthly),
+                stringResource(R.string.settings_about_sponsor_bai) to stringResource(R.string.settings_about_sponsor_amount_5),
+            ).forEach { (name, amount) ->
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f))
+                    Text(amount, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .52f), fontSize = 13.sp)
+                }
+            }
+            Text(
+                stringResource(R.string.settings_about_sponsors_note),
+                modifier = Modifier.padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .46f),
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+            )
         }
     }
     if (showCatEgg) {
@@ -3208,6 +3239,10 @@ private fun AboutSettings(context: android.content.Context) {
         }
     }
     Spacer(Modifier.height(14.dp))
+    SettingsActionButton(stringResource(R.string.settings_about_release_notes)) {
+        showReleaseNotes = true
+    }
+    Spacer(Modifier.height(10.dp))
     SettingsActionButton(stringResource(R.string.settings_about_github)) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/lladlam/MeloX-Android"))) }
     }
@@ -3273,6 +3308,37 @@ private fun AboutSettings(context: android.content.Context) {
                     exportingLogs = true
                     exportLogsLauncher.launch("MeloX-logs-${System.currentTimeMillis()}.txt")
                 }
+            }
+        }
+    }
+    if (showReleaseNotes) {
+        val notes = remember { MeloXReleaseNotesCatalog.current() }
+        MeloXGlassDialog(visible = true, onDismiss = { showReleaseNotes = false }) {
+            Text(stringResource(R.string.settings_release_notes_title), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.settings_release_notes_version, notes.version),
+                modifier = Modifier.padding(top = 6.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f),
+                fontSize = 13.sp,
+            )
+            Column(
+                Modifier
+                    .padding(top = 12.dp)
+                    .height(320.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                notes.entries.forEach { entry ->
+                    Text(
+                        "• $entry",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f),
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                    )
+                }
+            }
+            SettingsActionButton(stringResource(R.string.action_done), Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                showReleaseNotes = false
             }
         }
     }
