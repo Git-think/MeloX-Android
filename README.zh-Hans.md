@@ -81,7 +81,8 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - 网易云音乐云盘读取、搜索、上传、播放与删除；
 - 单曲/集合多选下载、逐次音质选择、离线歌词、自动缓存与存储修复；
 - 保留 app-private 离线副本，并可导出到 MediaStore；本地库可按歌曲、艺术家、专辑和文件夹浏览；
-- 从音乐库 / 搜索结果直接播放。
+- 从音乐库 / 搜索结果直接播放；
+- 音乐库全局搜索，覆盖歌曲、歌单、专辑、艺人与最近播放。
 
 ### 播放器
 
@@ -136,7 +137,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - 一起听房间创建、加入、成员、进度和队列同步；
 - 联系人、会话、文字私信与站内分享；
 - 麦克风录音、网易云音频指纹、分段与持续听歌识曲；
-- 首次启动引导、剪贴板链接识别、页面/首页排序与内容功能开关；
+- 首次启动欢迎与账号页、应用内更新日志、赞助者致谢、剪贴板链接识别、页面/首页排序与内容功能开关；
 - GitHub 版本检查、更新提示、项目许可与设置重置。
 
 ### 第三方音乐源
@@ -283,6 +284,8 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 
 Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) 的 `backdrop` 组件；`MeloXBackdropComponents.kt` 基于其官方 `LiquidButton` 与 `LiquidBottomTabs` 示例适配，在保留弥乐 iOS 尺寸和布局的前提下提供折射、模糊、按压高光与底栏选中透镜。
 
+SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；正文继续使用 XiaomiLTPro / MiLanPro，不属于 GPLv3 范围；授权说明见 [SF-Pro-NOTICE.md](docs/SF-Pro-NOTICE.md)。
+
 当前玻璃效果仍属于实验性实现，视觉与兼容性会继续调整。
 
 ### API 与 UI 参考项目
@@ -297,9 +300,10 @@ Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/An
 
 - [jayfunc/BetterLyrics](https://github.com/jayfunc/BetterLyrics) — 逐字歌词渲染、光效与动效参考；
 - [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — 网易云 YRC 逐字歌词解析参考；
-- [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — 网易云接口与播放器实现参考。
+- [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — 网易云接口与播放器实现参考；
+- [DanteAlighieri13210914/pv-tool](https://github.com/DanteAlighieri13210914/pv-tool) — 文字 PV 模板与特效的原始实现，按 PV Tool Non-Commercial License 移植。
 
-如后续 Android 版本迁移 PV Tool、BeatNet 或其他弥乐功能，将继续按照上游项目要求保留对应的独立许可证与署名。
+Text PV / PV Tool、BeatNet 及其他弥乐功能继续按照上游项目要求保留对应的独立许可证与署名。
 
 ## 贡献指南
 

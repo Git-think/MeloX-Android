@@ -1349,8 +1349,8 @@ fun MeloXApp(
             )
         }
         if (onboardingPage >= 0) {
-            if (onboardingPage == 0) {
-                MeloXFirstLaunchLegalConsent(
+            when (onboardingPage) {
+                0 -> MeloXFirstLaunchLegalConsent(
                     onAgree = {
                         MeloXSettingsPreferences.setString(context, "legal_consent_version", MELOX_LEGAL_VERSION)
                         MeloXSettingsPreferences.setLong(context, "legal_consent_at", System.currentTimeMillis())
@@ -1365,20 +1365,31 @@ fun MeloXApp(
                         }
                     },
                 )
-            } else {
-                MeloXAppDialog(
-                    title = stringResource(R.string.app_connect_title),
-                    message = stringResource(R.string.app_connect_body),
-                    dismissLabel = stringResource(R.string.app_later),
-                    confirmLabel = stringResource(R.string.app_login_netease),
-                    onDismiss = {
-                        MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
-                        onboardingPage = -1
+                1 -> MeloXOnboardingWelcomePage(
+                    onContinue = { onboardingPage = 2 },
+                    onLicenses = {
+                        runCatching {
+                            hostContext.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/lladlam/MeloX-Android/blob/main/README.md#credits"),
+                                ),
+                            )
+                        }
                     },
-                    onConfirm = {
+                )
+                else -> MeloXOnboardingAccountPage(
+                    isLoggedIn = neteaseSession.isLoggedIn,
+                    nickname = neteaseSession.profile?.nickname,
+                    avatarUrl = neteaseSession.profile?.avatarUrl,
+                    onLogin = {
                         MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
                         onboardingPage = -1
                         launchNeteaseLogin(AppTab.Settings)
+                    },
+                    onFinish = {
+                        MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
+                        onboardingPage = -1
                     },
                 )
             }
@@ -1648,6 +1659,15 @@ private fun MeloXBottomChrome(
                 .fillMaxWidth()
                 .height(chromeHeight),
         ) {
+            // Issue #94: the transparent gaps between the dock, search button and
+            // mini player were click-through to the page underneath. Keep one
+            // blocker behind the controls so those gaps consume taps, while the
+            // controls (later siblings, drawn on top) keep their own handlers.
+            Box(
+                Modifier.matchParentSize().pointerInput(Unit) {
+                    detectTapGestures { }
+                },
+            )
             val horizontalMargin = 12.dp
             val compactSize = 48.dp
             // nav 胶囊右缘 ↔ 搜索键左缘的固有间隙（展开态）。

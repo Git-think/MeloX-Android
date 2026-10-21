@@ -69,6 +69,10 @@ fun MeloXImmersivePlaybackEffect(
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
+            // Keep the system bars hidden until the collapse transition has
+            // settled. Showing them on the first close frame made the page
+            // visibly slide down during the mini-player animation (issue #93).
+            kotlinx.coroutines.delay(320L)
             controller.show(type)
         }
     }

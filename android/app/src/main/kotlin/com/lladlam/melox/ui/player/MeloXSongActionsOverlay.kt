@@ -72,6 +72,7 @@ import com.lladlam.melox.core.network.MeloXMusicComment
 import com.lladlam.melox.core.network.MeloXSearchKind
 import com.lladlam.melox.core.network.MeloXUserPlayRecord
 import com.lladlam.melox.core.network.MeloXUserPlayRecordPeriod
+import com.lladlam.melox.ui.song.MeloXSongDetailActivity
 import com.lladlam.melox.ui.song.MeloXSongWikiActivity
 import com.lladlam.melox.core.network.MeloXWikiSection
 import com.lladlam.melox.core.network.NeteaseMusicOperationsClient
@@ -356,7 +357,20 @@ fun MeloXSongActionsOverlay(
                                         }
                                     },
                                     MeloXMoreAction(stringResource(R.string.player_view_comments), MeloXSymbol.Comment) { page = SongActionPage.Comments; scope.launch { loadComments(false) } },
+                                    MeloXMoreAction(stringResource(R.string.player_not_interested), MeloXSymbol.Xmark) {
+                                        busy = true
+                                        scope.launch {
+                                            runCatching { ops.markSongNotInterested(song.id) }
+                                                .onSuccess { message = context.getString(R.string.player_not_interested_done) }
+                                                .onFailure { message = it.message ?: context.getString(R.string.player_not_interested_failed) }
+                                            busy = false
+                                        }
+                                    },
                                     MeloXMoreAction(stringResource(R.string.player_listening_rank), MeloXSymbol.Clock) { page = SongActionPage.ListeningRank; scope.launch { loadPlayRecords(MeloXUserPlayRecordPeriod.Week) } },
+                                    MeloXMoreAction(stringResource(R.string.song_detail_title), MeloXSymbol.Info) {
+                                        MeloXSongDetailActivity.launch(context, song)
+                                        onDismiss()
+                                    },
                                     MeloXMoreAction(stringResource(R.string.player_wiki), MeloXSymbol.Book) {
                                         MeloXSongWikiActivity.launch(context, song)
                                         onDismiss()
@@ -399,10 +413,21 @@ fun MeloXSongActionsOverlay(
                             SongActionPage.Sleep -> {
                                 val state = playbackState
                                 if (state != null) {
-                                    listOf(15, 30, 45, 60).forEach { minutes ->
+                                    listOf(15, 30, 45, 60, 90).forEach { minutes ->
                                         ActionItem(stringResource(R.string.player_sleep_minutes, minutes), "◷") { state.setSleepTimer(minutes); onDismiss() }
                                     }
                                     if (state.sleepTimerEndRealtimeMs > 0L) {
+                                        val remainingMinutes = ((state.sleepTimerEndRealtimeMs - System.currentTimeMillis()) / 60_000L)
+                                            .coerceAtLeast(1L).toInt()
+                                        ActionItem(stringResource(R.string.player_sleep_remaining, remainingMinutes), "◷") {}
+                                        ActionItem(
+                                            stringResource(
+                                                R.string.player_sleep_end_at,
+                                                android.text.format.DateFormat.getTimeFormat(context)
+                                                    .format(java.util.Date(state.sleepTimerEndRealtimeMs)),
+                                            ),
+                                            "◷",
+                                        ) {}
                                         ActionItem(stringResource(R.string.player_cancel_sleep), "×") { state.cancelSleepTimer(); onDismiss() }
                                     }
                                 }
