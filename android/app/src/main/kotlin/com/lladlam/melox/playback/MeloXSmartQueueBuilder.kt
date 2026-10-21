@@ -57,6 +57,14 @@ object MeloXSmartQueueBuilder {
         }
     }
 
+    /** 该候选是否还需要「下载 + 算 BPM」：在分析范围内，且尚未成功、也没失败过。 */
+    fun needsAnalysis(expectedGeneration: Long, mediaId: String): Boolean = synchronized(lock) {
+        generation == expectedGeneration &&
+            mediaId in analysisTargets &&
+            mediaId !in analyses &&
+            mediaId !in failedIds
+    }
+
     fun consume(expectedGeneration: Long, mediaId: String): MediaItem? = synchronized(lock) {
         if (generation != expectedGeneration || mediaId in consumedIds) return@synchronized null
         val index = candidates.indexOfFirst { it.mediaId == mediaId }
