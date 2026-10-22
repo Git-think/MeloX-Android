@@ -301,6 +301,7 @@ internal fun MeloXIOSNowPlayingScene(
                     state = state,
                     favorite = favorite,
                     onShowActions = onShowActions,
+                    onOpenQueue = { onPageChanged(MeloXNowPlayingPage.Queue) },
                     // 封面页的标题在这里（而非顶部那条 alpha=0 的 header）⇒ 转屏时
                     // 由它跟横屏 LandscapeSongHeader 配对形变。
                     headerMorphModifier = if (page == MeloXNowPlayingPage.Artwork) {
@@ -431,32 +432,16 @@ internal fun MeloXIOSNowPlayingScene(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    if (MeloXPlaybackModeRuntime.heartModeActive) {
-                        Text("心动模式", color = Color(0xFFFF7BA5), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Text(
-                        text = state.transitionDisplayTitle(),
-                        color = Color.White,
-                        // ⚠ 歌词/列表页这条 header 的曲名比封面页（`ArtworkDetailsWithoutArtwork`
-                        //   那条仍是 20sp）小一号：行首被 72dp 缩略图占掉 84dp，
-                        //   曲名可用宽度只剩 ~116dp，小一号能少截一个字。
-                        fontSize = 19.sp,
-                        lineHeight = 23.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = state.transitionDisplayArtist(),
-                        color = Color.White.copy(alpha = 0.64f),
-                        fontSize = 18.sp,
-                        lineHeight = 22.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
+                MeloXPlaybackTitleMenu(
+                    state = state,
+                    onOpenQueue = { onPageChanged(MeloXNowPlayingPage.Queue) },
+                    modifier = Modifier.weight(1f),
+                    titleSize = 19.sp,
+                    titleLineHeight = 23.sp,
+                    artistSize = 18.sp,
+                    artistLineHeight = 22.sp,
+                    showHeartModeLabel = true,
+                )
                 MeloXCircleIconButton(onClick = favorite.toggle) {
                     MeloXAnimatedFavoriteStar(
                         liked = favorite.liked == true,
@@ -1134,6 +1119,7 @@ private fun MeloXIOSLandscapeNowPlayingScene(
                                     state = state,
                                     favorite = favorite,
                                     onShowActions = onShowActions,
+                                    onOpenQueue = { onPageChanged(MeloXNowPlayingPage.Queue) },
                                     onShowSkyline = if (
                                         page == MeloXNowPlayingPage.Lyrics && MeloXSettingsRuntime.skylineEnabled
                                     ) onShowSkyline else null,
@@ -1274,26 +1260,15 @@ private fun TabletLandscapePlayerColumn(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = state.transitionDisplayTitle(),
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    lineHeight = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = state.transitionDisplayArtist(),
-                    color = Color.White.copy(alpha = 0.64f),
-                    fontSize = 20.sp,
-                    lineHeight = 24.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
+            MeloXPlaybackTitleMenu(
+                state = state,
+                onOpenQueue = { onPageSelected(MeloXNowPlayingPage.Queue) },
+                modifier = Modifier.weight(1f),
+                titleSize = 20.sp,
+                titleLineHeight = 24.sp,
+                artistSize = 20.sp,
+                artistLineHeight = 24.sp,
+            )
             MeloXCircleIconButton(onClick = favorite.toggle) {
                 MeloXAnimatedFavoriteStar(
                     liked = favorite.liked == true,
@@ -1709,6 +1684,7 @@ private fun LandscapeSongHeader(
     state: MeloXPlaybackUiState,
     favorite: MeloXTrackFavorite,
     onShowActions: () -> Unit,
+    onOpenQueue: () -> Unit,
     onShowSkyline: (() -> Unit)? = null,
 ) {
     // ★ 天际按钮丝滑过渡（2026-09-30）：横屏从「队列」切到「歌词」时，右上角从
@@ -1738,28 +1714,16 @@ private fun LandscapeSongHeader(
         // 居中时歌名 cap 比封面顶低 ~15dp）。文字行高自带的 ~4dp cap 空隙保留。
         verticalAlignment = Alignment.Top,
     ) {
-        Column(Modifier.weight(1f)) {
-            if (MeloXPlaybackModeRuntime.heartModeActive) {
-                Text("心动模式", color = Color(0xFFFF7BA5), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(
-                text = state.transitionDisplayTitle(),
-                color = Color.White,
-                fontSize = 19.sp,
-                lineHeight = 23.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = state.transitionDisplayArtist(),
-                color = Color.White.copy(alpha = .58f),
-                fontSize = 15.sp,
-                lineHeight = 19.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        MeloXPlaybackTitleMenu(
+            state = state,
+            onOpenQueue = onOpenQueue,
+            modifier = Modifier.weight(1f),
+            titleSize = 19.sp,
+            titleLineHeight = 23.sp,
+            artistSize = 15.sp,
+            artistLineHeight = 19.sp,
+            showHeartModeLabel = true,
+        )
         Spacer(Modifier.width(14.dp))
         MeloXCircleIconButton(onClick = favorite.toggle) {
             MeloXAnimatedFavoriteStar(
@@ -1851,6 +1815,7 @@ private fun ArtworkDetailsWithoutArtwork(
     state: MeloXPlaybackUiState,
     favorite: MeloXTrackFavorite,
     onShowActions: () -> Unit,
+    onOpenQueue: () -> Unit,
     headerMorphModifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1877,26 +1842,15 @@ private fun ArtworkDetailsWithoutArtwork(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = state.transitionDisplayTitle(),
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        lineHeight = 24.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = state.transitionDisplayArtist(),
-                        color = Color.White.copy(alpha = 0.64f),
-                        fontSize = 20.sp,
-                        lineHeight = 24.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
+                MeloXPlaybackTitleMenu(
+                    state = state,
+                    onOpenQueue = onOpenQueue,
+                    modifier = Modifier.weight(1f),
+                    titleSize = 20.sp,
+                    titleLineHeight = 24.sp,
+                    artistSize = 20.sp,
+                    artistLineHeight = 24.sp,
+                )
                 MeloXCircleIconButton(onClick = favorite.toggle) {
                     MeloXAnimatedFavoriteStar(
                         liked = favorite.liked == true,
