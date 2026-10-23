@@ -92,6 +92,16 @@ object MusicExperiences {
         ),
     )
 
+    val kugouLite = MusicExperience(
+        source = MusicSource.KugouLite,
+        homeSections = listOf(
+            HomeSectionKind.Recommendations,
+            HomeSectionKind.Playlists,
+            HomeSectionKind.Rankings,
+            HomeSectionKind.Radio,
+        ),
+    )
+
     val kuwo = MusicExperience(
         source = MusicSource.Kuwo,
         homeSections = emptyList(),
@@ -174,6 +184,7 @@ object MusicExperiences {
         MusicSource.Netease -> netease
         MusicSource.QQMusic -> qqMusic
         MusicSource.Kugou -> kugou
+        MusicSource.KugouLite -> kugouLite
         MusicSource.Kuwo -> kuwo
         MusicSource.AppleMusic -> appleMusic
         MusicSource.Bilibili -> bilibili

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="account_login_kugou_lite">登录酷狗概念版</string>
+    <string name="provider_switch_kugou_lite">清除概念版账号登录态（与酷狗音乐 Token 隔离）后重新扫码</string>
+    <string name="settings_kugou_lite">酷狗概念版</string>
+    <string name="provider_kugou_lite_daily_vip">领取今日概念版 VIP</string>
+    <string name="provider_kugou_lite_daily_vip_subtitle">官方每日活动，仅在你点击时执行</string>
+    <string name="provider_kugou_lite_daily_vip_body">这里只调用一次酷狗官方每日 VIP 活动接口，不会自动领取。活动关闭、账号不符合条件或当日额度用完时都会失败。</string>
+    <string name="provider_kugou_lite_daily_vip_claim">确认领取</string>
+    <string name="provider_kugou_lite_daily_vip_done">请求已被官方接口接收，是否符合条件以后续 VIP 状态为准。</string>
+    <string name="provider_kugou_lite_daily_vip_failed">领取失败</string>
+</resources>

@@ -20,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,8 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.provider.MusicProviderSelectionStore
 import com.lladlam.melox.core.music.provider.ProviderAccountManager
+import com.lladlam.melox.core.provider.kugou.KugouLiteProvider
+import com.lladlam.melox.core.provider.kugou.KugouSessionStore
 import com.lladlam.melox.ui.account.KugouLoginScreen
 import com.lladlam.melox.ui.account.KuwoLoginScreen
 import com.lladlam.melox.ui.account.QQMusicLoginScreen
@@ -46,6 +49,7 @@ import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
 import com.lladlam.melox.ui.glass.MeloXGlassSheet
 import com.lladlam.melox.ui.settings.SettingsScreen
+import kotlinx.coroutines.launch
 
 private enum class ProviderAccountAction {
     Logout,
@@ -83,6 +87,7 @@ fun ProviderSettingsHub(
     var showServiceDialog by remember { mutableStateOf(false) }
     var showQQLogin by remember(currentSource) { mutableStateOf(false) }
     var showKugouLogin by remember(currentSource) { mutableStateOf(false) }
+    var showKugouLiteLogin by remember(currentSource) { mutableStateOf(false) }
     var showKuwoLogin by remember(currentSource) { mutableStateOf(false) }
     var showAppleMusicLogin by remember(currentSource) { mutableStateOf(false) }
     var showBilibiliLogin by remember(currentSource) { mutableStateOf(false) }
@@ -90,6 +95,9 @@ fun ProviderSettingsHub(
     var showYouTubeLogin by remember(currentSource) { mutableStateOf(false) }
     var loginRevision by remember(currentSource) { mutableStateOf(0) }
     var pendingAccountAction by remember { mutableStateOf<PendingProviderAccountAction?>(null) }
+    var showLiteVipClaim by remember { mutableStateOf(false) }
+    var liteVipClaimMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     var unifiedEnabled by remember {
         mutableStateOf(MusicProviderSelectionStore.unifiedEnabled(context))
@@ -119,6 +127,17 @@ fun ProviderSettingsHub(
             onDismiss = { showKugouLogin = false },
             onLoggedIn = {
                 showKugouLogin = false
+                loginRevision += 1
+            },
+        )
+        return
+    }
+    if (showKugouLiteLogin && currentSource == MusicSource.KugouLite) {
+        KugouLoginScreen(
+            lite = true,
+            onDismiss = { showKugouLiteLogin = false },
+            onLoggedIn = {
+                showKugouLiteLogin = false
                 loginRevision += 1
             },
         )
@@ -236,6 +255,7 @@ fun ProviderSettingsHub(
                                     MusicSource.Netease -> onNeteaseLogin()
                                     MusicSource.QQMusic -> showQQLogin = true
                                     MusicSource.Kugou -> showKugouLogin = true
+                                    MusicSource.KugouLite -> showKugouLiteLogin = true
                                     MusicSource.Kuwo -> showKuwoLogin = true
                                     MusicSource.AppleMusic -> showAppleMusicLogin = true
                                     MusicSource.Bilibili -> showBilibiliLogin = true
@@ -249,6 +269,18 @@ fun ProviderSettingsHub(
                     )
 
                     if (currentAccount.loggedIn) {
+                        if (currentSource == MusicSource.KugouLite) {
+                            Spacer(Modifier.height(8.dp))
+                            ProviderSimpleCard(
+                                stringResource(R.string.provider_kugou_lite_daily_vip),
+                                stringResource(R.string.provider_kugou_lite_daily_vip_subtitle),
+                                onClick = {
+                                    showServiceDialog = false
+                                    liteVipClaimMessage = null
+                                    showLiteVipClaim = true
+                                },
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
                         ProviderSimpleCard(
                             stringResource(R.string.provider_switch_account),
@@ -256,6 +288,7 @@ fun ProviderSettingsHub(
                                 MusicSource.Netease -> stringResource(R.string.provider_switch_netease)
                                 MusicSource.QQMusic -> stringResource(R.string.provider_switch_qq)
                                 MusicSource.Kugou -> stringResource(R.string.provider_switch_kugou)
+                                MusicSource.KugouLite -> stringResource(R.string.provider_switch_kugou_lite)
                                 MusicSource.Kuwo -> stringResource(R.string.provider_switch_kuwo)
                                 MusicSource.AppleMusic -> stringResource(R.string.provider_switch_apple)
                                 MusicSource.Bilibili -> stringResource(R.string.provider_switch_bilibili)
@@ -385,6 +418,7 @@ fun ProviderSettingsHub(
                                 MusicSource.Netease -> onNeteaseLogin()
                                 MusicSource.QQMusic -> showQQLogin = true
                                 MusicSource.Kugou -> showKugouLogin = true
+                                MusicSource.KugouLite -> showKugouLiteLogin = true
                                 MusicSource.Kuwo -> showKuwoLogin = true
                                 MusicSource.AppleMusic -> showAppleMusicLogin = true
                                 MusicSource.Bilibili -> showBilibiliLogin = true
@@ -402,6 +436,59 @@ fun ProviderSettingsHub(
                         MeloXGlassButtonStyle.BorderedProminent
                     },
                 ) { Text(if (pending.action == ProviderAccountAction.Logout) stringResource(R.string.provider_logout) else stringResource(R.string.provider_continue)) }
+            }
+        }
+    }
+
+    if (showLiteVipClaim) {
+        MeloXGlassDialog(visible = true, onDismiss = { showLiteVipClaim = false }) {
+            Text(stringResource(R.string.provider_kugou_lite_daily_vip), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.provider_kugou_lite_daily_vip_body),
+                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+            )
+            liteVipClaimMessage?.let {
+                Text(it, modifier = Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.primary)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MeloXGlassButton(
+                    onClick = { showLiteVipClaim = false },
+                    modifier = Modifier.weight(1f),
+                    style = MeloXGlassButtonStyle.Plain,
+                ) { Text(stringResource(R.string.action_cancel)) }
+                MeloXGlassButton(
+                    onClick = {
+                        scope.launch {
+                            val provider = KugouLiteProvider(
+                                sessionProvider = { KugouSessionStore.readLite(context) },
+                                persistAuth = { auth -> KugouSessionStore.updateLiteEntitlements(context, auth = auth) },
+                                persistDfid = { dfid -> KugouSessionStore.updateLiteDfid(context, dfid) },
+                                persistVip = { vip ->
+                                    KugouSessionStore.updateLiteEntitlements(
+                                        context = context,
+                                        vipType = vip.vipType,
+                                        vipExpiresAtEpochSeconds = vip.expiresAtEpochSeconds,
+                                        superVip = vip.superVip,
+                                        vipActive = vip.isVip,
+                                        freeListenEligible = vip.freeListen,
+                                    )
+                                },
+                            )
+                            liteVipClaimMessage = runCatching { provider.claimDailyVip() }
+                                .fold(
+                                    onSuccess = { context.getString(R.string.provider_kugou_lite_daily_vip_done) },
+                                    onFailure = { it.message ?: context.getString(R.string.provider_kugou_lite_daily_vip_failed) },
+                                )
+                            loginRevision += 1
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MeloXGlassButtonStyle.BorderedProminent,
+                ) { Text(stringResource(R.string.provider_kugou_lite_daily_vip_claim)) }
             }
         }
     }

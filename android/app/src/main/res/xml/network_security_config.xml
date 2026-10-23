@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
+
+    <!--
+      KuGou's youth/lite media CDN still returns http:// URLs and its TLS
+      certificate is not valid for every fs.youthandroid*.kugou.com host.
+      Restrict the cleartext exception to KuGou's own domain so other music
+      sources keep the strict HTTPS-only policy. API calls remain HTTPS.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">kugou.com</domain>
+    </domain-config>
 </network-security-config>

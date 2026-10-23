@@ -25,13 +25,14 @@ import org.json.JSONObject
  * the final compatibility fallback.
  */
 internal class KugouLyricsClient(
-    sessionProvider: () -> KugouSession,
+    private val sessionProvider: () -> KugouSession,
     httpClient: OkHttpClient = com.lladlam.melox.core.network.MeloXHttpClient.shared,
+    private val source: MusicSource = MusicSource.Kugou,
 ) {
     private val requests = KugouRequestClient(sessionProvider, httpClient)
 
     suspend fun lyrics(track: MusicTrack): LyricsDocument {
-        require(track.id.source == MusicSource.Kugou) {
+        require(track.id.source == source) {
             "KugouLyricsClient cannot handle ${track.id.source.storageValue} track"
         }
         val metadata = (track.providerMetadata as? ProviderTrackMetadata.Kugou)
@@ -75,6 +76,7 @@ internal class KugouLyricsClient(
     ): LyricCandidate? {
         val keyword = "${track.artistText} - ${track.title}"
         val durationSeconds = ((track.durationMs ?: 0L) / 1_000L).coerceAtLeast(0L)
+        val platform = sessionProvider().platform
 
         val modern = runCatching {
             requests.get(
@@ -82,8 +84,8 @@ internal class KugouLyricsClient(
                 path = "/v1/search",
                 params = mapOf(
                     "album_audio_id" to (metadata.albumAudioId ?: 0L).toString(),
-                    "appid" to KugouRequestClient.AppId.toString(),
-                    "clientver" to KugouRequestClient.ClientVersion.toString(),
+                    "appid" to platform.appId.toString(),
+                    "clientver" to platform.clientVersion.toString(),
                     "duration" to durationSeconds.toString(),
                     "hash" to metadata.hash,
                     "keyword" to keyword,

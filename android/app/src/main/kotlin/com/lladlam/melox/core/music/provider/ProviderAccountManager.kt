@@ -57,6 +57,14 @@ class ProviderAccountManager(
                 accountId = session.userId.takeIf { it > 0L }?.toString(),
             )
         }
+        MusicSource.KugouLite -> {
+            val session = KugouSessionStore.readLite(appContext)
+            AccountState(
+                source = source,
+                loggedIn = session.isLoggedIn,
+                accountId = session.userId.takeIf { it > 0L }?.toString(),
+            )
+        }
         MusicSource.Kuwo -> {
             val session = KuwoSessionStore.read(appContext)
             AccountState(
@@ -103,6 +111,7 @@ class ProviderAccountManager(
 
             MusicSource.QQMusic -> QQMusicSessionStore.clear(appContext, clearWebCookies = true)
             MusicSource.Kugou -> KugouSessionStore.clearLogin(appContext)
+            MusicSource.KugouLite -> KugouSessionStore.clearLiteLogin(appContext)
             MusicSource.Kuwo -> KuwoSessionStore.clear(appContext)
             MusicSource.AppleMusic -> AppleMusicSessionStore.clear(appContext)
             MusicSource.Bilibili -> BilibiliSessionStore.clear(appContext, clearWebCookies = true)

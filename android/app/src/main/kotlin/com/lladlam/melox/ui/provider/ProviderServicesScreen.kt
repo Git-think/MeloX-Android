@@ -96,6 +96,7 @@ fun ProviderServicesScreen(
     }
     var showQQLogin by remember(currentSource) { mutableStateOf(false) }
     var showKugouLogin by remember(currentSource) { mutableStateOf(false) }
+    var showKugouLiteLogin by remember(currentSource) { mutableStateOf(false) }
     var showKuwoLogin by remember(currentSource) { mutableStateOf(false) }
     var showAppleMusicLogin by remember(currentSource) { mutableStateOf(false) }
     var showBilibiliLogin by remember(currentSource) { mutableStateOf(false) }
@@ -203,6 +204,14 @@ fun ProviderServicesScreen(
         KugouLoginScreen(
             onDismiss = { showKugouLogin = false },
             onLoggedIn = { showKugouLogin = false; loginRevision++ },
+        )
+        return
+    }
+    if (showKugouLiteLogin && currentSource == MusicSource.KugouLite) {
+        KugouLoginScreen(
+            lite = true,
+            onDismiss = { showKugouLiteLogin = false },
+            onLoggedIn = { showKugouLiteLogin = false; loginRevision++ },
         )
         return
     }
@@ -315,6 +324,7 @@ fun ProviderServicesScreen(
                             MusicSource.Netease -> onNeteaseLogin()
                             MusicSource.QQMusic -> showQQLogin = true
                             MusicSource.Kugou -> showKugouLogin = true
+                            MusicSource.KugouLite -> showKugouLiteLogin = true
                             MusicSource.Kuwo -> showKuwoLogin = true
                             MusicSource.AppleMusic -> showAppleMusicLogin = true
                             MusicSource.Bilibili -> showBilibiliLogin = true
@@ -538,6 +548,7 @@ fun ProviderServicesScreen(
                                 MusicSource.Netease -> onNeteaseLogin()
                                 MusicSource.QQMusic -> showQQLogin = true
                                 MusicSource.Kugou -> showKugouLogin = true
+                                MusicSource.KugouLite -> showKugouLiteLogin = true
                                 MusicSource.Kuwo -> showKuwoLogin = true
                                 MusicSource.AppleMusic -> showAppleMusicLogin = true
                                 MusicSource.Bilibili -> showBilibiliLogin = true

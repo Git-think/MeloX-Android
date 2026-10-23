@@ -218,7 +218,9 @@ class ProviderPlaybackResolver(
             mediaMid = uri.getQueryParameter(QQMediaMidQuery)?.takeIf(String::isNotBlank),
             numericSongId = uri.getQueryParameter(QQNumericIdQuery)?.toLongOrNull(),
         )
-        MusicSource.Kugou -> ProviderTrackMetadata.Kugou(
+        MusicSource.Kugou,
+        MusicSource.KugouLite,
+        -> ProviderTrackMetadata.Kugou(
             hash = id.value,
             albumAudioId = uri.getQueryParameter(KugouAlbumAudioIdQuery)?.toLongOrNull(),
             albumId = uri.getQueryParameter(KugouAlbumIdQuery)?.takeIf(String::isNotBlank),

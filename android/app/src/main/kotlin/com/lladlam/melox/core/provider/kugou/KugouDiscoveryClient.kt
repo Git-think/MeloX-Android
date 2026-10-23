@@ -23,6 +23,7 @@ import org.json.JSONObject
 class KugouDiscoveryClient(
     private val sessionProvider: () -> KugouSession,
     httpClient: OkHttpClient = com.lladlam.melox.core.network.MeloXHttpClient.shared,
+    private val source: MusicSource = MusicSource.Kugou,
 ) {
     private val requests = KugouRequestClient(sessionProvider, httpClient)
 
@@ -30,10 +31,16 @@ class KugouDiscoveryClient(
         val session = sessionProvider()
         if (!session.isLoggedIn) return null
         return MusicAccountSummary(
-            source = MusicSource.Kugou,
+            source = source,
             id = session.userId.toString(),
-            displayName = "酷狗用户 ${session.userId}",
-            subtitle = if (session.vipType > 0) "酷狗会员" else "酷狗音乐",
+            displayName = if (source == MusicSource.KugouLite) "酷狗概念版用户 ${session.userId}" else "酷狗用户 ${session.userId}",
+            subtitle = when {
+                source == MusicSource.KugouLite && session.superVip -> "酷狗概念版超级 VIP"
+                source == MusicSource.KugouLite && session.vipType > 0 -> "酷狗概念版 VIP"
+                source == MusicSource.KugouLite -> "酷狗概念版"
+                session.vipType > 0 -> "酷狗会员"
+                else -> "酷狗音乐"
+            },
         )
     }
 
@@ -105,16 +112,16 @@ class KugouDiscoveryClient(
             .put("area_code", 1)
             .put("categoryid", 0)
         val body = JSONObject()
-            .put("appid", KugouRequestClient.AppId)
+            .put("appid", session.platform.appId)
             .put("mid", session.mid)
-            .put("clientver", KugouRequestClient.ClientVersion)
+            .put("clientver", session.platform.clientVersion)
             .put("platform", "android")
             .put("clienttime", clientTime)
             .put("userid", session.userId)
             .put("module_id", 1)
             .put("page", 1)
             .put("pagesize", limit.coerceIn(1, 30))
-            .put("key", paramsKey(clientTime))
+            .put("key", paramsKey(clientTime, session))
             .put("special_recommend", specialRecommend)
             .put("req_multi", 1)
             .put("retrun_min", 5)
@@ -199,7 +206,7 @@ class KugouDiscoveryClient(
         )
         if (title.isBlank()) return null
         return MusicPlaylistSummary(
-            id = MusicResourceId(MusicSource.Kugou, id),
+            id = MusicResourceId(source, id),
             title = title,
             artworkUrl = kugouArtworkUrl(item),
             creatorName = firstString(item, "nickname", "nick_name", "username", "author_name")
@@ -219,7 +226,7 @@ class KugouDiscoveryClient(
         val title = firstString(item, "rankname", "rank_name", "name", "title")
         if (title.isBlank()) return null
         return MusicRankingSummary(
-            id = MusicResourceId(MusicSource.Kugou, id),
+            id = MusicResourceId(source, id),
             title = title,
             artworkUrl = kugouArtworkUrl(item),
             subtitle = firstString(item, "update_frequency", "updateFrequency", "intro", "description")
@@ -248,12 +255,12 @@ class KugouDiscoveryClient(
             .ifEmpty { listOf("未知歌手") }
             .map { MusicArtistRef(name = it) }
         return MusicTrack(
-            id = MusicResourceId(MusicSource.Kugou, hash),
+            id = MusicResourceId(source, hash),
             title = title,
             artists = artists,
             album = albumName.takeIf(String::isNotBlank)?.let {
                 MusicAlbumRef(
-                    id = albumId?.let { value -> MusicResourceId(MusicSource.Kugou, value) },
+                    id = albumId?.let { value -> MusicResourceId(source, value) },
                     name = it,
                     artworkUrl = artwork,
                 )
@@ -303,8 +310,8 @@ class KugouDiscoveryClient(
         }.firstOrNull() ?: -1L
 
     /** MakcRe/KuGouMusicApi signParamsKey(clienttime). */
-    private fun paramsKey(clientTime: String): String = md5Hex(
-        "${KugouRequestClient.AppId}$AndroidSignatureSalt${KugouRequestClient.ClientVersion}$clientTime",
+    private fun paramsKey(clientTime: String, session: KugouSession): String = md5Hex(
+        "${session.platform.appId}${session.platform.androidSignatureSalt}${session.platform.clientVersion}$clientTime",
     )
 
     private fun md5Hex(value: String): String =
@@ -312,7 +319,4 @@ class KugouDiscoveryClient(
             .digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte) }
 
-    private companion object {
-        const val AndroidSignatureSalt = "OIlwieks28dk2k092lksi2UIkp"
-    }
 }
