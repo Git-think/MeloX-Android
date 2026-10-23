@@ -83,6 +83,7 @@ import androidx.compose.ui.zIndex
 import com.lladlam.melox.ui.glass.meloXBackdropBlur
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.animation.meloXContentEnter
 import com.lladlam.melox.ui.animation.meloXContentExit
@@ -1644,6 +1645,7 @@ private fun MeloXAnimatedFavoriteStar(
     }
     Canvas(
         modifier = modifier
+            .meloXIconDrawingScale()
             .graphicsLayer {
                 scaleX = scale.value
                 scaleY = scale.value

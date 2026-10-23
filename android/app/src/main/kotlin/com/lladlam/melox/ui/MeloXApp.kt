@@ -149,6 +149,7 @@ import com.lladlam.melox.ui.discovery.MeloXHomeScreen
 import com.lladlam.melox.ui.glass.LocalMeloXBackdrop
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.ui.glass.MeloXSymbolVariant
 import com.lladlam.melox.ui.glass.MeloXSystemColors
 import com.lladlam.melox.ui.glass.MeloXGlassDialog
@@ -2366,7 +2367,7 @@ private fun RootGlyphIcon(
         Icon(
             painter = painterResource(R.drawable.melox_home_tab),
             contentDescription = null,
-            modifier = modifier,
+            modifier = modifier.meloXIconDrawingScale(),
             tint = color,
         )
         return

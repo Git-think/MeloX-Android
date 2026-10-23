@@ -171,6 +171,7 @@ import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
 import com.lladlam.melox.ui.glass.meloXLiquidButton
 import com.lladlam.melox.ui.glass.meloXLiquidTabSelection
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.ui.player.MeloXFlowingLightBackdrop
 import com.lladlam.melox.ui.player.MeloXSongActionsOverlay
 import com.lladlam.melox.ui.sharing.MeloXNeteaseResourceShareActivity
@@ -3493,7 +3494,7 @@ private fun glassColor(foreground: Color): Color =
 
 @Composable
 private fun MeloXPlayGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val path = Path().apply {
             moveTo(size.width * 0.24f, size.height * 0.12f)
             lineTo(size.width * 0.86f, size.height * 0.50f)
@@ -3506,7 +3507,7 @@ private fun MeloXPlayGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXPlusGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.11f
         val half = size.width * 0.30f
         drawLine(color, Offset(center.x - half, center.y), Offset(center.x + half, center.y), strokeWidth = stroke, cap = StrokeCap.Round)
@@ -3516,7 +3517,7 @@ private fun MeloXPlusGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXCheckGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.13f
         val p = Path().apply {
             moveTo(size.width * 0.22f, size.height * 0.53f)
@@ -3529,7 +3530,7 @@ private fun MeloXCheckGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXBackGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.14f
         val p = Path().apply {
             moveTo(size.width * 0.67f, size.height * 0.14f)
@@ -3542,7 +3543,7 @@ private fun MeloXBackGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXSearchGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.11f
         drawCircle(
             color = color,
@@ -3562,7 +3563,7 @@ private fun MeloXSearchGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXShareGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.09f
         drawRoundRect(
             color = color,
@@ -3589,7 +3590,7 @@ private fun MeloXShareGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXShuffleGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.095f
         val top = Path().apply {
             moveTo(size.width * 0.10f, size.height * 0.28f)

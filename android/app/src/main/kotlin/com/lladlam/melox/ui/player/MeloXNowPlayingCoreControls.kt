@@ -98,6 +98,7 @@ import com.lladlam.melox.ui.glass.meloXLiquidButton
 import com.lladlam.melox.ui.glass.MeloXPlaybackModeGlyph
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.platform.MeloXVolumeKeyBridge
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.settings.MeloXVolumeControlMode
@@ -1307,7 +1308,12 @@ private fun ScenePlaybackModeBadge(
         repeatMode == 1 -> MeloXSymbol.RepeatOne
         else -> MeloXSymbol.Repeat
     }
-    MeloXPlaybackModeGlyph(symbol = symbol, size = size, modifier = modifier, color = color)
+    MeloXPlaybackModeGlyph(
+        symbol = symbol,
+        size = size,
+        modifier = modifier.meloXIconDrawingScale(),
+        color = color,
+    )
 }
 
 @Composable
@@ -1648,7 +1654,7 @@ private fun SceneCupertinoGlyph(
     compact: Boolean = false,
 ) {
     if (useVectorGlyphs && kind in VECTOR_GLYPHS) {
-        Canvas(modifier = modifier) {
+        Canvas(modifier = modifier.meloXIconDrawingScale()) {
             val w = size.width
             val h = size.height
             when (kind) {
@@ -1785,7 +1791,7 @@ private fun SceneCupertinoGlyph(
         )
         return
     }
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.meloXIconDrawingScale()) {
         val w = size.width
         val h = size.height
         val min = size.minDimension
