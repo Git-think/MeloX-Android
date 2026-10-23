@@ -3,13 +3,18 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- focus-api itself declares API 27. MeloX only invokes it behind the
-         Android 8.1 + HyperOS 3 runtime guard in HyperOsFocusBridge, so the
-         app can safely keep its existing API 26 fallback support. -->
-    <uses-sdk tools:overrideLibrary="com.xzakota.hyper.notification.focus" />
+    <!-- focus-api itself declares API 27 and SuperLyricApi declares API 26.
+         MeloX only invokes them behind runtime guards (HyperOsFocusBridge on
+         Android 8.1 + HyperOS 3; SuperLyricHelper.isAvailable() + a
+         LinkageError catch around every call), so the app can safely keep
+         its existing API 24 fallback support. -->
+    <uses-sdk
+        tools:overrideLibrary="com.xzakota.hyper.notification.focus,com.hchen.superlyricapi" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -58,6 +63,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -33,6 +33,46 @@ object MeloXLogExporter {
         )
     }
 
+    /**
+     * In-app preview: recent crash reports plus the tail of this process's
+     * logcat, truncated so a phone can show it inside a dialog without OOM.
+     */
+    fun previewRecentLogs(
+        context: Context,
+        maxLogLines: Int = 2_000,
+        deviceInfo: MeloXLogDeviceInfo = collectDeviceInfo(context),
+    ): String {
+        val logcat = runCatching { readProcessLogs() }.getOrNull()
+        val crashReports = runCatching {
+            MeloXCrashRecorder.readRecentReports(context, limit = 3)
+        }.getOrDefault("")
+        return buildString {
+            appendLine("MeloX Android 日志预览")
+            appendLine("应用版本：${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrDefault("未知")}")
+            appendLine("Android 版本：${deviceInfo.androidVersion}")
+            appendLine("手机型号：${deviceInfo.phoneModel}")
+            appendLine("系统版本：${deviceInfo.systemVersion}")
+            appendLine("已登录音乐源：${deviceInfo.loggedMusicSources.joinToString("、").ifBlank { "无" }}")
+            appendLine()
+            if (crashReports.isNotBlank()) {
+                appendLine("=== 崩溃现场记录 ===")
+                appendLine(crashReports)
+                appendLine()
+            }
+            appendLine("=== 当前 MeloX 进程日志 ===")
+            val lines = logcat?.text.orEmpty().lineSequence().filter(String::isNotBlank).toList()
+            if (lines.isEmpty()) {
+                appendLine("（当前没有可读取的应用日志）")
+            } else {
+                appendLine(lines.takeLast(maxLogLines).joinToString(separator = "\n"))
+                if (lines.size > maxLogLines) {
+                    appendLine()
+                    appendLine("（仅显示最近 $maxLogLines 行，完整日志请用“导出全部日志”）")
+                }
+            }
+        }
+    }
+
     fun exportRecentLogs(
         context: Context,
         uri: Uri,

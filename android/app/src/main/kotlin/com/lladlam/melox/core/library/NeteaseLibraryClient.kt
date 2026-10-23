@@ -45,6 +45,44 @@ class NeteaseLibraryClient(
     suspend fun playlistDetail(playlistId: Long): NeteasePlaylistDetail =
         withContext(Dispatchers.IO) { playlistDetailBlocking(playlistId) }
 
+    /**
+     * Server-side playlist shuffle ("云端随机"), mirroring Mei's
+     * `/api/playlist/random/list/get`. Returns the shuffled song ids in server
+     * order, or null when the endpoint rejects the request so callers can fall
+     * back to a local shuffle.
+     */
+    suspend fun randomPlaylistIds(
+        playlistId: Long,
+        seedSongId: Long,
+        alg: String = "",
+    ): List<Long>? = withContext(Dispatchers.IO) {
+        if (playlistId <= 0L || seedSongId <= 0L) return@withContext null
+        ensureLoggedIn()
+        val payload = JSONObject()
+            .put("playlistId", playlistId)
+            .put("songId", seedSongId)
+            .put("alg", alg)
+        val response = runCatching { authenticatedWeapi.post("/api/playlist/random/list/get", payload) }
+            .recoverCatching { eapi("/api/playlist/random/list/get", payload, true) }
+            .getOrNull() ?: return@withContext null
+        val data = response.optJSONObject("data") ?: JSONObject()
+        val raw = data.optJSONArray("songIds") ?: data.optJSONArray("list") ?: JSONArray()
+        val ids = buildList {
+            for (index in 0 until raw.length()) {
+                val value = raw.opt(index)
+                val id = when (value) {
+                    is Number -> value.toLong()
+                    is String -> value.toLongOrNull()
+                    is JSONObject -> value.optLong("id", 0L).takeIf { it > 0L }
+                        ?: value.optString("songId").toLongOrNull()
+                    else -> null
+                } ?: continue
+                if (id > 0L) add(id)
+            }
+        }
+        ids.distinct().takeIf { it.isNotEmpty() }
+    }
+
     suspend fun homeContent(
         limit: Int = 12,
         area: String = "全部",

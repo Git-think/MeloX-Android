@@ -114,6 +114,8 @@ class MeloXDownloadStore private constructor(private val context: Context) {
 
     val downloads = mutableStateListOf<MeloXDownloadedSong>()
     val activeDownloads = mutableStateMapOf<Long, MeloXActiveDownload>()
+    /** Paused downloads keep their song/quality so the UI can offer a resume action. */
+    val pausedDownloads = mutableStateMapOf<Long, MeloXActiveDownload>()
     var errorMessage: String? = null
         private set
 
@@ -156,6 +158,7 @@ class MeloXDownloadStore private constructor(private val context: Context) {
 
     fun contains(songId: Long): Boolean = downloadsBySongId.containsKey(songId)
     fun isDownloading(songId: Long): Boolean = activeDownloads.containsKey(songId)
+    fun isPaused(songId: Long): Boolean = pausedDownloads.containsKey(songId)
     fun recordFor(songId: Long): MeloXDownloadedSong? = downloadsBySongId[songId]
     fun downloadedQuality(songId: Long): MusicQuality? = recordFor(songId)?.quality
 
@@ -196,6 +199,12 @@ class MeloXDownloadStore private constructor(private val context: Context) {
             ?.songs
             ?.map { it.song }
             .orEmpty()
+
+    /** Local audio file used by the LAN audio proxy; null when not downloaded. */
+    internal fun localAudioFile(songId: Long): File? {
+        val record = recordFor(songId) ?: return null
+        return File(directory, record.fileName).takeIf(File::isFile)
+    }
 
     fun localArtworkUri(songId: Long): Uri? {
         val record = recordFor(songId) ?: return null
@@ -242,6 +251,7 @@ class MeloXDownloadStore private constructor(private val context: Context) {
         if (isDownloading(song.id) || jobs.containsKey(song.id)) return
 
         errorMessage = null
+        pausedDownloads.remove(song.id)
         activeDownloads[song.id] = MeloXActiveDownload(song, quality)
         jobs[song.id] = scope.launch {
             transferSlots.withPermit {
@@ -250,9 +260,30 @@ class MeloXDownloadStore private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * Stops the current transfer but keeps a paused record so the downloads
+     * screen can offer resume. Restarting re-downloads from the beginning
+     * because partial files are not resumable across sessions.
+     */
+    fun pause(songId: Long) {
+        val job = jobs.remove(songId) ?: return
+        val active = activeDownloads[songId] ?: return
+        pausedDownloads[songId] = active.copy(bytesPerSecond = 0L)
+        activeDownloads.remove(songId)
+        pendingPlaylistRefs.remove(songId)
+        storageCommands.trySend(StorageCommand.Delete(setOf("$songId.part")))
+        job.cancel()
+    }
+
+    fun resume(songId: Long) {
+        val paused = pausedDownloads.remove(songId) ?: return
+        start(paused.song, paused.quality)
+    }
+
     fun cancel(songId: Long) {
         jobs.remove(songId)?.cancel()
         activeDownloads.remove(songId)
+        pausedDownloads.remove(songId)
         pendingPlaylistRefs.remove(songId)
         storageCommands.trySend(StorageCommand.Delete(setOf("$songId.part")))
     }
@@ -273,6 +304,7 @@ class MeloXDownloadStore private constructor(private val context: Context) {
 
     fun removeAll() {
         jobs.keys.toList().forEach(::cancel)
+        pausedDownloads.clear()
         pendingPlaylistRefs.clear()
         downloads.clear()
         downloadsBySongId.clear()

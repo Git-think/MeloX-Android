@@ -3,6 +3,7 @@ package com.lladlam.melox
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.ViewTreeObserver
@@ -36,10 +37,13 @@ import com.lladlam.melox.platform.MeloXVolumeKeyBridge
 import com.lladlam.melox.platform.lyricon.MeloXLyriconBridge
 import com.lladlam.melox.platform.xiaomi.HyperOsFocusBridge
 import com.lladlam.melox.ui.player.MeloXListenTogetherInviteActivity
+import com.lladlam.melox.ui.player.MeloXFloatingLyricsPip
+import com.lladlam.melox.ui.player.MeloXFloatingLyricsPipScreen
 import com.lladlam.melox.ui.MeloXApp
 import com.lladlam.melox.ui.layout.MeloXDetailPageOwner
 import com.lladlam.melox.ui.layout.MeloXDetailPaneState
 import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
+import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.theme.MeloXTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
@@ -55,6 +59,36 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
     private val firstDraw = CompletableDeferred<Unit>()
     private var clipboardScanJob: Job? = null
     private var handledRemoteConfigForegroundSession = -1L
+    private val pipModeState = mutableStateOf(false)
+
+    /** Installs the service → PiP bridge used by the notification's floating-lyrics action. */
+    private fun requestFloatingLyricsPip(service: com.lladlam.melox.playback.MeloXPlaybackService): Boolean {
+        if (isInPictureInPictureMode) {
+            moveTaskToBack(true)
+            return true
+        }
+        return runCatching {
+            enterPictureInPictureMode(
+                MeloXFloatingLyricsPip.params(this, service.isPlaybackActive()),
+            )
+        }.isSuccess
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (MeloXSettingsRuntime.floatingLyricsEnabled && !isInPictureInPictureMode) {
+            runCatching {
+                enterPictureInPictureMode(
+                    MeloXFloatingLyricsPip.params(this, false),
+                )
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipModeState.value = isInPictureInPictureMode
+    }
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,10 +100,11 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
         consumePlaybackIntent(intent)
         MeloXSettingsPreferences.initializeCritical(this)
         completeAfterFirstDraw()
+        MeloXFloatingLyricsPip.install { service -> requestFloatingLyricsPip(service) }
 
         setContent {
             MeloXTheme {
-                var splashVisible by remember { mutableStateOf(coldStart && !returnFromBackground) }
+                var splashVisible by remember { mutableStateOf(coldStart && !returnFromBackground && !pipModeState.value) }
                 val pageAlpha by animateFloatAsState(
                     targetValue = if (splashVisible) 0f else 1f,
                     animationSpec = tween(350),
@@ -80,11 +115,14 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
                     animationSpec = tween(350),
                     label = "melox-start-icon",
                 )
-                LaunchedEffect(coldStart, returnFromBackground) {
-                    if (coldStart && !returnFromBackground) delay(1_000L)
+                LaunchedEffect(coldStart, returnFromBackground, pipModeState.value) {
+                    if (coldStart && !returnFromBackground && !pipModeState.value) delay(1_000L)
                     splashVisible = false
                 }
                 Box(Modifier.fillMaxSize()) {
+                    if (pipModeState.value) {
+                        MeloXFloatingLyricsPipScreen(Modifier.fillMaxSize())
+                    } else {
                     Box(Modifier.fillMaxSize().alpha(pageAlpha)) {
                         MeloXApp(
                             openNowPlayingRequest = openNowPlayingRequest,
@@ -103,6 +141,7 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
                                 .clip(RoundedCornerShape(24.dp))
                                 .alpha(splashAlpha),
                         )
+                    }
                     }
                 }
             }

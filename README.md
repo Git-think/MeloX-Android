@@ -78,7 +78,7 @@ Root is not required. Platform extras use standard Android or OEM APIs and degra
 - Charts, home recommendations, daily recommendations, private FM, and heart mode;
 - Podcast home, categories, subscriptions, and episode details;
 - NetEase cloud drive read, search, upload, playback, and delete;
-- Multi-select download, per-download quality, offline lyrics, auto cache, and storage repair;
+- Multi-select download, per-download quality, offline lyrics, auto cache, storage repair, and pause / resume;
 - App-private offline copies, optional MediaStore export, and a local library by song, artist, album, and folder;
 - Play directly from the library or search results;
 - Library-wide search across songs, playlists, albums, artists, and recent playback.
@@ -97,7 +97,10 @@ Root is not required. Platform extras use standard Android or OEM APIs and degra
 - AutoMix dual-player preload, analysis, transition planning, tempo matching, fades, and EQ envelope;
 - 10-band equalizer from 31 Hz to 16 kHz, presets, system or player volume, and a sleep timer;
 - Shared-element player transitions, expand and collapse, and landscape player;
-- Tap the now-playing title for a glass menu to open the artist, album, or current queue.
+- Tap the now-playing title for a glass menu to open the artist, album, or current queue;
+- Lyrics picture-in-picture with previous / play-pause / next remote actions.
+- In-app playback device picker for the phone speaker, Bluetooth, wired and USB outputs.
+- Nearby MeloX over LAN: control, cast (MeloX PCM), transfer, and listen together; see `docs/MELOX-LAN.md`.
 
 ### Quality
 
@@ -124,7 +127,8 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Apple Music trailing scroll, bounce, blur, highlight, long-tone, and refresh-rate settings;
 - EVA layouts and 18 TextPV templates;
 - Skyline landscape lyrics;
-- System media lyrics, a dedicated lyric notification, and a draggable floating lyric window.
+- System media lyrics, a dedicated lyric notification, and a draggable floating lyric window;
+- ColorOS lockscreen lyrics (`lyricInfo`) and SuperLyricApi publishing share the same lyric timeline.
 
 ### HyperOS
 
@@ -137,7 +141,7 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Listen Together rooms, members, progress, and queue sync;
 - Contacts, conversations, text messages, and in-app sharing;
 - Microphone recording, NetEase audio fingerprinting, and continuous recognition;
-- First-run welcome and account pages, in-app release notes, sponsor acknowledgements, clipboard link detection, page ordering, and feature switches;
+- First-run welcome and account pages, in-app release notes, in-app log viewer, sponsor acknowledgements, clipboard link detection, page ordering, and feature switches;
 - GitHub version check, update prompt, license, and settings reset.
 
 ### Third-party music sources
@@ -153,7 +157,7 @@ The playable quality depends on the track, account entitlement, region, and the 
 
 ## Platform scope
 
-iOS Live Activity and Dynamic Island map to the Android media notification, lyric notification, and optional HyperOS Focus Notification. iOS picture-in-picture lyrics map to the Android floating lyric window. Apple Watch, watchOS, and macOS targets are not part of the Android APK.
+iOS Live Activity and Dynamic Island map to the Android media notification, lyric notification, and optional HyperOS Focus Notification. iOS picture-in-picture lyrics map to Android's native picture-in-picture window, with the draggable floating lyric window as a fallback. Apple Watch, watchOS, and macOS targets are not part of the Android APK.
 
 Liquid Glass uses Kyant0 `AndroidLiquidGlass` Backdrop. The result still depends on the Android version, GPU, and OEM compositor.
 

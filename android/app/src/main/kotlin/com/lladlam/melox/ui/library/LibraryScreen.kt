@@ -875,6 +875,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
     var exportMessage by remember { mutableStateOf<String?>(null) }
 
     val active = downloads.activeDownloads.values.toList()
+    val paused = downloads.pausedDownloads.values.toList()
     val completed = downloads.downloads.toList()
     val providerCompleted = providerDownloads.downloads.toList()
     val groups = downloads.downloadedPlaylists
@@ -1184,10 +1185,42 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                   fontSize = 12.sp,
               )
           }
+          Text(stringResource(R.string.action_pause), color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { downloads.pause(item.song.id) }.padding(10.dp))
           Text(stringResource(R.string.action_cancel), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.cancel(item.song.id) }.padding(10.dp))
       }
   }
-  if (active.isEmpty()) {
+  if (paused.isNotEmpty()) {
+      item {
+          Text(
+              stringResource(R.string.library_paused),
+              fontSize = 15.sp,
+              fontWeight = FontWeight.SemiBold,
+              modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+          )
+      }
+      items(paused, key = { "paused-${it.song.id}" }) { item ->
+          Row(Modifier.fillMaxWidth().height(66.dp), verticalAlignment = Alignment.CenterVertically) {
+              AsyncImage(
+                  model = item.song.artworkUrl,
+                  contentDescription = null,
+                  contentScale = ContentScale.Crop,
+                  modifier = Modifier.size(48.dp).clip(RoundedCornerShape(9.dp)),
+              )
+              Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                  Text(item.song.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                  val progress = item.fractionCompleted?.let { "${(it * 100).toInt()}%" } ?: stringResource(R.string.library_preparing)
+                  Text(
+                      "$progress · ${item.quality.title}",
+                      color = MaterialTheme.colorScheme.onBackground.copy(alpha = .48f),
+                      fontSize = 12.sp,
+                  )
+              }
+              Text(stringResource(R.string.action_resume), color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { downloads.resume(item.song.id) }.padding(10.dp))
+              Text(stringResource(R.string.action_cancel), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.cancel(item.song.id) }.padding(10.dp))
+          }
+      }
+  }
+  if (active.isEmpty() && paused.isEmpty()) {
       item { Text(stringResource(R.string.library_none_active), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f), modifier = Modifier.padding(top = 24.dp)) }
   }
         }
@@ -2035,8 +2068,7 @@ internal fun MeloXUnifiedPlaylistDetailScreen(
     artworkSharedKey: String? = null,
 ) {
     val context = LocalContext.current.applicationContext
-    val client = remember(context) {
-        NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
+    val client = remember(context) {    NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
     }
     if (!LocalMeloXListDetail.current && sharedTransitionScope != null && animatedVisibilityScope != null) {
         MeloXPlaylistDetailScreen(
@@ -2383,6 +2415,12 @@ private fun MeloXPlaylistDetailScreen(
     }
 
     val displayed = detail?.summary ?: initialPlaylist
+    // 只有网易云本源歌单才可能走服务端「云端随机」；专辑/第三方源保留本地随机。
+    val cloudPlaylistId = if (isAlbum || providerPlaylist != null) {
+        null
+    } else {
+        displayed.id.takeIf { it > 0L }
+    }
     val songs = detail?.songs.orEmpty()
     val ownedPlaylistId = displayed.id.takeIf {
         !isAlbum &&
@@ -2674,6 +2712,7 @@ private fun MeloXPlaylistDetailScreen(
                                 context = context,
                                 songs = filteredSongs,
                                 onFailure = { errorMessage = it.message ?: "播放失败" },
+                                playlistId = cloudPlaylistId,
                             )
                         },
                         onShuffle = {
@@ -2682,6 +2721,7 @@ private fun MeloXPlaylistDetailScreen(
                                 songs = filteredSongs,
                                 shuffle = true,
                                 onFailure = { errorMessage = it.message ?: "播放失败" },
+                                playlistId = cloudPlaylistId,
                             )
                         },
                         isSaved = isSaved == true,
@@ -2818,6 +2858,7 @@ private fun MeloXPlaylistDetailScreen(
                                     songs = filteredSongs,
                                     selectedSongId = song.id,
                                     onFailure = { errorMessage = it.message ?: "播放失败" },
+                                    playlistId = cloudPlaylistId,
                                 )
                             },
                             onMore = {

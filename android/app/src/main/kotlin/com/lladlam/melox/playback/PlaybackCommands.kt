@@ -19,6 +19,8 @@ import com.lladlam.melox.core.audio.MusicQualityRuntime
 import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.model.SearchSong
 import com.lladlam.melox.core.network.MeloXNetworkAvailability
+import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
+import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.concurrent.Executor
 import java.util.UUID
@@ -32,9 +34,16 @@ object PlaybackCommands {
     const val QUEUE_ENTRY_ID_KEY = "melox.queue.entry_id"
     const val QUEUE_ORIGINAL_INDEX_UNSET = -1
     const val HEART_MODE_KEY = "melox.playback.heart_mode"
+    const val PLAYLIST_ID_KEY = "melox.queue.playlist_id"
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mainExecutor = Executor { command -> mainHandler.post(command) }
+    private val cloudShuffleScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+    )
+
+    @Volatile
+    private var cloudShuffleGeneration = 0L
 
     @Volatile
     private var activeController: MediaController? = null
@@ -54,6 +63,7 @@ object PlaybackCommands {
         startPositionMs: Long = C.TIME_UNSET,
         heartMode: Boolean = false,
         onFailure: ((Throwable) -> Unit)? = null,
+        playlistId: Long? = null,
     ) {
         val appContext = context.applicationContext
         val selectedProviderTrack = songs.firstOrNull { it.id == selectedSongId }?.providerTrack
@@ -73,6 +83,56 @@ object PlaybackCommands {
             return
         }
 
+        // 云端随机：播放网易云歌单且开关打开时，先请求服务端随机顺序，
+        // 失败就回退本地随机（与 Mei 行为一致）。
+        val cloudShuffleEligible = playlistId != null &&
+            songs.size > 1 &&
+            MeloXSettingsPreferences.boolean(appContext, "playback_cloud_shuffle", true) &&
+            MeloXPlaybackModePreferences.shuffle(appContext)
+        if (cloudShuffleEligible) {
+            val seedSongId = selectedSongId.takeIf { it > 0L } ?: songs.first().id
+            cloudShuffleScope.launch {
+                val serverOrder = runCatching {
+                    com.lladlam.melox.core.library.NeteaseLibraryClient(
+                        cookieProvider = { com.lladlam.melox.core.account.NeteaseSessionStore.readCookie(appContext) },
+                    ).randomPlaylistIds(playlistId, seedSongId)
+                }.getOrNull()
+                dispatchNeteaseQueue(
+                    context = context,
+                    songs = songs,
+                    selectedSongId = selectedSongId,
+                    startPositionMs = startPositionMs,
+                    heartMode = heartMode,
+                    onFailure = onFailure,
+                    playlistId = playlistId,
+                    serverOrder = serverOrder,
+                )
+            }
+            return
+        }
+        dispatchNeteaseQueue(
+            context = context,
+            songs = songs,
+            selectedSongId = selectedSongId,
+            startPositionMs = startPositionMs,
+            heartMode = heartMode,
+            onFailure = onFailure,
+            playlistId = playlistId,
+            serverOrder = null,
+        )
+    }
+
+    private fun dispatchNeteaseQueue(
+        context: Context,
+        songs: List<SearchSong>,
+        selectedSongId: Long,
+        startPositionMs: Long,
+        heartMode: Boolean,
+        onFailure: ((Throwable) -> Unit)?,
+        playlistId: Long?,
+        serverOrder: List<Long>?,
+    ) {
+        val appContext = context.applicationContext
         val quality = MusicQualityPreferences.read(appContext)
         MusicQualityRuntime.selected = quality
         MusicQualityRuntime.clear()
@@ -117,6 +177,7 @@ object PlaybackCommands {
                             originalIndex = index,
                             artworkOverride = downloads.localArtworkUri(song.id),
                             heartMode = heartMode,
+                            playlistId = playlistId,
                         )
                     }
                     val selectedItemIndex = originalQueue.indexOfFirst {
@@ -128,7 +189,11 @@ object PlaybackCommands {
                     val useShuffle = MeloXPlaybackModePreferences.shuffle(appContext) && !smartQueue
                     val queue = if (useShuffle) {
                         val selected = originalQueue[selectedItemIndex]
-                        listOf(selected) + originalQueue.filterIndexed { index, _ -> index != selectedItemIndex }.shuffled()
+                        val rest = originalQueue.filterIndexed { index, _ -> index != selectedItemIndex }
+                        val orderedRest = serverOrder?.let { order ->
+                            orderByServerIds(rest, order)
+                        } ?: rest.shuffled()
+                        listOf(selected) + orderedRest
                     } else {
                         originalQueue
                     }
@@ -146,6 +211,10 @@ object PlaybackCommands {
                     adoptController(controller)
                     controller.shuffleModeEnabled = false
                     controller.setMediaItems(dispatchedQueue, dispatchedStartIndex, startPositionMs)
+                    Log.d(
+                        TAG,
+                        "Cloud shuffle=${serverOrder != null}, playlist=$playlistId",
+                    )
                     MeloXPlaybackModeRuntime.heartModeActive = heartMode
                     controller.prepare()
                     controller.play()
@@ -181,6 +250,7 @@ object PlaybackCommands {
         shuffle: Boolean = false,
         heartMode: Boolean = false,
         onFailure: ((Throwable) -> Unit)? = null,
+        playlistId: Long? = null,
     ) {
         val queue = if (shuffle) songs.shuffled() else songs
         val first = queue.firstOrNull()
@@ -194,6 +264,7 @@ object PlaybackCommands {
             selectedSongId = first.id,
             heartMode = heartMode,
             onFailure = onFailure,
+            playlistId = playlistId,
         )
     }
 
@@ -353,6 +424,48 @@ object PlaybackCommands {
         reorderFutureInPlace(player, manual + orderedBase)
         player.shuffleModeEnabled = false
         MeloXPlaybackModePreferences.setShuffle(context, enabled)
+        // 云端随机：本地顺序先落地（即时反馈），服务端随机回来后再覆盖未来部分。
+        if (enabled) requestCloudShuffle(context, player) else cloudShuffleGeneration++
+    }
+
+    /**
+     * Applies NetEase server-side shuffle to the current playlist queue. Any
+     * failure keeps the local shuffle that was just applied.
+     */
+    private fun requestCloudShuffle(appContext: Context, player: Player) {
+        if (!MeloXSettingsPreferences.boolean(appContext, "playback_cloud_shuffle", true)) return
+        val playlistId = player.currentMediaItem
+            ?.mediaMetadata?.extras
+            ?.getLong(PLAYLIST_ID_KEY, -1L)
+            ?.takeIf { it > 0L } ?: return
+        val seedSongId = player.currentMediaItem?.mediaId?.toLongOrNull()?.takeIf { it > 0L } ?: return
+        val generation = ++cloudShuffleGeneration
+        cloudShuffleScope.launch {
+            val serverOrder = runCatching {
+                com.lladlam.melox.core.library.NeteaseLibraryClient(
+                    cookieProvider = { com.lladlam.melox.core.account.NeteaseSessionStore.readCookie(appContext) },
+                ).randomPlaylistIds(playlistId, seedSongId)
+            }.getOrNull()
+            if (serverOrder == null || generation != cloudShuffleGeneration) return@launch
+            mainHandler.post {
+                if (generation != cloudShuffleGeneration ||
+                    !MeloXSettingsPreferences.boolean(appContext, "playback_cloud_shuffle", true)
+                ) return@post
+                if (player.currentMediaItem?.mediaMetadata?.extras?.getLong(PLAYLIST_ID_KEY, -1L) != playlistId) return@post
+                val currentIndex = player.currentMediaItemIndex
+                val count = player.mediaItemCount
+                if (currentIndex !in 0 until count) return@post
+                val items = List(count) { player.getMediaItemAt(it) }
+                val manual = items.drop(currentIndex + 1).filter {
+                    it.mediaMetadata.extras?.getString(QUEUE_ORIGIN_KEY) == QUEUE_ORIGIN_MANUAL
+                }
+                val base = items.drop(currentIndex + 1).filter {
+                    it.mediaMetadata.extras?.getString(QUEUE_ORIGIN_KEY) != QUEUE_ORIGIN_MANUAL
+                }
+                reorderFutureInPlace(player, manual + orderByServerIds(base, serverOrder))
+                Log.d(TAG, "Applied cloud shuffle for playlist=$playlistId, order=${serverOrder.size}")
+            }
+        }
     }
 
     fun prioritizeManualQueue(player: Player) {
@@ -386,6 +499,15 @@ object PlaybackCommands {
             originalIndex = originalIndex,
         )
     } ?: song.toMediaItem(quality, queueOrigin, originalIndex, artworkOverride, heartMode)
+
+    /** Server-order ranking with a local-shuffle fallback for ids it did not return. */
+    private fun orderByServerIds(items: List<MediaItem>, order: List<Long>): List<MediaItem> {
+        val rank = order.withIndex().associate { (index, id) -> id to index }
+        val matched = items.filter { (it.mediaId.toLongOrNull() ?: -1L) in rank }
+            .sortedBy { rank[it.mediaId.toLongOrNull()] ?: Int.MAX_VALUE }
+        val missing = items.filterNot { (it.mediaId.toLongOrNull() ?: -1L) in rank }.shuffled()
+        return matched + missing
+    }
 
     private fun reorderFutureInPlace(player: Player, desiredFuture: List<MediaItem>) {
         val start = player.currentMediaItemIndex + 1
@@ -430,6 +552,7 @@ object PlaybackCommands {
         originalIndex: Int = QUEUE_ORIGINAL_INDEX_UNSET,
         artworkOverride: Uri? = null,
         heartMode: Boolean = MeloXPlaybackModeRuntime.heartModeActive,
+        playlistId: Long? = null,
     ): MediaItem {
         val metadata = MediaMetadata.Builder()
             .setTitle(name)
@@ -444,6 +567,7 @@ object PlaybackCommands {
                     putBoolean(HEART_MODE_KEY, heartMode)
                     putLong(PlaybackTrackIdentity.DurationMsExtra, durationMs.coerceAtLeast(0L))
                     putBoolean(PlaybackTrackIdentity.IsFavoriteExtra, false)
+                    playlistId?.let { putLong(PLAYLIST_ID_KEY, it) }
                 },
             )
             .apply {

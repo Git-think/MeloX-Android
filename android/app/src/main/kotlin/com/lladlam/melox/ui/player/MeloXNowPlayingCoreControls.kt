@@ -1,10 +1,6 @@
 package com.lladlam.melox.ui.player
 
-import android.content.Context
-import android.content.Intent
-import android.media.MediaRouter2
 import android.os.Build
-import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -1217,6 +1213,7 @@ internal fun ScenePageSelector(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var showOutputPicker by remember { mutableStateOf(false) }
     val rowHeight = if (compact) 42.dp else 50.dp
     val hPadding = if (compact) MeloXCompactPageSelectorHPadding else 32.dp
     Row(
@@ -1242,7 +1239,7 @@ internal fun ScenePageSelector(
             enabled = true,
             compact = compact,
             useVectorGlyphs = useVectorGlyphs,
-            onClick = { showSystemAudioOutputSwitcher(context) },
+            onClick = { showOutputPicker = true },
         )
 
         Box {
@@ -1285,6 +1282,7 @@ internal fun ScenePageSelector(
             }
         }
     }
+    MeloXAudioOutputDialog(visible = showOutputPicker, onDismiss = { showOutputPicker = false })
 }
 
 
@@ -1310,25 +1308,6 @@ private fun ScenePlaybackModeBadge(
         else -> MeloXSymbol.Repeat
     }
     MeloXPlaybackModeGlyph(symbol = symbol, size = size, modifier = modifier, color = color)
-}
-
-private fun showSystemAudioOutputSwitcher(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        // ⚠ `MediaRouter2.getInstance()` 的文档明确它**可能返回 null**（设备上没有可用的
-        //   路由服务时）。旧写法直接链式 `.showSystemOutputSwitcher()` ⇒ 在 API 34+ 的
-        //   （也就是能跑液态玻璃的）机型上偶发 NPE 闪退，且整个函数在点击音频输出按钮的
-        //   **唯一路径**上，没有上层 try/catch 接得住。
-        val router = runCatching { MediaRouter2.getInstance(context) }.getOrNull()
-        val shown = router != null &&
-            runCatching { router.showSystemOutputSwitcher() }.getOrDefault(false)
-        if (shown) return
-    }
-    runCatching {
-        context.startActivity(
-            Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
 }
 
 @Composable
@@ -1376,7 +1355,7 @@ private fun ScenePageButton(
             .semantics {
                 contentDescription = when (kind) {
                     SceneGlyphKind.Lyrics -> "歌词"
-                    SceneGlyphKind.AirPlay -> "AirPlay"
+                    SceneGlyphKind.AirPlay -> "播放设备"
                     SceneGlyphKind.Queue -> "接下来播放"
                     else -> kind.name
                 }

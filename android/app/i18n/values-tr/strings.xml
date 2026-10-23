@@ -39,6 +39,7 @@
     <string name="action_done">Tamam</string>
     <string name="action_play">Çal</string>
     <string name="action_pause">Duraklat</string>
+    <string name="action_resume">Devam et</string>
     <string name="action_download">İndir</string>
     <string name="action_share">Paylaş</string>
     <string name="app_exit_confirm">Çıkmak için tekrar basın</string>
@@ -114,6 +115,10 @@
     <string name="player_queue_count">Kuyruk · %1$d şarkı</string>
     <string name="player_title_menu_failed">Şarkı bilgileri yüklenemedi</string>
     <string name="player_sleep_minutes">%1$d dakika sonra</string>
+    <string name="settings_cloud_shuffle">Bulut rastgele sıralama</string>
+    <string name="settings_cloud_shuffle_note">网易云 çalma listelerinde sunucu sırasını tercih eder; kullanılamazsa yerel rastgeleye döner.</string>
+    <string name="settings_skip_unavailable">Ses kaynağı olmayanları atla</string>
+    <string name="settings_skip_unavailable_note">VIP, telif veya bölge kısıtı nedeniyle oynatılamayan parçada sonrakine geç.</string>
     <string name="player_sleep_remaining">Yaklaşık %1$d dakika kaldı</string>
     <string name="player_sleep_end_at">Yaklaşık %1$s civarında durur</string>
     <string name="player_cancel_sleep">Zamanlayıcıyı iptal et</string>
@@ -174,6 +179,17 @@
     <string name="player_replies_failed">Yanıtlar yüklenemedi</string>
     <string name="player_rank_failed">Dinleme geçmişi yüklenemedi</string>
     <string name="player_wiki_failed">Bilgi yüklenemedi</string>
+    <string name="player_output_devices">Oynatma cihazı</string>
+    <string name="player_output_current">Geçerli çıkış: %1$s</string>
+    <string name="player_output_none">Değiştirilebilir ses çıkışı bulunamadı</string>
+    <string name="player_output_open_system">Sistem ses çıkışını aç</string>
+    <string name="player_output_switch_failed">Bu cihaza geçilemedi. Sistem çıkış seçici açıldı.</string>
+    <string name="player_output_unavailable">Bu cihazda ses çıkışı değiştirilemiyor</string>
+    <string name="player_output_this_phone">Bu telefon</string>
+    <string name="player_output_bluetooth">Bluetooth cihazı</string>
+    <string name="player_output_wired">Kablolu kulaklık</string>
+    <string name="player_output_usb">USB ses</string>
+    <string name="player_output_audio_device">Ses cihazı</string>
     <string name="player_source_actions">%1$s · Şarkı işlemleri</string>
     <string name="player_choose_playlist">Bir çalma listesi seçin</string>
     <string name="player_recognizing">Bu yerel şarkı tanımlanıyor…</string>
@@ -247,6 +263,8 @@
     <string name="library_download_hint">Bir şarkının diğer menüsünden Şarkıyı indir seçeneğini kullanın.</string>
     <string name="library_preparing">Hazırlanıyor</string>
     <string name="library_none_active">Hiçbir şey indirilmiyor</string>
+    <string name="library_paused">Duraklatılan indirmeler</string>
+    <string name="library_none_paused">Duraklatılan indirme yok</string>
     <string name="library_downloaded_count">%1$d indirildi</string>
     <string name="library_downloaded_songs">%1$d indirilmiş şarkı</string>
     <string name="library_login_required">Giriş gerekli</string>

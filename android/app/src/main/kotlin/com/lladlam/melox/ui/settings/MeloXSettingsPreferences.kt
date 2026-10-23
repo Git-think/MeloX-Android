@@ -13,6 +13,10 @@ enum class MeloXLyricAnnotationDisplayMode { FocusedLine, AllLines }
 enum class MeloXLyricsStyle { AppleMusic, Eva, TextPV }
 enum class MeloXLyricsRenderingQuality { Low, Balanced, High }
 enum class MeloXPlayerBackgroundMode { FlowingLight, AppleLyrics, BlurredArtwork, CustomImage }
+
+/** Only the two procedural modes use the flowing-light shader path. */
+internal val MeloXPlayerBackgroundMode.usesFlowingBackdrop: Boolean
+    get() = this != MeloXPlayerBackgroundMode.BlurredArtwork && this != MeloXPlayerBackgroundMode.CustomImage
 enum class MeloXPlayerShell { AppleMusic, Classic }
 enum class MeloXTextPVStyle {
     BlueBold, KineticSplit, BluePlane, CyberGrunge, Geometric, RainCity,
@@ -456,12 +460,15 @@ object MeloXSettingsRuntime {
             } else {
                 MeloXPlayerBackgroundMode.BlurredArtwork
             }
-        flowingBackdropEnabled = playerBackgroundMode != MeloXPlayerBackgroundMode.BlurredArtwork
+        flowingBackdropEnabled = playerBackgroundMode.usesFlowingBackdrop
         flowingLightSpeed = MeloXSettingsPreferences.float(app, "player_flowing_speed", 1f).coerceIn(.25f, 2f)
         flowingLightSaturation = MeloXSettingsPreferences.float(app, "player_flowing_saturation", 1f).coerceIn(0f, 2f)
         flowingLightBrightness = MeloXSettingsPreferences.float(app, "player_flowing_brightness", 1f).coerceIn(.4f, 1.6f)
         customBackgroundPath = MeloXSettingsPreferences.string(app, "player_custom_background_path", "")
             .takeIf { it.isNotBlank() && java.io.File(it).isFile }
+        // Interrupted imports can leave orphan files behind; neither of them is
+        // referenced by preferences anymore, so clean them once at startup.
+        runCatching { MeloXCustomBackgroundStore.prune(app, customBackgroundPath) }
         playerShell = runCatching {
             MeloXPlayerShell.valueOf(MeloXSettingsPreferences.string(app, "player_shell", MeloXPlayerShell.AppleMusic.name))
         }.getOrDefault(MeloXPlayerShell.AppleMusic)
@@ -968,7 +975,7 @@ object MeloXSettingsPreferences {
                     MeloXPlayerBackgroundMode.valueOf(value)
                 }.getOrDefault(MeloXPlayerBackgroundMode.FlowingLight)
                 MeloXSettingsRuntime.flowingBackdropEnabled =
-                    MeloXSettingsRuntime.playerBackgroundMode != MeloXPlayerBackgroundMode.BlurredArtwork
+                    MeloXSettingsRuntime.playerBackgroundMode.usesFlowingBackdrop
             }
             "player_custom_background_path" -> MeloXSettingsRuntime.customBackgroundPath =
                 value.takeIf { it.isNotBlank() }

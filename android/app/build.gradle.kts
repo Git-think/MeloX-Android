@@ -342,6 +342,7 @@ dependencies {
 
     // External lyric integrations.
     implementation("io.github.proify.lyricon:provider:0.1.70")
+    implementation("com.github.HChenX:SuperLyricApi:3.4")
     // HyperOS Focus / Super Island notification payload builder.
     implementation("com.xzakota.hyper.notification:focus-api:1.4")
     // Optional non-root HyperOS compatibility path. If Shizuku is unavailable or
