@@ -2622,10 +2622,12 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         val (iconRes, labelRes) = when (action) {
             MeloXNotificationAction.None -> return null
             MeloXNotificationAction.PlayMode -> when {
-                active.shuffleModeEnabled -> R.drawable.ic_melox_notification_play_mode to R.string.notification_mode_shuffle
-                active.repeatMode == Player.REPEAT_MODE_ONE -> android.R.drawable.ic_media_previous to R.string.notification_mode_repeat_one
-                active.repeatMode == Player.REPEAT_MODE_ALL -> android.R.drawable.ic_media_next to R.string.notification_mode_repeat_all
-                else -> android.R.drawable.ic_media_ff to R.string.notification_mode_sequential
+                MeloXPlaybackModePreferences.shuffle(this) ->
+                    R.drawable.ic_melox_notification_shuffle to R.string.notification_mode_shuffle
+                active.repeatMode == Player.REPEAT_MODE_ONE ->
+                    R.drawable.ic_melox_notification_repeat_one to R.string.notification_mode_repeat_one
+                else ->
+                    R.drawable.ic_melox_notification_repeat_all to R.string.notification_mode_repeat_all
             }
             MeloXNotificationAction.Favorite -> R.drawable.ic_melox_notification_favorite to R.string.notification_action_favorite
             MeloXNotificationAction.FloatingLyrics -> R.drawable.ic_melox_notification_floating_lyrics to R.string.notification_action_floating_lyrics
@@ -2677,20 +2679,20 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
     }
 
-    /** Shares the same mode cycle between the player UI and system media controls. */
+    /** Cycles 列表循环 → 单曲循环 → 随机播放 and never leaves the three states. */
     private fun switchPlayModeCycle() {
         val active = player ?: return
         when {
-            active.shuffleModeEnabled -> {
+            MeloXPlaybackModePreferences.shuffle(this) -> {
                 PlaybackCommands.setExplicitShuffle(this, active, false)
-                active.repeatMode = Player.REPEAT_MODE_ONE
+                active.repeatMode = Player.REPEAT_MODE_ALL
             }
             active.repeatMode == Player.REPEAT_MODE_ONE -> {
                 active.repeatMode = Player.REPEAT_MODE_ALL
+                PlaybackCommands.setExplicitShuffle(this, active, true)
             }
             else -> {
-                active.repeatMode = Player.REPEAT_MODE_ALL
-                PlaybackCommands.setExplicitShuffle(this, active, true)
+                active.repeatMode = Player.REPEAT_MODE_ONE
             }
         }
         refreshNotificationButtons()

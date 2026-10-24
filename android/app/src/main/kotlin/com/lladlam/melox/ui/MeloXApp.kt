@@ -1445,12 +1445,10 @@ fun MeloXApp(
         availableUpdate?.takeIf {
             onboardingPage < 0 && !cloudControlChoicePending && pendingRemoteNotice == null
         }?.let { release ->
-            MeloXAppDialog(
-                title = stringResource(R.string.app_update_found, release.version),
-                message = release.name + release.notes.takeIf(String::isNotBlank)?.let { "\n\n${it.take(500)}" }.orEmpty(),
-                dismissLabel = stringResource(R.string.app_update_later),
-                confirmLabel = if (release.apkUrl != null) stringResource(R.string.app_update_download) else stringResource(R.string.app_update_view),
-                onDismiss = { availableUpdate = null },
+            MeloXUpdateDialog(
+                release = release,
+                downloadAvailable = release.apkUrl != null,
+                onLater = { availableUpdate = null },
                 onConfirm = {
                     availableUpdate = null
                     playerScope.launch {
@@ -1532,6 +1530,71 @@ private fun MeloXAppDialog(
                 style = MeloXGlassButtonStyle.BorderedProminent,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) { Text(confirmLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+@Composable
+private fun MeloXUpdateDialog(
+    release: MeloXRelease,
+    downloadAvailable: Boolean,
+    onLater: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    // Capped to the safe drawing area: a long release note scrolls inside the
+    // panel instead of pushing the buttons off screen.
+    MeloXGlassDialog(visible = true, onDismiss = onLater, maxHeightFraction = 0.92f) {
+        Text(
+            stringResource(R.string.app_update_found, release.version),
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .padding(top = 10.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (release.name.isNotBlank()) {
+                Text(
+                    release.name,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (release.notes.isNotBlank()) {
+                Text(
+                    release.notes,
+                    modifier = Modifier.padding(top = if (release.name.isNotBlank()) 8.dp else 0.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f),
+                    lineHeight = 21.sp,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            MeloXGlassButton(
+                onClick = onLater,
+                modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
+                style = MeloXGlassButtonStyle.Plain,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            ) { Text(stringResource(R.string.app_update_later), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.width(10.dp))
+            MeloXGlassButton(
+                onClick = onConfirm,
+                modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
+                style = MeloXGlassButtonStyle.BorderedProminent,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    if (downloadAvailable) stringResource(R.string.app_update_download) else stringResource(R.string.app_update_view),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

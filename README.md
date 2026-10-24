@@ -29,15 +29,15 @@ The **Windows** and **Linux** editions are in their final verification stage. If
 
 > MeloX Android is an unofficial open-source project. It is not affiliated with, partnered with, or authorized by NetEase Cloud Music, Xiaomi, Apple, or their related companies.
 
-## Current version: 0.6.5
+## Current version: 0.7.0
 
-`0.6.5` (versionCode **24**, 2026-10-18) adds configurable split-screen layouts, independent Dock / mini-player placement, shared multi-provider actions, and YouTube Music account and library improvements. It also restores application language selection, fixes lyric translation language routing, and retains the signed hot-update channel.
+`0.7.0` (versionCode **25**, 2026-10-25) adds the Qishui music provider, LAN Together / DLNA / MiPlay casting, and experimental USB audio output, while reworking playback fallbacks, Kugou Lite daily rewards and lyric romanization.
 
-- Split-screen is enabled by default. In **Settings → General**, place the Dock and mini player independently at the bottom-left, bottom-right, top-left, top-right, or vertically along either screen edge. Matching positions retain linked scroll-collapse behaviour; separate positions stay expanded.
-- Search, collection details, song menus and downloads use each provider's actual capabilities. YouTube Music adds channel switching, editable-playlist filtering and continuation paging, with fixes for request region and browser-session authentication.
-- All music sources use the same lyric-loading pipeline, including matching, bindings, caching and translation-language preferences. Language changes reload the current track; immersive bottom-area taps reveal controls without seeking.
+- Qishui Music supports Douyin QR sign-in, recommendations, search, playlists, lyrics and playback. LAN Together now coordinates queue and seek changes; DLNA and MiPlay expose discovery and playback sessions; USB output is available as an experimental UAC1 path.
+- Playback resolves the current source first, then a strict full-audio match from another built-in source (NetEase, QQ Music, Kugou Lite, Qishui, Kuwo, Bilibili), and only then configured CHKSZ/LX resolvers. Bilibili collected folders use the correct endpoints and page lazily.
+- Kugou Lite checks in automatically once a day for both free-listening and concept VIP rewards. First-run onboarding is now a four-step full-screen flow, the privacy policy and disclaimer are version 1.3, lyric romanization stays under each visual line with per-unit alignment, and the update dialog stays inside screen safe areas.
 
-- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/v0.6.5)
+- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/v0.7.0)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
