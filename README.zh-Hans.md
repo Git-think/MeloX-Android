@@ -37,7 +37,7 @@
 - 播放按“当前音源 → 其他内置音源严格完整音频匹配（网易云、QQ、酷狗概念版、汽水、酷我、Bilibili）→ 已配置的 CHKSZ/LX”顺序执行；Bilibili 他人收藏夹改用正确接口并按页加载。
 - 酷狗概念版每天自动签到并同时领取畅听与概念版 VIP；首次启动改为四步全屏引导，隐私政策与免责声明升级至 1.3，罗马音固定在每条视觉行下方并按发音单元横向对齐，更新弹窗限制在屏幕安全区内。
 
-- 下载与完整更新日志：[GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/v0.7.0)
+- 下载与完整更新日志：[GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.7.0)
 - 详细版本记录：[CHANGELOG.md](CHANGELOG.md)
 - 本次版本说明：[CHANGELOG.md](CHANGELOG.md)
 

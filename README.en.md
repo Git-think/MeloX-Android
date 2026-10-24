@@ -37,7 +37,7 @@ The **Windows** and **Linux** editions are in their final verification stage. If
 - Playback resolves the current source first, then a strict full-audio match from another built-in source (NetEase, QQ Music, Kugou Lite, Qishui, Kuwo, Bilibili), and only then configured CHKSZ/LX resolvers. Bilibili collected folders use the correct endpoints and page lazily.
 - Kugou Lite checks in automatically once a day for both free-listening and concept VIP rewards. First-run onboarding is now a four-step full-screen flow, the privacy policy and disclaimer are version 1.3, lyric romanization stays under each visual line with per-unit alignment, and the update dialog stays inside screen safe areas.
 
-- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/v0.7.0)
+- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.7.0)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
