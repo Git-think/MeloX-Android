@@ -30,6 +30,7 @@ internal interface MeloXLanHost {
     fun snapshot(): MeloXLanPlayback
     fun queueSnapshot(): List<MeloXLanTrack>
     fun currentTrack(): MeloXLanTrack?
+    suspend fun dlnaSource(): com.lladlam.melox.dlna.DlnaMediaSource? = null
     fun control(command: String, positionMs: Long?, volume: Int?): Boolean
     fun transfer(track: MeloXLanTrack, queue: List<MeloXLanTrack>, positionMs: Long): Boolean
     fun startCast(format: MeloXLanCastFormat): MeloXLanCastHandshake?
@@ -40,9 +41,16 @@ internal interface MeloXLanHost {
         positionMs: Long,
         playing: Boolean,
         relay: MeloXLanRelay?,
+        sameDevice: Boolean = false,
     ): Boolean
     fun stopTogether()
     fun applyTogetherState(positionMs: Long, playing: Boolean, index: Int)
+    suspend fun prepareTogetherRound(queue: List<MeloXLanTrack>?, index: Int, positionMs: Long, relay: MeloXLanRelay?, sameDevice: Boolean): Boolean
+    fun commitTogetherRound(startAtLocalMs: Long, positionMs: Long, playing: Boolean)
+    fun setTogetherBarrier(enabled: Boolean)
+    fun correctTogether(positionMs: Long, playing: Boolean, index: Int, late: Boolean, forceSeek: Boolean = false) {
+        applyTogetherState(positionMs, playing, index)
+    }
 }
 
 internal class MeloXLanServer(
@@ -62,6 +70,11 @@ internal class MeloXLanServer(
     @Volatile private var togetherClient: Client? = null
     @Volatile private var togetherQueue: List<MeloXLanTrack> = emptyList()
     @Volatile private var togetherIndex: Int = 0
+    @Volatile private var togetherSession = ""
+    @Volatile private var togetherGeneration = -1L
+    @Volatile private var togetherLate = false
+    @Volatile private var togetherCommitted = false
+    private var preparation: Job? = null
 
     fun start(): Int {
         if (running) return controlPort
@@ -84,7 +97,7 @@ internal class MeloXLanServer(
         ).also { it.start() }
         eventJob = scope.launch {
             while (isActive) {
-                delay(1_000L)
+                delay(200L)
                 if (running && clients.isNotEmpty()) broadcastState()
             }
         }
@@ -114,15 +127,28 @@ internal class MeloXLanServer(
 
     fun hasTogether(): Boolean = togetherClient != null
 
+    fun stopTogetherSession() {
+        val client = togetherClient ?: return
+        togetherClient = null
+        preparation?.cancel()
+        togetherSession = ""
+        host.stopTogether()
+        onTogetherChanged?.invoke(false)
+        scope.launch(Dispatchers.IO) {
+            client.send(JSONObject().put("type", "event").put("event", "together.stopped"))
+        }
+    }
+
     fun sendTogetherControl(command: String, positionMs: Long?): Boolean {
         val client = togetherClient ?: return false
-        return client.sendRequest(
+        scope.launch(Dispatchers.IO) { client.sendRequest(
             JSONObject()
                 .put("type", "request")
                 .put("action", "control")
                 .put("command", command)
                 .put("positionMs", positionMs ?: 0L),
-        ) != null
+        ) }
+        return true
     }
 
     private fun bindControlSocket(): ServerSocket? {
@@ -173,16 +199,13 @@ internal class MeloXLanServer(
                     .put("state", state),
             )
         }
-        togetherClient?.let { client ->
+        togetherClient?.takeIf { togetherSession.isNotEmpty() }?.let { client ->
             client.send(
                 JSONObject()
                     .put("type", "event")
-                    .put("event", "together.state")
-                    .put("queue", JSONArray(togetherQueue.map { it.toJson() }))
-                    .put("index", togetherIndex)
-                    .put("positionMs", host.snapshot().positionMs)
-                    .put("playing", host.snapshot().playing)
-                    .put("serverTimeMs", System.currentTimeMillis()),
+                    .put("event", "together.status")
+                    .put("sessionId", togetherSession).put("generation", togetherGeneration)
+                    .put("state", state),
             )
         }
     }
@@ -248,6 +271,7 @@ internal class MeloXLanServer(
                         .put("deviceId", identity.deviceId)
                         .put("deviceName", identity.deviceName)
                         .put("platform", "android")
+                        .put("capabilities", JSONArray(listOf("control", "cast", "transfer", "together", MELOX_LAN_BARRIER)))
                         .put("port", controlPort),
                 )
                 socket.soTimeout = 0
@@ -265,7 +289,7 @@ internal class MeloXLanServer(
                     while (running && !closed.get()) {
                         val request = readJson() ?: break
                         if (request.optString("type") == "event") {
-                            if (togetherClient === this@Client) onTogetherEvent?.invoke(request)
+                            if (togetherClient === this@Client) handleTogetherEvent(request)
                         } else {
                             handle(request)
                         }
@@ -349,6 +373,8 @@ internal class MeloXLanServer(
                     }
                 }
                 "together.start" -> {
+                    preparation?.cancel()
+                    togetherSession = ""
                     val queue = MeloXLanTrack.fromJsonArray(request.optJSONArray("queue"))
                     val index = request.optInt("index", 0)
                     val position = request.optLong("positionMs", 0L).coerceAtLeast(0L)
@@ -358,6 +384,7 @@ internal class MeloXLanServer(
                         positionMs = position,
                         playing = request.optBoolean("playing", true),
                         relay = MeloXLanRelay.fromJson(request.optJSONObject("relay")),
+                        sameDevice = socket.inetAddress.isLoopbackAddress || socket.inetAddress == socket.localAddress,
                     )
                     if (ok) {
                         togetherClient = this
@@ -373,7 +400,36 @@ internal class MeloXLanServer(
                     }
                     if (ok) broadcastState()
                 }
+                "together.prepare" -> {
+                    val session = request.optString("sessionId")
+                    val generation = request.optLong("generation", -1L)
+                    val queue = MeloXLanTrack.fromJsonArray(request.optJSONArray("queue"))
+                    if (session.isBlank() || generation < 0L || queue.isEmpty() ||
+                        (session == togetherSession && generation <= togetherGeneration)) {
+                        respond { put("ok", false).put("error", "stale_or_invalid_round") }
+                        return
+                    }
+                    preparation?.cancel()
+                    togetherSession = session
+                    togetherGeneration = generation
+                    togetherCommitted = false
+                    togetherLate = false
+                    togetherClient = this
+                    togetherQueue = queue
+                    togetherIndex = request.optInt("index", 0)
+                    onTogetherChanged?.invoke(true)
+                    preparation = scope.launch {
+                        val ok = host.prepareTogetherRound(queue, togetherIndex, request.optLong("positionMs", 0L),
+                            MeloXLanRelay.fromJson(request.optJSONObject("relay")),
+                            socket.inetAddress.isLoopbackAddress || socket.inetAddress == socket.localAddress)
+                        if (togetherSession == session && togetherGeneration == generation && togetherClient === this@Client) {
+                            respond { put("ok", ok).put("sessionId", session).put("generation", generation) }
+                        }
+                    }
+                }
                 "together.stop" -> {
+                    preparation?.cancel()
+                    togetherSession = ""
                     host.stopTogether()
                     togetherClient = null
                     onTogetherChanged?.invoke(false)
@@ -386,6 +442,32 @@ internal class MeloXLanServer(
                     put("serverTimeMs", System.currentTimeMillis())
                 }
                 else -> respond { put("ok", false).put("error", "unknown_action:$action") }
+            }
+        }
+
+        private fun handleTogetherEvent(event: JSONObject) {
+            if (togetherSession.isNotEmpty()) {
+                if (event.optString("sessionId") != togetherSession || event.optLong("generation") != togetherGeneration) return
+                when (event.optString("event")) {
+                    "together.commit" -> {
+                        togetherLate = event.optBoolean("late")
+                        togetherCommitted = true
+                        host.commitTogetherRound(event.optLong("startAtMs") - event.optLong("clockOffsetMs"),
+                            event.optLong("positionMs"), event.optBoolean("playing"))
+                    }
+                    "together.state" -> {
+                        if (!togetherCommitted) return
+                        val state = event.optJSONObject("state") ?: event
+                        val playing = state.optBoolean("playing")
+                        val target = togetherTargetPosition(state.optLong("positionMs"), playing && state.optBoolean("ready", true),
+                            state.optLong("serverTimeMs", event.optLong("serverTimeMs")), System.currentTimeMillis(), event.optLong("clockOffsetMs"))
+                        host.correctTogether(target, playing, state.optInt("index"), togetherLate && !event.optBoolean("seek"), event.optBoolean("seek"))
+                    }
+                }
+            } else {
+                // v1 peers shipped both nested and flat state envelopes.
+                val state = event.optJSONObject("state") ?: event
+                onTogetherEvent?.invoke(JSONObject().put("event", event.optString("event")).put("state", state))
             }
         }
 
@@ -415,7 +497,10 @@ internal class MeloXLanServer(
             if (!closed.compareAndSet(false, true)) return
             clients.remove(this)
             if (togetherClient === this) {
+                preparation?.cancel()
+                togetherSession = ""
                 togetherClient = null
+                host.stopTogether()
                 onTogetherChanged?.invoke(false)
             }
             runCatching { socket.close() }

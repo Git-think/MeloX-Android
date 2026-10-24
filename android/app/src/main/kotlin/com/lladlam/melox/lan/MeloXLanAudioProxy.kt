@@ -57,7 +57,7 @@ internal class MeloXLanAudioProxy(
         val revoked: AtomicBoolean = AtomicBoolean(false),
     )
 
-    fun issue(guestAddress: String, queue: List<MeloXLanTrack>): MeloXLanRelay? {
+    @Synchronized fun issue(guestAddress: String, queue: List<MeloXLanTrack>): MeloXLanRelay? {
         val ip = localIpv4Address() ?: return null
         val socket = ensureServer() ?: return null
         val songIds = queue.mapNotNull { it.id.toLongOrNull()?.takeIf { id -> id > 0L } }.toSet()

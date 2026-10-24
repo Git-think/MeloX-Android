@@ -354,7 +354,7 @@ internal class KugouLiteApiClient(
                 ),
                 headers = mapOf("content-type" to "application/x-www-form-urlencoded"),
             )
-        }.also { vipCache = null }
+        }.also { checkVipRewardResponse(it); vipCache = null }
     }
 
     suspend fun monthVipRecord(): JSONObject = withContext(Dispatchers.IO) {
@@ -362,6 +362,23 @@ internal class KugouLiteApiClient(
             path = "/youth/v1/activity/get_month_vip_record",
             params = mapOf("latest_limit" to "100"),
         )
+    }
+
+    suspend fun upgradeDailyVip(): JSONObject {
+        val session = sessionProvider()
+        if (!session.isLoggedIn) throw KugouAuthException("请先登录酷狗概念版")
+        return withContext(Dispatchers.IO) {
+            requests.postWithoutBody(
+                path = "/youth/v1/listen_song/upgrade_vip_reward",
+                params = mapOf("kugouid" to session.userId.toString(), "ad_type" to "1"),
+            )
+        }.also { checkVipRewardResponse(it); vipCache = null }
+    }
+
+    private fun checkVipRewardResponse(response: JSONObject) {
+        if (response.optInt("status", 0) != 1) {
+            throw IOException(response.optString("error_msg").ifBlank { "酷狗未确认本次会员领取，请刷新后重试" })
+        }
     }
 
     private suspend fun fetchVipStatus(): KugouLiteVip {

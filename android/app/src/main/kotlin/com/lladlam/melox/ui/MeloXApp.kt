@@ -133,8 +133,6 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.shapes.Capsule
 import com.lladlam.melox.ui.library.LibraryScreen
 import com.lladlam.melox.ui.legal.MELOX_LEGAL_VERSION
-import com.lladlam.melox.ui.legal.MeloXFirstLaunchLegalConsent
-import com.lladlam.melox.ui.legal.MeloXCloudControlConsentDialog
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigConsent
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigSource
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime
@@ -203,6 +201,7 @@ import com.lladlam.melox.ui.player.MeloXSmoothCorner
 import com.lladlam.melox.ui.player.MeloXPlayerRecedeCompatFallbackDp
 import com.lladlam.melox.ui.player.meloXPlayerTransitionDurationMillis
 import com.lladlam.melox.ui.player.rememberMeloXPlaybackUiState
+import com.lladlam.melox.ui.player.MeloXAudioOutputDialog
 import com.lladlam.melox.ui.provider.ProviderExploreScreen
 import com.lladlam.melox.ui.provider.ProviderHomeScreen
 import com.lladlam.melox.ui.provider.ProviderLibraryScreen
@@ -288,7 +287,8 @@ fun MeloXApp(
         if (MeloXSettingsRuntime.disableAutomaticTabBarShrink) tabBarMinimized = false
     }
     var libraryModalVisible by remember { mutableStateOf(false) }
-    var onboardingPage by remember {
+    var onboardingLoginRequested by rememberSaveable { mutableStateOf(false) }
+    var onboardingPage by rememberSaveable {
         mutableStateOf(if (MeloXSettingsPreferences.boolean(context, "onboarding_completed", false)) -1 else 0)
     }
     var availableUpdate by remember { mutableStateOf<MeloXRelease?>(null) }
@@ -672,6 +672,13 @@ fun MeloXApp(
               .layerBackdrop(pageBackdrop),
       )
       CompositionLocalProvider(LocalMeloXBackdrop provides pageBackdrop) {
+        CompositionLocalProvider(LocalMeloXBackdrop provides playerControlBackdrop) {
+            MeloXAudioOutputDialog(
+                visible = playbackState.showOutputPicker,
+                onDismiss = { playbackState.showOutputPicker = false },
+                state = playbackState,
+            )
+        }
         SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
             val sharedScope = this
             val fullPlayerVisible = playbackState.hasMedia &&
@@ -1350,12 +1357,17 @@ fun MeloXApp(
             )
         }
         if (onboardingPage >= 0) {
+            fun finishOnboarding() {
+                MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
+                onboardingPage = -1
+                if (onboardingLoginRequested) launchNeteaseLogin(AppTab.Settings)
+            }
             when (onboardingPage) {
-                0 -> MeloXFirstLaunchLegalConsent(
+                2 -> MeloXOnboardingLegalPage(
                     onAgree = {
                         MeloXSettingsPreferences.setString(context, "legal_consent_version", MELOX_LEGAL_VERSION)
                         MeloXSettingsPreferences.setLong(context, "legal_consent_at", System.currentTimeMillis())
-                        onboardingPage = 1
+                        if (cloudControlChoicePending) onboardingPage = 3 else finishOnboarding()
                     },
                     onDecline = { (hostContext as? Activity)?.finish() },
                     onOpenProject = {
@@ -1366,8 +1378,8 @@ fun MeloXApp(
                         }
                     },
                 )
-                1 -> MeloXOnboardingWelcomePage(
-                    onContinue = { onboardingPage = 2 },
+                0 -> MeloXOnboardingWelcomePage(
+                    onContinue = { onboardingPage = 1 },
                     onLicenses = {
                         runCatching {
                             hostContext.startActivity(
@@ -1379,24 +1391,37 @@ fun MeloXApp(
                         }
                     },
                 )
-                else -> MeloXOnboardingAccountPage(
+                1 -> MeloXOnboardingAccountPage(
                     isLoggedIn = neteaseSession.isLoggedIn,
                     nickname = neteaseSession.profile?.nickname,
                     avatarUrl = neteaseSession.profile?.avatarUrl,
                     onLogin = {
-                        MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
-                        onboardingPage = -1
-                        launchNeteaseLogin(AppTab.Settings)
+                        onboardingLoginRequested = true
+                        onboardingPage = 2
                     },
                     onFinish = {
-                        MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
-                        onboardingPage = -1
+                        onboardingLoginRequested = false
+                        onboardingPage = 2
+                    },
+                )
+                else -> MeloXOnboardingCloudPage(
+                    onReject = {
+                        MeloXRemoteConfigConsent.reject(context)
+                        playerScope.launch { MeloXRemoteConfigRuntime.clearCache(context) }
+                        cloudControlChoicePending = false
+                        finishOnboarding()
+                    },
+                    onAccept = {
+                        MeloXRemoteConfigConsent.accept(context)
+                        MeloXRemoteConfigRuntime.initializeAndRefresh(context, BuildConfig.VERSION_CODE, force = true)
+                        cloudControlChoicePending = false
+                        finishOnboarding()
                     },
                 )
             }
         }
         if (onboardingPage < 0 && cloudControlChoicePending) {
-            MeloXCloudControlConsentDialog(
+            MeloXOnboardingCloudPage(
                 onReject = {
                     MeloXRemoteConfigConsent.reject(context)
                     playerScope.launch { MeloXRemoteConfigRuntime.clearCache(context) }

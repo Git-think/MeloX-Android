@@ -282,7 +282,10 @@ MeloX Android comes from the MeloX Android migration and also uses or references
 - `librespot-java` — Spotify session, playback, and offline cache. Apache License 2.0.
 - [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — anonymous YouTube Music search and stream URLs. GPL-3.0.
 - [Metrolist InnerTube](https://github.com/mostafaalagamy/Metrolist) — signed-in YouTube Music catalog, library, and playlists. GPL-3.0, vendored at `android/innertube/`.
-- [Miuix](https://github.com/compose-miuix-ui/miuix) — current Backdrop / Blur experiment uses `miuix-blur`. Apache License 2.0.
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) — on-device AutoSync lyric-alignment inference. MIT.
+- [QuickJS Android](https://github.com/HarlonWang/quickjs-wrapper) — isolated runtime for LX Music-compatible source scripts. See the wrapper and QuickJS licenses.
+- [ZXing](https://github.com/zxing/zxing) — QR-code generation. Apache License 2.0.
+- [Shizuku](https://github.com/RikkaApps/Shizuku) — optional non-root HyperOS compatibility integration. Apache License 2.0.
 
 ### Liquid Glass
 
@@ -294,9 +297,17 @@ The glass effect is still experimental.
 
 ### API and UI references
 
+- [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — Qishui Music native API, QR sign-in, catalog, lyric, and playback-field reference. MIT; scope and validation: [QISHUI.md](docs/QISHUI.md).
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — Mei-based Apple Music style NetEase client used as a UI reference.
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API reference.
 - [bromothymolb/bilibili-api-zoku](https://github.com/bromothymolb/bilibili-api-zoku) — Bilibili API reference.
+- [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) — KuGou Lite protocol, request signing, daily VIP claims, and upgrade parameters. MIT; implementation notes: [KUGOU-LITE.md](docs/KUGOU-LITE.md).
+- [MoeKoeMusic/MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic) — desktop KuGou Lite account and daily-VIP flow reference. GPL-2.0.
+- [MoeKoeMusic/MoeKoeMusic-mobile](https://github.com/MoeKoeMusic/MoeKoeMusic-mobile) — mobile sign-in flow and activity-result handling reference. GPL-2.0. The MoeKoe projects were used for behavioural reference; their code and UI assets were not copied.
+- [lladlam/Square](https://github.com/lladlam/Square) — Spotify / YouTube Music dual-backend architecture reference.
+- [lladlam/MeloX-AutoSync](https://github.com/lladlam/MeloX-AutoSync) — local word-level lyric alignment and pronunciation-mapping reference; see the bundled component notices for individual licenses.
+- [neteasecloudmusicapienhanced/api-enhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced) — song recognition and audio-fingerprint runtime reference.
+- [mjhydri/BeatNet](https://github.com/mjhydri/BeatNet) — AutoMix beat, downbeat, and tempo analysis. CC BY 4.0.
 
 ### Upstream MeloX references
 
@@ -360,6 +371,7 @@ Thank you to the following sponsors for supporting MeloX Android!
 | Afdian user\_26d40 | CNY 50 |
 | Afdian user\_aec4c | CNY 6 (monthly) |
 | Bai | CNY 5 |
+| 中末 | CNY 8.88 |
 
 ## Links
 

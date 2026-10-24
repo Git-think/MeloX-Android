@@ -183,7 +183,6 @@ class CrossProviderPlaybackFallbackResolver(
     companion object {
         val EligibleSources = setOf(
             MusicSource.QQMusic,
-            MusicSource.Kugou,
             MusicSource.Kuwo,
             MusicSource.Bilibili,
         )

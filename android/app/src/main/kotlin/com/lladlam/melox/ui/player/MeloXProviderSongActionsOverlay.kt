@@ -627,6 +627,7 @@ private fun shareProviderSong(
         }
         MusicSource.Spotify -> "https://open.spotify.com/track/${identity.value}"
         MusicSource.YouTubeMusic -> "https://music.youtube.com/watch?v=${identity.value}"
+        MusicSource.Qishui -> "https://music.douyin.com/qishui/song/${identity.value}"
         MusicSource.Jellyfin -> null
         MusicSource.Local -> null
     }

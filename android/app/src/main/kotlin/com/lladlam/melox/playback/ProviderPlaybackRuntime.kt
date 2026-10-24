@@ -63,6 +63,7 @@ object ProviderPlaybackRuntime {
                 listOf(session.serverUrl, session.accessToken, session.userId).joinToString("|")
             }
             MusicSource.Local -> "local"
+            MusicSource.Qishui -> com.lladlam.melox.core.provider.qishui.QishuiSessionStore.read(context).sessionId
         }
         return MessageDigest.getInstance("SHA-256").digest(credential.toByteArray())
             .joinToString("") { "%02x".format(it) }

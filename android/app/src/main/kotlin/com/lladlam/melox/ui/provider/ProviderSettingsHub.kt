@@ -86,7 +86,7 @@ fun ProviderSettingsHub(
 
     var showServiceDialog by remember { mutableStateOf(false) }
     var showQQLogin by remember(currentSource) { mutableStateOf(false) }
-    var showKugouLogin by remember(currentSource) { mutableStateOf(false) }
+    var showQishuiLogin by remember(currentSource) { mutableStateOf(false) }
     var showKugouLiteLogin by remember(currentSource) { mutableStateOf(false) }
     var showKuwoLogin by remember(currentSource) { mutableStateOf(false) }
     var showAppleMusicLogin by remember(currentSource) { mutableStateOf(false) }
@@ -112,21 +112,18 @@ fun ProviderSettingsHub(
         MusicProviderSelectionStore.setAutomaticFallbackEnabled(context, false)
     }
 
+    if (showQishuiLogin && currentSource == MusicSource.Qishui) {
+        com.lladlam.melox.ui.account.QishuiLoginScreen(
+            onDismiss = { showQishuiLogin = false },
+            onLoggedIn = { showQishuiLogin = false; loginRevision++ },
+        )
+        return
+    }
     if (showQQLogin && currentSource == MusicSource.QQMusic) {
         QQMusicLoginScreen(
             onDismiss = { showQQLogin = false },
             onLoggedIn = {
                 showQQLogin = false
-                loginRevision += 1
-            },
-        )
-        return
-    }
-    if (showKugouLogin && currentSource == MusicSource.Kugou) {
-        KugouLoginScreen(
-            onDismiss = { showKugouLogin = false },
-            onLoggedIn = {
-                showKugouLogin = false
                 loginRevision += 1
             },
         )
@@ -254,7 +251,8 @@ fun ProviderSettingsHub(
                                 when (currentSource) {
                                     MusicSource.Netease -> onNeteaseLogin()
                                     MusicSource.QQMusic -> showQQLogin = true
-                                    MusicSource.Kugou -> showKugouLogin = true
+                                    MusicSource.Qishui -> showQishuiLogin = true
+                                    MusicSource.Kugou -> Unit
                                     MusicSource.KugouLite -> showKugouLiteLogin = true
                                     MusicSource.Kuwo -> showKuwoLogin = true
                                     MusicSource.AppleMusic -> showAppleMusicLogin = true
@@ -296,6 +294,7 @@ fun ProviderSettingsHub(
                                 MusicSource.YouTubeMusic -> stringResource(R.string.provider_switch_youtube)
                                 MusicSource.Jellyfin -> stringResource(R.string.provider_switch_jellyfin)
                                 MusicSource.Local -> stringResource(R.string.provider_switch_local)
+                                MusicSource.Qishui -> "清除汽水音乐登录状态后，使用抖音重新扫码"
                             },
                             onClick = {
                                 showServiceDialog = false
@@ -417,7 +416,8 @@ fun ProviderSettingsHub(
                             when (pending.source) {
                                 MusicSource.Netease -> onNeteaseLogin()
                                 MusicSource.QQMusic -> showQQLogin = true
-                                MusicSource.Kugou -> showKugouLogin = true
+                                MusicSource.Qishui -> showQishuiLogin = true
+                                MusicSource.Kugou -> Unit
                                 MusicSource.KugouLite -> showKugouLiteLogin = true
                                 MusicSource.Kuwo -> showKuwoLogin = true
                                 MusicSource.AppleMusic -> showAppleMusicLogin = true

@@ -1,6 +1,11 @@
 package com.lladlam.melox.ui
 
 import androidx.compose.foundation.Image
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +21,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,19 +39,16 @@ import coil3.compose.AsyncImage
 import com.lladlam.melox.R
 import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
+import com.lladlam.melox.ui.legal.*
 
-/**
- * Full first-run flow modeled on the iOS welcome + account pages. The legal
- * consent dialog stays the first step because Android needs an explicit
- * agreement before sign-in and remote features.
- */
+/** Full-screen first-run pages; account sign-in starts after the consent steps. */
 @Composable
 internal fun MeloXOnboardingWelcomePage(
     onContinue: () -> Unit,
     onLicenses: () -> Unit,
 ) {
     Box(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding(),
     ) {
         Column(
             Modifier.fillMaxSize().padding(horizontal = 32.dp),
@@ -104,6 +110,84 @@ internal fun MeloXOnboardingWelcomePage(
 }
 
 @Composable
+private fun MeloXOnboardingChoicePage(
+    title: String,
+    primaryLabel: String,
+    secondaryLabel: String,
+    onPrimary: () -> Unit,
+    onSecondary: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    BackHandler { }
+    Column(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .safeDrawingPadding().padding(horizontal = 32.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Image(painterResource(R.drawable.ic_launcher_foreground), null,
+                Modifier.padding(top = 24.dp).size(88.dp).clip(MaterialTheme.shapes.large))
+            Text(title, modifier = Modifier.padding(top = 22.dp, bottom = 16.dp),
+                color = MaterialTheme.colorScheme.onBackground, fontSize = 28.sp,
+                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            content()
+            Spacer(Modifier.height(24.dp))
+        }
+        MeloXGlassButton(onClick = onPrimary, modifier = Modifier.fillMaxWidth(),
+            style = MeloXGlassButtonStyle.BorderedProminent,
+            contentPadding = PaddingValues(vertical = 12.dp)) {
+            Text(primaryLabel, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.height(8.dp))
+        MeloXGlassButton(onClick = onSecondary, modifier = Modifier.fillMaxWidth(),
+            style = MeloXGlassButtonStyle.Plain,
+            contentPadding = PaddingValues(vertical = 9.dp)) {
+            Text(secondaryLabel, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+internal fun MeloXOnboardingLegalPage(onAgree: () -> Unit, onDecline: () -> Unit, onOpenProject: () -> Unit) {
+    MeloXOnboardingChoicePage(
+        title = stringResource(R.string.legal_welcome),
+        primaryLabel = stringResource(R.string.legal_agree_continue),
+        secondaryLabel = stringResource(R.string.legal_decline_exit),
+        onPrimary = onAgree, onSecondary = onDecline,
+    ) {
+        Text(stringResource(R.string.legal_welcome_body), fontSize = 15.sp, lineHeight = 22.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f), textAlign = TextAlign.Center)
+        MeloXLegalLinks(modifier = Modifier.padding(vertical = 16.dp))
+        Text(stringResource(R.string.legal_agree_note), fontSize = 12.sp, lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .54f), textAlign = TextAlign.Center)
+        MeloXGlassButton(onClick = onOpenProject, style = MeloXGlassButtonStyle.Plain) {
+            Text(stringResource(R.string.legal_project))
+        }
+    }
+}
+
+@Composable
+internal fun MeloXOnboardingCloudPage(onReject: () -> Unit, onAccept: () -> Unit) {
+    var showPolicy by remember { mutableStateOf(false) }
+    MeloXOnboardingChoicePage(
+        title = "云控选择", primaryLabel = "同意并启用", secondaryLabel = "暂不启用",
+        onPrimary = onAccept, onSecondary = onReject,
+    ) {
+        Text(MELOX_CLOUD_CONTROL_MESSAGE, fontSize = 15.sp, lineHeight = 23.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f))
+        MeloXGlassButton(onClick = { showPolicy = true }, style = MeloXGlassButtonStyle.Plain) {
+            Text("查看云控隐私协议")
+        }
+    }
+    if (showPolicy) MeloXLegalDocumentDialog(MeloXLegalDocument.CloudControlPrivacy, onDismiss = { showPolicy = false })
+}
+
+@Composable
 internal fun MeloXOnboardingAccountPage(
     isLoggedIn: Boolean,
     nickname: String?,
@@ -112,7 +196,7 @@ internal fun MeloXOnboardingAccountPage(
     onFinish: () -> Unit,
 ) {
     Box(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding(),
     ) {
         Column(
             Modifier.fillMaxSize().padding(horizontal = 32.dp),

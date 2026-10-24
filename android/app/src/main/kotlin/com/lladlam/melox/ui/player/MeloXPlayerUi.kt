@@ -1,5 +1,9 @@
 package com.lladlam.melox.ui.player
 
+import com.lladlam.melox.dlna.DlnaSession
+import com.lladlam.melox.miplay.MiPlaySession
+import com.lladlam.melox.usb.MeloXUsbAudioSession
+
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -149,6 +153,7 @@ data class MeloXQueueEntry(
 
 @Stable
 class MeloXPlaybackUiState internal constructor(private val appContext: Context) {
+    var showOutputPicker by mutableStateOf(false)
     private var controller: MediaController? = null
     private val downloadStore by lazy(LazyThreadSafetyMode.NONE) { MeloXDownloadStore.get(appContext) }
     private val sleepTimerHandler = Handler(Looper.getMainLooper())
@@ -381,6 +386,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         if (rebuildQueue || queue.size != player.mediaItemCount) {
             queue = buildQueue(player)
         }
+        applyDlnaState()
     }
 
     internal fun refreshCurrentLocalMetadata() {
@@ -420,6 +426,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         durationMs = player.duration
             .takeUnless { it == C.TIME_UNSET || it < 0L }
             ?: 0L
+        applyDlnaState()
         // 「播过这首」的落库点：**只在真的在播时**才记（无音源的歌 `isPlaying`
         // 恒 false，永远进不来 ⇒ 不会被算进本地推荐记录）。
         // recordPlayback() 内部会 readFeatures()（最多 2000 条 JSON 反序列化）→ 改 →
@@ -555,7 +562,18 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         }
     }
 
+    private fun applyDlnaState() {
+        if (MeloXUsbAudioSession.active) volume = MeloXUsbAudioSession.volume
+        if (MiPlaySession.active) MiPlaySession.volume?.let { volume = it }
+        if (!DlnaSession.active) return
+        isPlaying = DlnaSession.playing
+        positionMs = DlnaSession.displayedPosition()
+        durationMs = DlnaSession.durationMs
+        DlnaSession.volume?.let { volume = it }
+    }
+
     fun togglePlayPause() {
+        if (DlnaSession.active) { DlnaSession.toggle(); return }
         controller?.let { player ->
             // 用 UI 口径（播放意图）判断：缓冲期间 `player.isPlaying` 是 false，
             // 若照它判断，此时点暂停会变成又一次 `play()`（点了没反应）。
@@ -564,10 +582,12 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
     }
 
     fun seekTo(positionMs: Long) {
+        if (DlnaSession.active) { DlnaSession.seek(positionMs); return }
         controller?.seekTo(positionMs.coerceIn(0L, durationMs.coerceAtLeast(0L)))
     }
 
     fun previous() {
+        if (DlnaSession.active) { DlnaSession.previous(); return }
         controller?.let { player ->
             if (MeloXSettingsRuntime.previousRestartsAfterFiveSeconds && player.currentPosition >= 5_000L) {
                 player.seekTo(0L)
@@ -619,6 +639,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
     }
 
     fun next() {
+        if (DlnaSession.active) { DlnaSession.next(); return }
         controller?.let { player ->
             // ⚠ 多一个 `recordedMediaId == mediaId` 判据（2026-09-28 修）：
             //   `recordedMediaId` 只在「真的在播」时才被置上。切到一首无音源的歌后
@@ -709,6 +730,9 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
     }
 
     fun changeVolume(value: Float) {
+        if (MeloXUsbAudioSession.active) { MeloXUsbAudioSession.changeVolume(value); return }
+        if (MiPlaySession.active) { MiPlaySession.changeVolume(value); return }
+        if (DlnaSession.active) { DlnaSession.changeVolume(value); return }
         if (MeloXSettingsRuntime.volumeControlMode == MeloXVolumeControlMode.Player) {
             controller?.volume = value.coerceIn(0f, 1f)
             volume = controller?.volume ?: value.coerceIn(0f, 1f)
@@ -766,6 +790,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
      *   调用方（音量条）必须先自行排除前两种，才能把 `false` 当成越界。
      */
     internal fun syncSystemVolumeNow(): Boolean {
+        if (MiPlaySession.active || DlnaSession.active || MeloXUsbAudioSession.active) return false
         if (MeloXSettingsRuntime.volumeControlMode != MeloXVolumeControlMode.System) return false
         if (volumeDragging) return false
         val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager

@@ -88,7 +88,7 @@ internal class MeloXLanDiscoveryResponder(
             .put("port", controlPort())
             .put("pinRequired", !isTrusted(peerId))
             .put("trusted", isTrusted(peerId))
-            .put("capabilities", meloXJsonStringArray(listOf("control", "cast", "transfer", "together")))
+            .put("capabilities", meloXJsonStringArray(listOf("control", "cast", "transfer", "together", MELOX_LAN_BARRIER)))
             .put("address", localIpv4Address().orEmpty())
             .put("state", snapshot().toJson())
             .put("nonce", message.optString("nonce").ifBlank { UUID.randomUUID().toString() })

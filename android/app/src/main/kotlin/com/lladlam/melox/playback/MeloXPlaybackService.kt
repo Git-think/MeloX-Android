@@ -142,11 +142,20 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     private var notificationButtons: List<CommandButton> = emptyList()
 
     @Volatile private var lanPlayback = MeloXLanPlayback()
+    @Volatile private var lanQueue: List<MeloXLanTrack> = emptyList()
+    private var lanBarrier = false
+    private var lanPreparing = false
+    private var lanCommit: Runnable? = null
     private var lanCastReceiver: MeloXLanCastReceiver? = null
+    private var lanTogetherSharesDevice = false
+    private var lanTogetherLastSeekAtMs = 0L
     private val lanStateRunnable = object : Runnable {
         override fun run() {
-            player?.let { lanPlayback = buildLanPlayback(it) }
-            handler.postDelayed(this, 1_000L)
+            player?.let {
+                lanPlayback = buildLanPlayback(it)
+            }
+            MeloXLanRuntime.onPlaybackUpdated()
+            handler.postDelayed(this, 100L)
         }
     }
 
@@ -235,6 +244,11 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
 
         override fun onEvents(player: Player, events: Player.Events) {
+            lanPlayback = buildLanPlayback(player)
+            if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                lanQueue = readLanQueue(player)
+            }
+            MeloXLanRuntime.onPlaybackUpdated()
             if (events.containsAny(
                     Player.EVENT_MEDIA_METADATA_CHANGED,
                     Player.EVENT_REPEAT_MODE_CHANGED,
@@ -243,6 +257,10 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             ) {
                 handler.post { refreshNotificationButtons() }
             }
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            if (!lanPreparing && reason == Player.DISCONTINUITY_REASON_SEEK) MeloXLanRuntime.onTogetherSeek()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -254,6 +272,10 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (lanBarrier && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                player?.let { lanPlayback = buildLanPlayback(it) }
+                MeloXLanRuntime.onTogetherTrackEnded()
+            }
             if (!playWhenReady && !cancellingMix && hasPreparedMix()) {
                 Log.i(TAG, "AutoMix cancelled because playback paused: reason=$reason")
                 cancelPreparedMix()
@@ -266,6 +288,11 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                 markSongActuallyPlayed(active)
             }
             if (playbackState == Player.STATE_ENDED) {
+                if (lanBarrier) {
+                    lanPlayback = buildLanPlayback(active)
+                    MeloXLanRuntime.onTogetherTrackEnded()
+                    return
+                }
                 historySongId?.let {
                     playbackHistoryReporter.recordDuration(
                         it,
@@ -343,6 +370,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             equalizerController.attach(audioSessionId)
         }
 
+
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             if (updatingSystemLyricsMetadata) return
             if (mixStartedAt == 0L && preparedMixSourceId != null) {
@@ -385,6 +413,15 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             controller: MediaSession.ControllerInfo,
             playerCommand: Int,
         ): Int {
+            if (com.lladlam.melox.dlna.DlnaSession.active) {
+                when (playerCommand) {
+                    Player.COMMAND_PLAY_PAUSE -> com.lladlam.melox.dlna.DlnaSession.toggle()
+                    Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> com.lladlam.melox.dlna.DlnaSession.next()
+                    Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> com.lladlam.melox.dlna.DlnaSession.previous()
+                    else -> return super.onPlayerCommandRequest(session, controller, playerCommand)
+                }
+                return SessionResult.RESULT_INFO_SKIPPED
+            }
             // The in-app previous button and the notification/MediaSession
             // previous button must obey the same "restart after 5 seconds"
             // preference. Media3's default uses a 3-second threshold, which is
@@ -1089,20 +1126,17 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         managesAudioFocus: Boolean,
         observesSession: Boolean = managesAudioFocus,
     ): ExoPlayer {
-        val renderersFactory = if (observesSession) {
-            object : DefaultRenderersFactory(this) {
-                override fun buildAudioSink(
-                    context: Context,
-                    enableFloatOutput: Boolean,
-                    enableAudioTrackPlaybackParams: Boolean,
-                ): AudioSink = DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(MeloXCastAudioProcessor()))
-                    .setEnableFloatOutput(enableFloatOutput)
-                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .build()
-            }
-        } else {
-            DefaultRenderersFactory(this)
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setAudioProcessors(arrayOf(MeloXCastAudioProcessor(tapAudio = observesSession)))
+                // Media3's float sink bypasses the custom PCM processor chain.
+                .setEnableFloatOutput(false)
+                .setEnableAudioTrackPlaybackParams(false)
+                .build()
         }
         return ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -1120,7 +1154,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         val metadata = item?.mediaMetadata
         val identity = PlaybackTrackIdentity.fromMediaItem(item)
         return MeloXLanPlayback(
-            playing = active.isPlaying,
+            playing = active.playWhenReady,
             title = metadata?.title?.toString().orEmpty(),
             artist = metadata?.artist?.toString().orEmpty(),
             album = metadata?.albumTitle?.toString().orEmpty(),
@@ -1134,13 +1168,39 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             queueLength = active.mediaItemCount,
             canNext = active.hasNextMediaItem(),
             canPrevious = active.hasPreviousMediaItem() || active.currentPosition > 0L,
+            ready = active.playbackState == Player.STATE_READY,
+            ended = active.playbackState == Player.STATE_ENDED ||
+                (!active.playWhenReady && active.duration > 0L && active.currentPosition >= active.duration - 100L),
+            sampleTimeMs = System.currentTimeMillis(),
         )
     }
 
     override fun snapshot(): MeloXLanPlayback = lanPlayback
 
-    override fun queueSnapshot(): List<MeloXLanTrack> {
-        val active = player ?: return emptyList()
+    override suspend fun dlnaSource(): com.lladlam.melox.dlna.DlnaMediaSource? {
+        val captured = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            val active = player ?: return@withContext null
+            val item = active.currentMediaItem ?: return@withContext null
+            val uri = item.localConfiguration?.uri ?: return@withContext null
+            Triple(item, uri, buildLanPlayback(active))
+        } ?: return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val spec = playbackResolver.resolveDataSpec(androidx.media3.datasource.DataSpec.Builder()
+                .setUri(captured.second).build())
+            val state = captured.third
+            val mime = captured.first.localConfiguration?.mimeType ?: when (spec.uri.lastPathSegment?.substringAfterLast('.')?.lowercase()) {
+                "flac" -> "audio/flac"; "m4a", "aac" -> "audio/mp4"; "wav" -> "audio/wav"
+                "ogg", "opus" -> "audio/ogg"; else -> "audio/mpeg"
+            }
+            com.lladlam.melox.dlna.DlnaMediaSource(spec.uri.toString(), spec.httpRequestHeaders, state.title,
+                state.artist, state.album, state.artworkUrl, state.durationMs, state.positionMs,
+                state.trackId ?: captured.first.mediaId, mime)
+        }
+    }
+
+    override fun queueSnapshot(): List<MeloXLanTrack> = lanQueue
+
+    private fun readLanQueue(active: Player): List<MeloXLanTrack> {
         return buildList {
             for (index in 0 until active.mediaItemCount) {
                 val item = active.getMediaItemAt(index)
@@ -1185,6 +1245,11 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                 "pause" -> active.pause()
                 "toggle" -> if (active.isPlaying) active.pause() else active.play()
                 "next" -> if (active.hasNextMediaItem()) active.seekToNextMediaItem()
+                "dlna.previous" -> if (active.hasPreviousMediaItem()) active.seekToPreviousMediaItem()
+                "together.next" -> if (active.hasNextMediaItem()) {
+                    active.seekToNextMediaItem()
+                    active.playWhenReady = true
+                }
                 "previous" -> {
                     if (active.currentPosition >= 5_000L) {
                         active.seekTo(0L)
@@ -1241,6 +1306,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         positionMs: Long,
         playing: Boolean,
         relay: com.lladlam.melox.lan.MeloXLanRelay?,
+        sameDevice: Boolean,
     ): Boolean {
         if (relay != null) {
             val items = queue.map { track ->
@@ -1263,6 +1329,9 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             if (items.isEmpty()) return false
             handler.post {
                 val active = player ?: return@post
+                lanTogetherSharesDevice = sameDevice
+                applyAudioFocusPolicy(active)
+                lanTogetherLastSeekAtMs = android.os.SystemClock.elapsedRealtime()
                 active.setMediaItems(items, index.coerceIn(0, items.lastIndex), positionMs.coerceAtLeast(0L))
                 active.prepare()
                 if (playing) active.play() else active.pause()
@@ -1271,40 +1340,137 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
         val songs = queue.mapNotNull { it.toSearchSong() }
         if (songs.isEmpty()) return false
-        val selected = songs.getOrNull(index.coerceIn(0, songs.lastIndex)) ?: return false
         handler.post {
-            PlaybackCommands.playQueue(
-                context = this,
-                songs = songs,
-                selectedSongId = selected.id,
-                startPositionMs = positionMs.coerceAtLeast(0L),
-            )
-            if (!playing) handler.postDelayed({ player?.pause() }, 500L)
+            val active = player ?: return@post
+            lanTogetherSharesDevice = sameDevice
+            applyAudioFocusPolicy(active)
+            lanTogetherLastSeekAtMs = android.os.SystemClock.elapsedRealtime()
+            active.setMediaItems(songs.map { PlaybackCommands.mediaItemFor(it) }, index.coerceIn(0, songs.lastIndex), positionMs.coerceAtLeast(0L))
+            active.prepare()
+            active.playWhenReady = playing
         }
         return true
     }
 
-    override fun stopTogether() = Unit
-
-    override fun applyTogetherState(positionMs: Long, playing: Boolean, index: Int) {
+    override fun stopTogether() {
         handler.post {
-            val active = player ?: return@post
-            val target = positionMs.coerceAtLeast(0L)
-            if (index in 0 until active.mediaItemCount && active.currentMediaItemIndex != index) {
-                active.seekTo(index, target)
-            } else if (kotlin.math.abs(active.currentPosition - target) > 400L) {
-                active.seekTo(target)
-            }
-            if (playing) {
-                if (!active.isPlaying) active.play()
-            } else if (active.isPlaying) {
+            lanPreparing = false
+            lanCommit?.let(handler::removeCallbacks)
+            lanCommit = null
+            setTogetherBarrier(false)
+            player?.let { active ->
                 active.pause()
+                active.setPlaybackSpeed(1f)
+                lanTogetherSharesDevice = false
+                applyAudioFocusPolicy(active)
             }
         }
     }
 
+    override fun applyTogetherState(positionMs: Long, playing: Boolean, index: Int) {
+        correctTogether(positionMs, playing, index, late = false)
+    }
+
+    override fun correctTogether(positionMs: Long, playing: Boolean, index: Int, late: Boolean, forceSeek: Boolean) {
+        handler.post {
+            val active = player ?: return@post
+            if (lanPreparing) return@post
+            val target = positionMs.coerceAtLeast(0L)
+            if (!forceSeek && lanBarrier && active.duration > 0L && active.currentPosition >= active.duration - 100L) return@post
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (forceSeek && index in 0 until active.mediaItemCount) {
+                active.seekTo(index, target)
+                active.setPlaybackSpeed(1f)
+                lanTogetherLastSeekAtMs = now
+            } else if (!late && index in 0 until active.mediaItemCount && active.currentMediaItemIndex != index) {
+                active.seekTo(index, target)
+                lanTogetherLastSeekAtMs = now
+            } else if (!late && com.lladlam.melox.lan.shouldCorrectTogetherPosition(
+                    ready = active.playbackState == Player.STATE_READY,
+                    localPositionMs = active.currentPosition,
+                    hostPositionMs = target,
+                    elapsedSinceSeekMs = now - lanTogetherLastSeekAtMs,
+                )) {
+                active.seekTo(target)
+                active.setPlaybackSpeed(1f)
+                lanTogetherLastSeekAtMs = now
+            } else {
+                active.setPlaybackSpeed(if (!late && playing && active.playbackState == Player.STATE_READY) {
+                    com.lladlam.melox.lan.togetherPlaybackRate(target - active.currentPosition)
+                } else 1f)
+            }
+            if (active.playWhenReady != playing) {
+                active.playWhenReady = playing
+            }
+        }
+    }
+
+    override fun setTogetherBarrier(enabled: Boolean) {
+        if (android.os.Looper.myLooper() != handler.looper) {
+            handler.post { setTogetherBarrier(enabled) }
+            return
+        }
+        lanBarrier = enabled
+        player?.pauseAtEndOfMediaItems = enabled
+        if (enabled) cancelPreparedMix()
+        if (!enabled) {
+            lanPreparing = false
+            lanCommit?.let(handler::removeCallbacks)
+            lanCommit = null
+            player?.setPlaybackSpeed(1f)
+        }
+    }
+
+    override suspend fun prepareTogetherRound(
+        queue: List<MeloXLanTrack>?, index: Int, positionMs: Long,
+        relay: com.lladlam.melox.lan.MeloXLanRelay?, sameDevice: Boolean,
+    ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+        val active = player ?: return@withContext false
+        setTogetherBarrier(true)
+        lanCommit?.let(handler::removeCallbacks)
+        lanCommit = null
+        lanPreparing = true
+        active.pause()
+        active.setPlaybackSpeed(1f)
+        if (queue != null) {
+            if (!startTogether(queue, index, positionMs, false, relay, sameDevice)) return@withContext false
+            // startTogether posts its queue mutation; process it before checking READY.
+            kotlinx.coroutines.delay(1)
+        } else {
+            if (active.playbackState == Player.STATE_ENDED || active.currentMediaItemIndex != index) {
+                active.seekTo(index.coerceIn(0, (active.mediaItemCount - 1).coerceAtLeast(0)), positionMs)
+            }
+            active.prepare()
+        }
+        kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+            while (active.playbackState != Player.STATE_READY) {
+                if (active.playerError != null) return@withTimeoutOrNull false
+                kotlinx.coroutines.delay(10L)
+            }
+            true
+        } ?: false
+    }
+
+    override fun commitTogetherRound(startAtLocalMs: Long, positionMs: Long, playing: Boolean) {
+        handler.post {
+            lanCommit?.let(handler::removeCallbacks)
+            val task = Runnable {
+                lanPreparing = false
+                player?.let { active ->
+                    if (kotlin.math.abs(active.currentPosition - positionMs) > 100L) active.seekTo(positionMs)
+                    active.setPlaybackSpeed(1f)
+                    active.playWhenReady = playing
+                }
+                lanCommit = null
+            }
+            lanCommit = task
+            handler.postDelayed(task, (startAtLocalMs - System.currentTimeMillis()).coerceIn(0L, 5_000L))
+        }
+    }
+
     private fun shouldManageAudioFocus(): Boolean =
-        !MeloXSettingsPreferences.boolean(this, "playback_allow_other_apps", false)
+        !lanTogetherSharesDevice &&
+            !MeloXSettingsPreferences.boolean(this, "playback_allow_other_apps", false)
 
     private fun applyAudioFocusPolicy(active: ExoPlayer) {
         val managesAudioFocus = shouldManageAudioFocus()
@@ -1315,6 +1481,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     }
 
     private fun maybePrepareAutoplay(active: ExoPlayer) {
+        if (lanBarrier) return
         if (MeloXPlaybackModePreferences.smartQueue(this)) return
         if (!MeloXPlaybackModePreferences.autoplay(this)) return
         if (active.mediaItemCount <= 0 || active.currentMediaItemIndex < 0) return
@@ -1451,6 +1618,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     )
 
     private fun maybeRunAutoMix(active: ExoPlayer) {
+        if (lanBarrier) return
         val enabled = MeloXPlaybackModePreferences.autoMix(this)
         if (MeloXPlaybackModeRuntime.autoMixEnabled != enabled) {
             MeloXPlaybackModeRuntime.autoMixEnabled = enabled
@@ -2266,6 +2434,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     }
 
     override fun onDestroy() {
+        com.lladlam.melox.usb.MeloXUsbAudioSession.release()
         MeloXLanRuntime.detach(this)
         handler.removeCallbacks(lanStateRunnable)
         lanCastReceiver?.stop()

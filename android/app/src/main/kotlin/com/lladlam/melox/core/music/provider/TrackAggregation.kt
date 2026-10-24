@@ -94,6 +94,7 @@ object TrackAggregation {
             com.lladlam.melox.core.music.model.MusicSource.YouTubeMusic -> 0
             com.lladlam.melox.core.music.model.MusicSource.Jellyfin -> 0
             com.lladlam.melox.core.music.model.MusicSource.Local -> 0
+            com.lladlam.melox.core.music.model.MusicSource.Qishui -> 0
         }
         return AggregatedTrackCandidate(track, identity, version, quality, sourceBonus, identity + version + quality + sourceBonus, "版本 ${key.version} · ${track.id.source.displayName}")
     }

@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="player_output_local">本机</string>
+    <string name="dlna_devices">局域网音箱 / 电视（DLNA）</string>
+    <string name="miplay_devices">小米妙播（MiPlay）</string>
+    <string name="usb_exclusive_title">USB 独占（实验性）</string>
+    <string name="usb_exclusive_profile">全速 UAC1 · 双声道 PCM16 · 自适应 / 同步</string>
+    <string name="usb_exclusive_stop">关闭 USB 独占输出</string>
+    <string name="miplay_searching">正在通过小米互联服务寻找设备…</string>
+    <string name="miplay_disconnect">断开小米妙播</string>
+    <string name="dlna_searching">正在寻找音箱和电视…</string>
+    <string name="dlna_empty">未发现设备，请确认音箱或电视已连接同一 Wi-Fi。</string>
+    <string name="dlna_disconnect">断开音箱 / 电视</string>
+    <string name="lan_together_stop">关闭一起听</string>
+    <string name="lan_connected">已连接</string>
+    <string name="lan_pairing_pin">本机 PIN：%1$s</string>
+    <string name="player_output_progress">播放进度</string>
+    <string name="player_output_volume">音量</string>
+    <string name="player_output_previous">上一首</string>
+    <string name="player_output_next">下一首</string>
     <string name="settings_split_screen">分屏模式</string>
     <string name="settings_split_screen_hint">横屏及符合尺寸条件的播放页使用双栏布局，下方可分别调整控件位置。</string>
     <string name="settings_split_navigation_position">分屏底部导航栏位置</string>
@@ -211,20 +229,20 @@
     <string name="lan_connect">连接</string>
     <string name="lan_connect_failed">无法连接到该设备</string>
     <string name="lan_pin_title">输入 4 位 PIN</string>
-    <string name="lan_pin_hint">在 %1$s 的「播放设备 → 附近的弥乐」中查看。</string>
+    <string name="lan_pin_hint">在 %1$s 的播放设备面板底部查看 PIN。</string>
     <string name="lan_pin_hint_short">4 位 PIN</string>
     <string name="lan_trusted">已常用</string>
     <string name="lan_add_trusted">加入常用设备</string>
     <string name="lan_trust_added">已加入常用设备</string>
     <string name="lan_close_device">关闭会话</string>
-    <string name="lan_transfer">传输</string>
+    <string name="lan_transfer">投送</string>
     <string name="lan_transfer_sent">已发送传输</string>
     <string name="lan_transfer_failed">无法传输这首歌曲</string>
     <string name="lan_no_track">当前没有播放歌曲</string>
     <string name="lan_cast">投放</string>
     <string name="lan_cast_stop">停止投放</string>
     <string name="lan_cast_failed">无法开始投放</string>
-    <string name="lan_together">一起放</string>
+    <string name="lan_together">一起听</string>
     <string name="lan_relay_audio">由我提供音频（对方无需账号/VIP）</string>
     <string name="lan_relay_failed">无法创建临时音频凭证</string>
     <string name="lan_together_guest">正在一起放</string>

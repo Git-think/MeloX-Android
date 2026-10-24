@@ -69,5 +69,6 @@ object SpotifyTrackMatcher {
         MusicSource.YouTubeMusic -> 0
         MusicSource.Jellyfin -> 0
         MusicSource.Local -> 0
+        MusicSource.Qishui -> 0
     }
 }

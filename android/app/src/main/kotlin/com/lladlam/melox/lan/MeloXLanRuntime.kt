@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
@@ -151,10 +152,15 @@ internal object MeloXLanRuntime {
         device: MeloXLanDevice,
         onEvent: (JSONObject) -> Unit = {},
         onRequest: ((JSONObject) -> JSONObject?)? = null,
+        onDisconnected: () -> Unit = {},
     ): MeloXLanClient {
         val identity = prefs ?: MeloXLanPreferences(context.applicationContext).also { prefs = it }
-        return MeloXLanClient(device, identity, scope, onEvent, onRequest)
+        return MeloXLanClient(device, identity, scope, onEvent, onRequest, onDisconnected)
     }
+
+    fun activeSessionClient(): MeloXLanClient? = hostTogetherClient ?: castClient
+
+    fun isCasting(): Boolean = castSender != null
 
     fun currentCastFormat(): MeloXLanCastFormat = MeloXCastAudioTap.format
 
@@ -167,32 +173,50 @@ internal object MeloXLanRuntime {
     fun hostControl(command: String, positionMs: Long? = null): Boolean =
         host?.control(command, positionMs, null) == true
 
-    fun startCastSender(
+    suspend fun startCastSender(
         context: Context,
         device: MeloXLanDevice,
         handshake: MeloXLanCastHandshake,
         client: MeloXLanClient?,
-    ): Boolean {
-        stopCastSender()
-        val sender = MeloXLanCastSender(device, handshake, scope) { reason ->
-            val client = castClient
+    ): Boolean = withContext(Dispatchers.IO) {
+        stopCastSender(restoreLocalOutput = false)
+        lateinit var sender: MeloXLanCastSender
+        sender = MeloXLanCastSender(device, handshake, scope) { reason ->
+            if (castSender !== sender) return@MeloXLanCastSender
+            val connection = castClient
             castSender = null
             castClient = null
-            if (client != null) scope.launch { runCatching { client.stopCast() } }
+            if (connection != null) {
+                if (reason == "format_changed") {
+                    scope.launch { MeloXLanSession.resumeCastAfterFormatChange(context.applicationContext, connection) }
+                } else {
+                    MeloXCastAudioTap.muteLocalOutput = false
+                    MeloXLanSession.castStopped(connection)
+                    scope.launch { runCatching { connection.stopCast() } }
+                }
+            }
             if (reason != null) Log.i("MeloXLanRuntime", "Cast stopped: $reason")
         }
-        if (!sender.start()) return false
         castSender = sender
         castClient = client
-        return true
+        if (!sender.start()) {
+            castSender = null
+            castClient = null
+            MeloXCastAudioTap.muteLocalOutput = false
+            return@withContext false
+        }
+        MeloXCastAudioTap.muteLocalOutput = true
+        true
     }
 
-    fun stopCastSender() {
-        castSender?.stop()
-        castSender = null
+    fun stopCastSender(notifyRemote: Boolean = true, restoreLocalOutput: Boolean = true) {
+        if (restoreLocalOutput) MeloXCastAudioTap.muteLocalOutput = false
         val client = castClient
         castClient = null
-        if (client != null) {
+        val sender = castSender
+        castSender = null
+        sender?.stop()
+        if (notifyRemote && client != null) {
             scope.launch { runCatching { client.stopCast() } }
         }
     }
@@ -202,7 +226,9 @@ internal object MeloXLanRuntime {
         previewState: () -> JSONObject?,
     ) {
         hostTogetherJob?.cancel()
-        hostTogetherClient?.close()
+        hostTogetherClient?.takeUnless { it === client }?.let { old ->
+            scope.launch { runCatching { old.stopTogether() } }
+        }
         hostTogetherClient = client
         hostTogetherJob = scope.launch {
             while (true) {
@@ -222,27 +248,50 @@ internal object MeloXLanRuntime {
         }
     }
 
-    fun stopHostTogether() {
+    fun stopHostTogether(notifyRemote: Boolean = true) {
+        MeloXLanTogetherCoordinator.stop(notifyRemote)
         hostTogetherJob?.cancel()
         hostTogetherJob = null
-        hostTogetherClient?.close()
+        val client = hostTogetherClient
         hostTogetherClient = null
+        if (notifyRemote && client != null) scope.launch { runCatching { client.stopTogether() } }
         revokeActiveRelay()
     }
 
-    fun issueRelay(
+    suspend fun issueRelay(
         context: Context,
         guestAddress: String,
         queue: List<MeloXLanTrack>,
-    ): MeloXLanRelay? {
+    ): MeloXLanRelay? = withContext(Dispatchers.IO) {
         revokeActiveRelay()
         val proxy = audioProxy ?: MeloXLanAudioProxy(context.applicationContext, scope).also {
             audioProxy = it
         }
-        val relay = proxy.issue(guestAddress, queue) ?: return null
+        val relay = proxy.issue(guestAddress, queue) ?: return@withContext null
         activeRelayToken = relay.token
-        return relay
+        relay
     }
+
+    internal fun playbackHost(): MeloXLanHost? = host
+    internal fun onPlaybackUpdated() {
+        com.lladlam.melox.dlna.DlnaSession.localTrackChanged(host?.snapshot()?.trackId)
+        MeloXLanTogetherCoordinator.changed()
+    }
+    internal fun onTogetherTrackEnded() { MeloXLanTogetherCoordinator.ended() }
+    internal fun onTogetherSeek() { MeloXLanTogetherCoordinator.seek() }
+    internal fun onPeerEvent(client: MeloXLanClient, event: JSONObject) {
+        MeloXLanTogetherCoordinator.event(client, event)
+    }
+    internal suspend fun startTogetherSession(context: Context, client: MeloXLanClient, provideAudio: Boolean): Boolean =
+        MeloXLanTogetherCoordinator.join(context, client, provideAudio)
+    internal suspend fun issuePeerRelay(context: Context, address: String, queue: List<MeloXLanTrack>): MeloXLanRelay? =
+        withContext(Dispatchers.IO) {
+            val proxy = synchronized(this@MeloXLanRuntime) {
+                audioProxy ?: MeloXLanAudioProxy(context.applicationContext, scope).also { audioProxy = it }
+            }
+            proxy.issue(address, queue)
+        }
+    internal fun revokePeerRelay(relay: MeloXLanRelay) { audioProxy?.revoke(relay.token) }
 
     fun revokeActiveRelay() {
         audioProxy?.revoke(activeRelayToken)
@@ -252,9 +301,11 @@ internal object MeloXLanRuntime {
     fun sendGuestTogetherControl(context: Context, command: String, positionMs: Long? = null): Boolean =
         server?.sendTogetherControl(command, positionMs) == true
 
-    fun isHostingTogether(): Boolean = hostTogetherClient != null
+    fun isHostingTogether(): Boolean = hostTogetherClient != null || MeloXLanTogetherCoordinator.active
 
     fun isGuestTogether(): Boolean = guestTogether
+
+    fun stopGuestTogether() { server?.stopTogetherSession() }
 
     fun addServerListener(listener: (Boolean) -> Unit) {
         serverListeners += listener

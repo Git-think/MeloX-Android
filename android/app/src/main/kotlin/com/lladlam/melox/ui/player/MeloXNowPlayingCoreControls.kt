@@ -196,10 +196,11 @@ internal fun MeloXNowPlayingCoreControls(
 }
 
 @Composable
-private fun SceneProgressControl(
+internal fun SceneProgressControl(
     state: MeloXPlaybackUiState,
     onShowQuality: () -> Unit,
     modifier: Modifier = Modifier,
+    showQuality: Boolean = true,
 ) {
     val displayedDurationMs = if (state.isInTransition && state.incomingDurationMs > 0L) {
         state.incomingDurationMs
@@ -289,7 +290,7 @@ private fun SceneProgressControl(
                 fontWeight = FontWeight.Medium,
             )
 
-            if (MeloXSettingsRuntime.showPlayerQualityTip) {
+            if (showQuality && MeloXSettingsRuntime.showPlayerQualityTip) {
                 SceneQualityChip(
                     state = state,
                     onShowQuality = onShowQuality,
@@ -1214,7 +1215,6 @@ internal fun ScenePageSelector(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    var showOutputPicker by remember { mutableStateOf(false) }
     val rowHeight = if (compact) 42.dp else 50.dp
     val hPadding = if (compact) MeloXCompactPageSelectorHPadding else 32.dp
     Row(
@@ -1240,7 +1240,7 @@ internal fun ScenePageSelector(
             enabled = true,
             compact = compact,
             useVectorGlyphs = useVectorGlyphs,
-            onClick = { showOutputPicker = true },
+            onClick = { state.showOutputPicker = true },
         )
 
         Box {
@@ -1283,7 +1283,6 @@ internal fun ScenePageSelector(
             }
         }
     }
-    MeloXAudioOutputDialog(visible = showOutputPicker, onDismiss = { showOutputPicker = false })
 }
 
 

@@ -27,6 +27,9 @@ MIT 仓库的接口行为重新编写 Kotlin 代码。MoeKoe 的界面仅作为�
   `KugouPlaylistClient` / `KugouLyricsClient`，通过 `source` 参数区分资源 ID。
 - `KugouLoginScreen(lite = true)`：概念版 QR 登录入口。
 - `ProviderSettingsHub`：概念版账号、退出、领取今日 VIP（需二次确认）。
+- `SettingsRoute.KugouLiteVip` / `KugouLiteVipSettings`：仅概念版显示的
+  「设置 → 扩展 → 签到领会员」独立设置子页，复用设置宿主、分组列表、玻璃按钮和确认弹窗。
+  展示概念版账号与会员有效期；手动签到后可单独确认申请升级，返回登录页后刷新账号状态。
 
 ## 接口映射
 
@@ -45,6 +48,13 @@ MIT 仓库的接口行为重新编写 Kotlin 代码。MoeKoe 的界面仅作为�
 | 歌单 | `/v3/get_list_info`、`/pubsongs/v2/get_other_list_file_nofilt`、`/v7/get_all_list` |
 | 排行榜 | `/openapi/kmr/v2/rank/audio`、`/ocean/v6/rank/*` |
 | 每日 VIP | `/youth/v1/recharge/receive_vip_listen_song`（仅用户确认后调用） |
+| 今日 VIP 升级 | `/youth/v1/listen_song/upgrade_vip_reward`（签到成功／已签后，另行确认） |
+
+签到流程核对了上述三个本地参考仓库：MIT API 模块提供领取日期、`source_id=90139`、
+升级参数 `kugouid` / `ad_type=1`；桌面与移动参考用于核对「领取 → 可选升级」流程、
+`131001`（今日已领）与 `20028`（当前账号无法领取）的提示。未复制其界面实现。
+只有响应 `status=1` 才显示领取成功；本地已签到标记只记录本次页面确认过的日期，
+没有查询时显示「待确认」，不把它当作服务端历史记录。
 
 ## 安全与隔离
 

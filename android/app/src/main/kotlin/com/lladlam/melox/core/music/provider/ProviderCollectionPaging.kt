@@ -55,9 +55,11 @@ suspend fun PlaylistCapability.loadAllPlaylistTracks(
         tracks.size.toLong(),
     )
     var page = 2
-    while (tracks.size < target && page <= 100) {
+    var hasMore = first.hasMore
+    while ((hasMore ?: (tracks.size < target)) && page <= 100) {
         val before = tracks.size
         val next = playlistDetail(playlist, page = page, pageSize = pageSize)
+        hasMore = next.hasMore
         target = maxOf(target, next.total ?: 0L, next.summary.trackCount?.toLong() ?: 0L)
         tracks += next.tracks
         val distinct = tracks.distinctBy {
@@ -66,12 +68,13 @@ suspend fun PlaylistCapability.loadAllPlaylistTracks(
         }
         tracks.clear()
         tracks += distinct
-        if (tracks.size == before || next.tracks.isEmpty()) break
+        if ((tracks.size == before || next.tracks.isEmpty()) && hasMore != true) break
         page++
     }
     return first.copy(
         summary = first.summary.copy(trackCount = tracks.size),
         tracks = tracks,
         total = maxOf(first.total ?: 0L, tracks.size.toLong()).takeIf { it > 0L },
+        hasMore = hasMore,
     )
 }

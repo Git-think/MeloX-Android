@@ -187,6 +187,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -2259,6 +2260,12 @@ private fun MeloXPlaylistDetailScreen(
         (detail?.summary?.providerPlaylist ?: providerPlaylist)?.isEditable == false
     }
     var loading by remember(initialPlaylist.id) { mutableStateOf(true) }
+    val pagedBilibiliPlaylist = providerPlaylist?.id?.source == MusicSource.Bilibili && providedSongs == null
+    var providerPage by remember(initialPlaylist.id) { mutableStateOf(1) }
+    var providerHasMore by remember(initialPlaylist.id) { mutableStateOf(false) }
+    var providerLoadingMore by remember(initialPlaylist.id) { mutableStateOf(false) }
+    var providerPageError by remember(initialPlaylist.id) { mutableStateOf<String?>(null) }
+    var providerLoadGeneration by remember(initialPlaylist.id) { mutableStateOf(0) }
     var errorMessage by remember(initialPlaylist.id) { mutableStateOf<String?>(null) }
     var searchQuery by remember(initialPlaylist.id) { mutableStateOf("") }
     var showPlaylistActions by remember(initialPlaylist.id) { mutableStateOf(false) }
@@ -2325,6 +2332,9 @@ private fun MeloXPlaylistDetailScreen(
     }
 
     suspend fun refreshPlaylist() {
+        providerLoadGeneration++
+        providerHasMore = false
+        providerPageError = null
         loading = true
         errorMessage = null
         if (providedSongs != null) {
@@ -2383,10 +2393,15 @@ private fun MeloXPlaylistDetailScreen(
             }
             runCatching {
                 withContext(Dispatchers.IO) {
-                    capability.loadAllPlaylistTracks(providerPlaylist, pageSize = 200)
+                    if (pagedBilibiliPlaylist) capability.playlistDetail(providerPlaylist, page = 1, pageSize = 20)
+                    else capability.loadAllPlaylistTracks(providerPlaylist, pageSize = 200)
                 }
             }.onSuccess { providerDetail ->
                 detail = MeloXLegacyUiBridge.playlistDetail(providerDetail)
+                if (pagedBilibiliPlaylist) {
+                    providerPage = 1
+                    providerHasMore = providerDetail.hasMore ?: (providerDetail.tracks.size.toLong() < (providerDetail.total ?: 0L))
+                }
             }.onFailure { errorMessage = it.message ?: "歌单加载失败" }
         } else {
             runCatching { client.playlistDetail(initialPlaylist.id) }
@@ -2397,6 +2412,31 @@ private fun MeloXPlaylistDetailScreen(
                 .onFailure { errorMessage = it.message ?: "歌单加载失败" }
         }
         loading = false
+    }
+
+    suspend fun loadNextProviderPage() {
+        val playlist = providerPlaylist ?: return
+        val capability = providerPlaylistCapability ?: return
+        if (!pagedBilibiliPlaylist || loading || providerLoadingMore || !providerHasMore) return
+        val generation = providerLoadGeneration
+        providerLoadingMore = true
+        providerPageError = null
+        try {
+            val nextPage = providerPage + 1
+            val next = withContext(Dispatchers.IO) { capability.playlistDetail(playlist, page = nextPage, pageSize = 20) }
+            if (generation != providerLoadGeneration) return
+            val mapped = MeloXLegacyUiBridge.playlistDetail(next)
+            val merged = (detail?.songs.orEmpty() + mapped.songs).distinctBy { it.id }
+            detail = mapped.copy(songs = merged)
+            providerPage = nextPage
+            providerHasMore = next.hasMore ?: next.tracks.isNotEmpty()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (generation == providerLoadGeneration) providerPageError = error.message ?: "下一页加载失败"
+        } finally {
+            providerLoadingMore = false
+        }
     }
 
     LaunchedEffect(initialPlaylist.id, providerPlaylist?.id, providedSongs) {
@@ -2833,7 +2873,7 @@ private fun MeloXPlaylistDetailScreen(
                             )
                         }
                     }
-                    filteredSongs.isEmpty() -> item {
+                    filteredSongs.isEmpty() && !providerHasMore -> item {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2920,6 +2960,25 @@ private fun MeloXPlaylistDetailScreen(
                                 thickness = 0.6.dp,
                                 color = foreground.copy(alpha = 0.12f),
                             )
+                        }
+                    }
+                }
+                if (pagedBilibiliPlaylist && providerHasMore && !loading) {
+                    item(key = "provider-playlist-next-page", span = { GridItemSpan(maxLineSpan) }) {
+                        LaunchedEffect(providerPage) {
+                            if (providerPageError == null) loadNextProviderPage()
+                        }
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (providerLoadingMore) CircularProgressIndicator(color = foreground)
+                            providerPageError?.let { message ->
+                                Text(message, color = secondary, textAlign = TextAlign.Center)
+                                Text("重试加载下一页", color = foreground,
+                                    modifier = Modifier.clickable { scope.launch { loadNextProviderPage() } }.padding(8.dp))
+                            }
                         }
                     }
                 }

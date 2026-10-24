@@ -67,13 +67,13 @@ internal fun MeloXLanDialog(
     var devices by remember { mutableStateOf<List<MeloXLanDevice>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var selected by remember { mutableStateOf<MeloXLanDevice?>(null) }
-    var client by remember { mutableStateOf<MeloXLanClient?>(null) }
+    var selected by remember { mutableStateOf(MeloXLanRuntime.activeSessionClient()?.device) }
+    var client by remember { mutableStateOf(MeloXLanRuntime.activeSessionClient()) }
     var remoteState by remember { mutableStateOf<MeloXLanPlayback?>(null) }
     var connecting by remember { mutableStateOf(false) }
     var pinRequired by remember { mutableStateOf(false) }
     var pin by remember { mutableStateOf("") }
-    var castActive by remember { mutableStateOf(false) }
+    var castActive by remember { mutableStateOf(MeloXLanRuntime.isCasting()) }
     var remoteTrusted by remember { mutableStateOf(false) }
     var togetherRelay by remember { mutableStateOf(true) }
     val lanPermissionLauncher = rememberLauncherForActivityResult(
@@ -109,7 +109,8 @@ internal fun MeloXLanDialog(
         connecting = true
         error = null
         scope.launch {
-            val created = MeloXLanRuntime.newClient(
+            lateinit var created: MeloXLanClient
+            created = MeloXLanRuntime.newClient(
                 context = context,
                 device = device,
                 onEvent = { event ->
@@ -130,6 +131,16 @@ internal fun MeloXLanDialog(
                         JSONObject().put("ok", ok)
                     } else {
                         null
+                    }
+                },
+                onDisconnected = {
+                    scope.launch {
+                        if (client === created) {
+                            client = null
+                            remoteState = null
+                            castActive = false
+                            error = context.getString(R.string.lan_connect_failed)
+                        }
                     }
                 },
             )
@@ -169,7 +180,16 @@ internal fun MeloXLanDialog(
         }
     }
 
-    MeloXGlassDialog(visible = visible, onDismiss = onDismiss) {
+    fun dismiss() {
+        // Active sessions belong to the runtime, not to this sheet's lifetime.
+        if (MeloXLanRuntime.activeSessionClient() !== client) {
+            client?.close()
+            client = null
+        }
+        onDismiss()
+    }
+
+    MeloXGlassDialog(visible = visible, onDismiss = { dismiss() }) {
         Text(stringResource(R.string.lan_nearby), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
             stringResource(
@@ -305,6 +325,9 @@ internal fun MeloXLanDialog(
                                             handshake,
                                             c,
                                         )
+                                        if (!castActive) {
+                                            error = context.getString(R.string.lan_cast_failed)
+                                        }
                                     }
                                 }
                             }
@@ -453,7 +476,7 @@ internal fun MeloXLanDialog(
                 shape = MeloXShapes.capsule,
             ) { Text(stringResource(if (scanning) R.string.lan_scanning else R.string.lan_scan), fontSize = 13.sp) }
             MeloXGlassButton(
-                onClick = { resetDevice(); onDismiss() },
+                onClick = { dismiss() },
                 modifier = Modifier.width(92.dp),
                 style = MeloXGlassButtonStyle.BorderedProminent,
                 shape = MeloXShapes.capsule,

@@ -44,7 +44,7 @@ import androidx.compose.ui.res.painterResource
 import com.lladlam.melox.R
 import com.lladlam.melox.ui.animation.MeloXMotion
 
-private const val MeloXIconVisualScale = 0.7f
+private const val MeloXIconVisualScale = 0.83f
 
 /** Shrinks icon ink while preserving its original layout and touch bounds. */
 internal fun Modifier.meloXIconDrawingScale(): Modifier = drawWithContent {
@@ -215,6 +215,23 @@ fun MeloXSymbolIcon(
     // every 听歌识曲 entry (search field + Home quick action card) gets the
     // sealed-off microphone without any change at the call sites.
     when (symbol) {
+        MeloXSymbol.Circle -> {
+            val density = LocalDensity.current
+            val diameter = with(density) { iconSize.toPx() }
+            Canvas(
+                modifier = iconModifier.semantics {
+                    contentDescription?.let { this.contentDescription = it }
+                },
+            ) {
+                val stroke = diameter * .065f
+                drawCircle(
+                    color = color,
+                    radius = ((diameter * .42f) - stroke / 2f).coerceAtLeast(0f),
+                    style = Stroke(width = stroke),
+                )
+            }
+            return
+        }
         MeloXSymbol.Settings -> {
             Icon(
                 painter = painterResource(R.drawable.ic_melox_brand_gear),

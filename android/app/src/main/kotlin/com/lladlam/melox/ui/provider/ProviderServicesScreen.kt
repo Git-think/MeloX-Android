@@ -95,7 +95,7 @@ fun ProviderServicesScreen(
         ProviderAccountManager(context, neteaseSessionStore = neteaseSession)
     }
     var showQQLogin by remember(currentSource) { mutableStateOf(false) }
-    var showKugouLogin by remember(currentSource) { mutableStateOf(false) }
+    var showQishuiLogin by remember(currentSource) { mutableStateOf(false) }
     var showKugouLiteLogin by remember(currentSource) { mutableStateOf(false) }
     var showKuwoLogin by remember(currentSource) { mutableStateOf(false) }
     var showAppleMusicLogin by remember(currentSource) { mutableStateOf(false) }
@@ -193,17 +193,17 @@ fun ProviderServicesScreen(
         }
     }
 
+    if (showQishuiLogin && currentSource == MusicSource.Qishui) {
+        com.lladlam.melox.ui.account.QishuiLoginScreen(
+            onDismiss = { showQishuiLogin = false },
+            onLoggedIn = { showQishuiLogin = false; loginRevision++ },
+        )
+        return
+    }
     if (showQQLogin && currentSource == MusicSource.QQMusic) {
         QQMusicLoginScreen(
             onDismiss = { showQQLogin = false },
             onLoggedIn = { showQQLogin = false; loginRevision++ },
-        )
-        return
-    }
-    if (showKugouLogin && currentSource == MusicSource.Kugou) {
-        KugouLoginScreen(
-            onDismiss = { showKugouLogin = false },
-            onLoggedIn = { showKugouLogin = false; loginRevision++ },
         )
         return
     }
@@ -323,7 +323,8 @@ fun ProviderServicesScreen(
                         when (currentSource) {
                             MusicSource.Netease -> onNeteaseLogin()
                             MusicSource.QQMusic -> showQQLogin = true
-                            MusicSource.Kugou -> showKugouLogin = true
+                            MusicSource.Qishui -> showQishuiLogin = true
+                            MusicSource.Kugou -> Unit // Retired source; retained only for stored identities.
                             MusicSource.KugouLite -> showKugouLiteLogin = true
                             MusicSource.Kuwo -> showKuwoLogin = true
                             MusicSource.AppleMusic -> showAppleMusicLogin = true
@@ -547,7 +548,8 @@ fun ProviderServicesScreen(
                             when (source) {
                                 MusicSource.Netease -> onNeteaseLogin()
                                 MusicSource.QQMusic -> showQQLogin = true
-                                MusicSource.Kugou -> showKugouLogin = true
+                                MusicSource.Qishui -> showQishuiLogin = true
+                                MusicSource.Kugou -> Unit
                                 MusicSource.KugouLite -> showKugouLiteLogin = true
                                 MusicSource.Kuwo -> showKuwoLogin = true
                                 MusicSource.AppleMusic -> showAppleMusicLogin = true

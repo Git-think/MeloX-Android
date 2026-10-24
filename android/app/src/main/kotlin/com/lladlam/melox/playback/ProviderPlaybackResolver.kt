@@ -244,6 +244,7 @@ class ProviderPlaybackResolver(
             uri.getQueryParameter(SpotifyIsrcQuery)?.takeIf(String::isNotBlank),
         )
         MusicSource.YouTubeMusic -> ProviderTrackMetadata.Empty
+        MusicSource.Qishui -> ProviderTrackMetadata.Empty
         MusicSource.Jellyfin -> ProviderTrackMetadata.Empty
         MusicSource.Local -> ProviderTrackMetadata.Local(
             contentUri = uri.getQueryParameter("localContentUri").orEmpty(),

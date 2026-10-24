@@ -14,6 +14,7 @@ internal const val MELOX_LAN_VERSION = 1
 internal const val MELOX_LAN_DISCOVERY_PORT = 47830
 internal const val MELOX_LAN_DEFAULT_PORT = 47831
 internal const val MELOX_LAN_MAX_MESSAGE_BYTES = 256 * 1024
+internal const val MELOX_LAN_BARRIER = "together_barrier_v2"
 
 data class MeloXLanPlayback(
     val playing: Boolean = false,
@@ -30,6 +31,9 @@ data class MeloXLanPlayback(
     val queueLength: Int = 0,
     val canNext: Boolean = false,
     val canPrevious: Boolean = false,
+    val ready: Boolean = false,
+    val ended: Boolean = false,
+    val sampleTimeMs: Long = 0L,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("playing", playing)
@@ -43,6 +47,9 @@ data class MeloXLanPlayback(
         .put("queueLength", queueLength)
         .put("canNext", canNext)
         .put("canPrevious", canPrevious)
+        .put("ready", ready)
+        .put("ended", ended)
+        .put("serverTimeMs", sampleTimeMs)
         .apply {
             artworkUrl?.let { put("artworkUrl", it) }
             trackId?.let { put("trackId", it) }
@@ -67,6 +74,9 @@ data class MeloXLanPlayback(
                 queueLength = value.optInt("queueLength"),
                 canNext = value.optBoolean("canNext"),
                 canPrevious = value.optBoolean("canPrevious"),
+                ready = value.optBoolean("ready"),
+                ended = value.optBoolean("ended"),
+                sampleTimeMs = value.optLong("serverTimeMs"),
             )
         }
     }

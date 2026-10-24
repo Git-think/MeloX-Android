@@ -1,5 +1,7 @@
 package com.lladlam.melox.ui.player
 
+import com.lladlam.melox.core.lyrics.precedesLead
+
 import android.content.Context
 import android.content.Intent
 import android.graphics.BlurMaskFilter
@@ -1455,8 +1457,9 @@ private fun MeloXUpstreamLyricLine(
         MeloXLyricsRenderingQuality.Balanced -> requestedBlur * .55f
         MeloXLyricsRenderingQuality.High -> requestedBlur
     }
-    val accompanimentBefore = line.accompaniment.filter { it.timeMs < line.timeMs }
-    val accompanimentAfter = line.accompaniment.filterNot { it.timeMs < line.timeMs }
+    val (accompanimentBefore, accompanimentAfter) = remember(line) {
+        line.accompaniment.partition { it.precedesLead(line) }
+    }
 
     Column(
         modifier = Modifier
@@ -1597,7 +1600,8 @@ private fun MeloXRubyLyricText(
     softBlurDp: Float = 0f,
     modifier: Modifier = Modifier,
 ) {
-    if (MeloXSettingsRuntime.lyricWordByWordEnabled) {
+    val units = remember(line) { LyricRomanizationAligner.units(line) }
+    if (MeloXSettingsRuntime.lyricWordByWordEnabled && units.size <= 1) {
         Column(modifier = modifier) {
             MeloXGlyphLyricText(
                 line = line,
@@ -1634,7 +1638,6 @@ private fun MeloXRubyLyricText(
     }
 
     val flipped = line.agent?.alignment == com.lladlam.melox.core.lyrics.LyricAgentAlignment.Flipped
-    val units = remember(line) { LyricRomanizationAligner.units(line) }
     if (units.isEmpty()) {
         MeloXGlyphLyricText(
             line = line,

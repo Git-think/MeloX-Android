@@ -172,4 +172,6 @@ class KugouLiteProvider(
     suspend fun vipStatus(force: Boolean = false): KugouLiteVip = api.vipStatus(force)
 
     suspend fun claimDailyVip(date: LocalDate = LocalDate.now()): JSONObject = api.claimDailyVip(date)
+
+    suspend fun upgradeDailyVip(): JSONObject = api.upgradeDailyVip()
 }

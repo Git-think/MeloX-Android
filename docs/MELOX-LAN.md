@@ -1,6 +1,7 @@
 # MeloX LAN Protocol v1
 
-Status: draft, Android implementation in progress.
+Status: interoperable v1 transport, with the **Together barrier extension (revision 2)**
+specified below. Revision 2 implementation and cross-platform validation are in progress.
 
 This document defines the local-network link used by MeloX apps to discover each
 other and to control, cast, transfer, or synchronize playback. It is intentionally
@@ -70,7 +71,7 @@ Announce (unicast back to the sender's source address/port):
   "port": 47831,
   "pinRequired": true,
   "trusted": false,
-  "capabilities": ["control", "cast", "transfer", "together"],
+  "capabilities": ["control", "cast", "transfer", "together", "together_barrier_v2"],
   "state": {
     "playing": false,
     "title": "…",
@@ -94,7 +95,9 @@ for discovery requests nor announces itself, and the control server is closed.
 ## 3. Control connection
 
 TCP, one JSON object per line (`\n` terminated), UTF-8. Maximum line length is
-256 KiB. The server closes a connection after 15 seconds without a message.
+256 KiB. Authenticated connections belong to the session, not to a song or UI.
+They survive panel dismissal, page changes and queue replacement. Implementations
+using an idle timeout must exchange heartbeats at least every 5 seconds.
 
 ### 3.1 Handshake
 
@@ -115,7 +118,7 @@ The client sends a `hello` first:
 `pin` is omitted when the client believes it is trusted. The server replies:
 
 ```json
-{"type":"auth_ok","trusted":true,"sessionId":"…"}
+{"type":"auth_ok","trusted":true,"sessionId":"…","capabilities":["control","cast","transfer","together","together_barrier_v2"]}
 ```
 
 or
@@ -164,6 +167,7 @@ Supported actions:
 | `cast.stop` | — | Stop the cast receiver |
 | `together.start` | `queue`, `index`, `positionMs`, `playing` | Target joins as a synchronized player |
 | `together.stop` | — | Leave the session |
+| `together.prepare` | `sessionId`, `generation`, `queueRevision`, `queue`, `index`, `positionMs`, optional `relay` | Revision 2: acknowledge only after READY |
 | `ping` | `t0` | Clock probe; response echoes `t0` and returns `serverTimeMs` |
 
 `control` composes as follows:
@@ -193,6 +197,9 @@ event names and fields.
 ```json
 {
   "playing": true,
+  "ready": true,
+  "ended": false,
+  "serverTimeMs": 1792770000000,
   "title": "晴天",
   "artist": "周杰伦",
   "album": "叶惠美",
@@ -255,6 +262,16 @@ Controlled device:
 
 The controller then connects to `controlledIp:castPort` and streams.
 
+`ok:true` means that the audio listener is ready, not that sound has arrived.
+Senders must check the returned codec/rate/channel count, log connection and byte
+counts, and report a failed socket/format negotiation instead of showing success.
+After the stream starts, **only the receiver emits sound**. The sender continues
+decoding/advancing its player and taps PCM **before** silencing its local sink.
+Pausing the sender or setting upstream volume to zero is incorrect: it stops or
+silences the audio being transmitted. On stop/failure, restore local output.
+Muting must also cover secondary/crossfade players. Format renegotiation must not
+briefly restore local sound. Together does not use this local-mute rule.
+
 ### 4.2 Packet format
 
 Each audio packet:
@@ -297,7 +314,7 @@ protocol does not mandate it).
 
 ## 6. Together
 
-### 6.1 Start
+### 6.1 Legacy start and revision negotiation
 
 The initiator (host) sends its queue snapshot and state:
 
@@ -306,14 +323,94 @@ The initiator (host) sends its queue snapshot and state:
  "queue":[ … ], "index":2, "positionMs":42000, "playing":true}
 ```
 
-The receiver applies the queue, seeks to `positionMs`, and replies with its
+Legacy receivers apply the queue, seek to `positionMs`, and reply with their
 state. The host remains authoritative for queue changes. The control connection used
 for `together.start` stays open and is bidirectional: the joining device may send
 `control` requests back over the same socket, and the initiator applies them and
 emits `together.state` events over that socket. This avoids a reverse PIN prompt
 while still letting both sides control playback.
 
-### 6.3 Guest without an account or VIP: temporary audio relay
+Discovery and `auth_ok` advertise `together_barrier_v2` in `capabilities` when
+implemented. The v1 JSON framing and PCM framing stay unchanged. A v2 host sends
+the extension only to peers advertising support; legacy peers use the legacy
+path and must be reported as such, never presented as barrier-synchronized.
+
+### 6.2 Revision 2: queue generations and prepare/commit
+
+The host assigns a random `sessionId` and monotonically increasing `generation`.
+Every explicit skip/previous, queue/playlist replacement, or new track round
+creates a new generation, **even if the numerical index stays the same**.
+Queue identity includes ordered provider/id pairs and playback URLs where used.
+
+```json
+{"id":"p1","type":"request","action":"together.prepare",
+ "sessionId":"…","generation":7,"queueRevision":"…",
+ "queue":[…],"index":2,"trackId":"netease:186016","positionMs":0,
+ "playing":true,"relay":{"baseUrl":"http://…","token":"…"}}
+```
+
+The host pauses itself, prepares its own track, and sends prepare to every joined
+device concurrently. Receivers replace their queue/relay, prepare the requested
+track paused, and reply **only when the player is READY**, or return a preparation
+error. An acknowledgement that merely posted a main-thread task is not READY.
+Responses echo `sessionId` and `generation`. Stale generations cannot start,
+seek, finish, or replace a newer round. Failure/disconnection removes that peer
+from the pending barrier without closing other connections.
+
+Once all participants are READY, or **3 seconds after preparation began**, the
+host commits the ready group. Include a short scheduling lead (e.g. 200 ms) and a
+host wall-clock timestamp calibrated using ping (never compare wall-clock and
+monotonic timestamps directly):
+
+```json
+{"type":"event","event":"together.commit","sessionId":"…","generation":7,
+ "startAtMs":1792770000200,"clockOffsetMs":12,"positionMs":0,"playing":true}
+```
+
+Devices schedule against local monotonic time using the measured host-clock
+offset. `clockOffsetMs` is **host wall time minus receiver wall time**, so the
+receiver's local target is `startAtMs - clockOffsetMs`. If the host itself is not READY at the deadline, ready guests may still
+start; the host follows the same late-join rule. A late-ready device receives the
+same generation's commit with `late:true`, starts from its prepared position
+immediately, and **does not seek/catch up to the already-playing group**.
+Periodic state must not undo that rule. User seek is explicit and still applies.
+
+### 6.3 Track completion and the next round
+
+Receivers report ready/position/ended status tagged with session/generation.
+The host suppresses player auto-advance while the current barrier round is active;
+an explicit user skip overrides any wait immediately. On natural completion,
+compare the host with the most-delayed participant using current positions and
+known elapsed time, excluding failures/disconnections. If the maximum remaining
+time is **at most 5 seconds**, wait for the last participant to finish, then run
+prepare/commit for the next track. Cap this wait at 5 seconds so a stalled or lost
+peer cannot block the queue indefinitely. If the error exceeds 5 seconds, begin
+the next preparation without waiting. A generation receives at most one next-round
+transition. Queue changes are always sent with their new queue and relay grant;
+an index-only `together.state` cannot synchronize playlist changes.
+
+### 6.4 Clock and drift policy
+
+Use multiple ping samples (at least 3), rejecting slow outliers; prefer the
+lowest-RTT sample and refresh during the session. Ping timestamps are wall-clock
+milliseconds on both ends; local intervals/deadlines use monotonic time.
+
+```
+offset = hostServerTimeMs - (clientSendWallMs + clientReceiveWallMs) / 2
+target = hostPositionMs + (clientNowWallMs + offset - hostSampleWallMs)
+```
+
+Only extrapolate a playing, READY sample. Deliver transport/track changes
+immediately rather than waiting for a one-second timer. State samples should be
+sent about every 200 ms during playback. For on-time participants use a small
+deadband (~40 ms), bounded rate correction (e.g. 0.97–1.03), and reserve seeks for
+large errors (>250 ms), with buffering and post-seek cooldown protection. Late
+participants retain their intended start offset and are not forcibly aligned.
+Reset correction speed on stop/pause/new generation. Measure scheduling, player
+output latency and RTT separately; do not claim sub-100-ms acoustic synchronization
+from protocol-only tests.
+
+### 6.5 Guest without an account or VIP: temporary audio relay
 
 A host MAY include a `relay` object when starting Together:
 
@@ -344,7 +441,7 @@ Token rules:
 The proxy is host-local and never exposed to the internet. A future version may
 replace PCM/HTTP proxying with Opus and an authenticated media session.
 
-### 6.2 Clock sync
+### 6.6 Legacy clock sync
 
 Clients estimate the host clock offset with `ping`:
 
@@ -399,9 +496,31 @@ audible drift under half a second without extra DSP.
 may be advertised in `capabilities`; v1 peers should show the device as
 “unsupported protocol” rather than silently failing.
 
+### 9.1 Compatibility and diagnosis (2026-10-24)
+
+| Feature | v1 peer | `together_barrier_v2` peer |
+| --- | --- | --- |
+| PCM cast framing | Same length-prefixed S16LE TCP stream | Same |
+| Host playlist/skip update | Resend `together.start` with new queue/relay | New `together.prepare` generation |
+| READY acknowledgement / common start | Unavailable; legacy behavior is logged | Prepare/commit barrier |
+| Late starter does not catch up | Not guaranteed | Explicit late flag |
+| End-of-track wait | Host can use available status, with a bounded wait | Generation-tagged status |
+
+Android forces the integer PCM processing path: Media3's float-output path can
+bypass custom processors entirely, resulting in local-only playback and no cast
+packets. Decoder buffers are split into frame-aligned ~20-ms packets, never
+exceeding 64 KiB. A decoder buffer is not itself a valid packet-size assumption.
+Check `MeloXCast` first-PCM-sent/received logs and `MeloXTogether` round/legacy-peer
+logs before attributing a failure to an incompatible protocol version.
+
+The Linux source inspected during this Android revision advertises only the v1
+capabilities. Its PCM framing matches this document, but it needs the revision-2
+receiver/host state machine before barrier/late-start semantics can be guaranteed
+with Linux. Updating this document alone does not upgrade a running Linux binary.
+
 ## 10. Future extensions (not v1)
 
-- Remote queue editing and playlist transfer.
+- Remote queue editing (host queue/playlist replacement is already required by Together).
 - Opus/AAC negotiation and adaptive bitrate.
 - Device suggestions / handoff (Xiaomi-style flow) using the same discovery and
   transfer primitives.

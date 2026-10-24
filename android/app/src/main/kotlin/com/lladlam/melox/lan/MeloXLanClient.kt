@@ -10,6 +10,7 @@ import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,11 +29,12 @@ internal enum class MeloXLanConnectResult { Connected, PinRequired, Failed }
  * guest may receive them on the same socket and answer on its own player.
  */
 internal class MeloXLanClient(
-    private val device: MeloXLanDevice,
+    val device: MeloXLanDevice,
     private val identity: MeloXLanPreferences,
     private val scope: CoroutineScope,
     private val onEvent: (JSONObject) -> Unit = {},
     private val onRequest: ((JSONObject) -> JSONObject?)? = null,
+    private val onDisconnected: () -> Unit = {},
 ) {
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
@@ -43,6 +45,8 @@ internal class MeloXLanClient(
     @Volatile var trusted: Boolean = false
         private set
     @Volatile var remoteDeviceId: String = ""
+        private set
+    @Volatile var capabilities: Set<String> = device.capabilities
         private set
 
     suspend fun connect(pin: String? = null): MeloXLanConnectResult = withContext(Dispatchers.IO) {
@@ -88,6 +92,9 @@ internal class MeloXLanClient(
             "auth_ok" -> {
                 trusted = response.optBoolean("trusted")
                 remoteDeviceId = response.optString("deviceId")
+                response.optJSONArray("capabilities")?.let { values ->
+                    capabilities = (0 until values.length()).map { values.optString(it) }.toSet()
+                }
                 MeloXLanConnectResult.Connected
             }
             "auth_required" -> MeloXLanConnectResult.PinRequired
@@ -96,6 +103,7 @@ internal class MeloXLanClient(
     }
 
     fun close() {
+        val wasConnected = isConnected
         isConnected = false
         pending.values.forEach { it.cancel() }
         pending.clear()
@@ -103,6 +111,10 @@ internal class MeloXLanClient(
         socket = null
         reader = null
         writer = null
+        if (wasConnected) {
+            Log.i(TAG, "LAN connection closed: ${device.address}:${device.port}")
+            onDisconnected()
+        }
     }
 
     fun sendEvent(value: JSONObject): Boolean = send(value)
@@ -115,7 +127,7 @@ internal class MeloXLanClient(
         action: String,
         payload: JSONObject = JSONObject(),
         timeoutMs: Long = 5_000L,
-    ): JSONObject? {
+    ): JSONObject? = withContext(Dispatchers.IO) {
         val id = UUID.randomUUID().toString()
         val request = JSONObject()
             .put("id", id)
@@ -126,11 +138,23 @@ internal class MeloXLanClient(
         pending[id] = deferred
         if (!send(request)) {
             pending.remove(id)
-            return null
+            Log.w(TAG, "LAN request $action could not be sent")
+            return@withContext null
         }
-        return runCatching { withTimeout(timeoutMs) { deferred.await() } }
-            .onFailure { pending.remove(id) }
-            .getOrNull()
+        try {
+            withTimeout(timeoutMs) { deferred.await() }.also { response ->
+                if (response.has("ok") && !response.optBoolean("ok")) {
+                    Log.w(TAG, "LAN request $action rejected: ${response.optString("error")}")
+                }
+            }
+        } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+            Log.w(TAG, "LAN request $action timed out")
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } finally {
+            pending.remove(id)
+        }
     }
 
     suspend fun control(command: String, positionMs: Long? = null, volume: Int? = null): Boolean {
@@ -157,7 +181,14 @@ internal class MeloXLanClient(
         if (!response.optBoolean("ok")) return null
         val port = response.optInt("castPort", 0)
         if (port !in 1..65535) return null
-        return MeloXLanCastHandshake(port, MeloXLanCastFormat.fromJson(response.optJSONObject("format")))
+        val negotiated = MeloXLanCastFormat.fromJson(response.optJSONObject("format"))
+        if (negotiated != format || negotiated.codec != "pcm_s16le") {
+            Log.w(TAG, "Cast format mismatch: requested=$format received=$negotiated")
+            stopCast()
+            return null
+        }
+        Log.i(TAG, "Cast receiver ready: ${device.address}:$port $negotiated")
+        return MeloXLanCastHandshake(port, negotiated)
     }
 
     suspend fun stopCast(): Boolean = request("cast.stop")?.optBoolean("ok") == true
@@ -231,6 +262,6 @@ internal class MeloXLanClient(
             out.write("\n")
             out.flush()
             true
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "LAN socket write failed", it) }.getOrDefault(false)
     }
 }

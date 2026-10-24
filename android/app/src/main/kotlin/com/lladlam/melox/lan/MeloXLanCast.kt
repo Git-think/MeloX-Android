@@ -16,6 +16,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,11 +27,14 @@ private const val TAG = "MeloXCast"
 
 /**
  * Process-wide tap into Media3's decoded PCM. Attached only to the main
- * playback player, so cast sends exactly what the local user hears.
+ * playback player. During casting, PCM is sent before silencing local output.
  */
 internal object MeloXCastAudioTap {
+    @Volatile var inputEncoding: Int = C.ENCODING_PCM_16BIT
+    @Volatile var inputChannels: Int = 2
     @Volatile private var listener: ((ByteArray) -> Unit)? = null
     @Volatile private var formatListener: ((MeloXLanCastFormat) -> Unit)? = null
+    @Volatile var muteLocalOutput: Boolean = false
     @Volatile var format: MeloXLanCastFormat = MeloXLanCastFormat()
         private set
 
@@ -54,15 +58,23 @@ internal object MeloXCastAudioTap {
         formatListener = listener
     }
 
+    fun clearFormatListener(listener: (MeloXLanCastFormat) -> Unit) {
+        if (formatListener === listener) formatListener = null
+    }
+
     internal fun offer(bytes: ByteArray) {
         listener?.invoke(bytes)
     }
 }
 
 @UnstableApi
-internal class MeloXCastAudioProcessor : BaseAudioProcessor() {
+internal class MeloXCastAudioProcessor(private val tapAudio: Boolean = true) : BaseAudioProcessor() {
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        if (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT) {
+        if (tapAudio) {
+            MeloXCastAudioTap.inputEncoding = inputAudioFormat.encoding
+            MeloXCastAudioTap.inputChannels = inputAudioFormat.channelCount
+        }
+        if (tapAudio && inputAudioFormat.encoding == C.ENCODING_PCM_16BIT) {
             MeloXCastAudioTap.onFormatChanged(
                 MeloXLanCastFormat(
                     sampleRate = inputAudioFormat.sampleRate,
@@ -77,14 +89,17 @@ internal class MeloXCastAudioProcessor : BaseAudioProcessor() {
         val remaining = inputBuffer.remaining()
         if (remaining <= 0) return
         val output = replaceOutputBuffer(remaining)
-        if (MeloXCastAudioTap.isActive()) {
+        if (tapAudio && MeloXCastAudioTap.isActive()) {
             val data = ByteArray(remaining)
             inputBuffer.duplicate().get(data)
-            output.put(data)
             inputBuffer.position(inputBuffer.limit())
             MeloXCastAudioTap.offer(data)
+            if (MeloXCastAudioTap.muteLocalOutput) output.put(ByteArray(remaining)) else output.put(data)
         } else {
-            output.put(inputBuffer)
+            if (MeloXCastAudioTap.muteLocalOutput) {
+                output.put(ByteArray(remaining))
+                inputBuffer.position(inputBuffer.limit())
+            } else output.put(inputBuffer)
         }
         output.flip()
     }
@@ -95,18 +110,25 @@ internal class MeloXLanCastReceiver(
 ) {
     private var serverSocket: ServerSocket? = null
     private var job: Job? = null
+    @Volatile private var clientSocket: Socket? = null
     @Volatile private var audioTrack: AudioTrack? = null
 
     fun start(format: MeloXLanCastFormat): MeloXLanCastHandshake? {
         stop()
+        if (format.codec != "pcm_s16le") return null
+        val preparedTrack = buildTrack(format) ?: return null
         val socket = runCatching { ServerSocket(0) }.getOrElse {
+            preparedTrack.release()
             Log.w(TAG, "Unable to open cast receiver port", it)
             return null
         }
         serverSocket = socket
+        audioTrack = preparedTrack
         job = scope.launch(Dispatchers.IO) {
             try {
                 val client = socket.accept()
+                clientSocket = client
+                Log.i(TAG, "Cast audio connection accepted: ${client.inetAddress.hostAddress}")
                 client.use { receive(it, format) }
             } catch (error: Exception) {
                 if (serverSocket != null) Log.w(TAG, "Cast receiver stopped", error)
@@ -118,16 +140,23 @@ internal class MeloXLanCastReceiver(
     }
 
     private fun receive(socket: Socket, format: MeloXLanCastFormat) {
-        val track = buildTrack(format) ?: return
-        audioTrack = track
+        val track = audioTrack ?: return
         track.play()
         val input = DataInputStream(BufferedInputStream(socket.getInputStream()))
+        var received = 0L
         while (scope.isActive && serverSocket != null) {
             val length = input.readInt()
             if (length <= 0 || length > 64 * 1024) break
             val data = ByteArray(length)
             input.readFully(data)
-            track.write(data, 0, data.size, AudioTrack.WRITE_BLOCKING)
+            var offset = 0
+            while (offset < data.size) {
+                val count = track.write(data, offset, data.size - offset, AudioTrack.WRITE_BLOCKING)
+                check(count > 0) { "AudioTrack write failed: $count" }
+                offset += count
+            }
+            if (received == 0L) Log.i(TAG, "First cast PCM received: ${data.size} bytes, $format")
+            received += length
         }
     }
 
@@ -164,6 +193,8 @@ internal class MeloXLanCastReceiver(
         val socket = serverSocket
         serverSocket = null
         runCatching { socket?.close() }
+        runCatching { clientSocket?.close() }
+        clientSocket = null
         job?.cancel()
         job = null
         releaseTrack()
@@ -186,33 +217,47 @@ internal class MeloXLanCastSender(
     private var socket: Socket? = null
     private var job: Job? = null
     private val stopped = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val queue = ArrayBlockingQueue<ByteArray>(64)
+    private val queue = ArrayBlockingQueue<ByteArray>(12)
     private val tapListener: (ByteArray) -> Unit = { bytes -> offer(bytes) }
+    private val formatListener: (MeloXLanCastFormat) -> Unit = { newFormat ->
+        if (newFormat != handshake.format) stop("format_changed")
+    }
 
     fun start(): Boolean {
         val target = runCatching {
-            Socket().apply { connect(InetSocketAddress(device.address, handshake.port), 3_000) }
+            Socket().apply { tcpNoDelay = true; connect(InetSocketAddress(device.address, handshake.port), 3_000) }
         }.getOrElse {
             onStopped(it.message ?: "connect_failed")
             return false
         }
         socket = target
         MeloXCastAudioTap.attach(tapListener)
-        MeloXCastAudioTap.setFormatListener { newFormat ->
-            if (newFormat != handshake.format) {
-                // v1 does not resample mid-session; stop and let the UI start a
-                // fresh cast with the new format.
-                stop("format_changed")
-            }
-        }
+        MeloXCastAudioTap.setFormatListener(formatListener)
         job = scope.launch(Dispatchers.IO) {
             try {
                 val output = DataOutputStream(target.getOutputStream())
-                while (scope.isActive) {
-                    val packet = queue.take()
+                var sent = 0L
+                var emptySince = 0L
+                while (scope.isActive && !stopped.get()) {
+                    val packet = queue.poll(200, TimeUnit.MILLISECONDS)
+                    if (packet == null) {
+                        val state = MeloXLanRuntime.snapshot()
+                        if (state?.playing == true && state.ready) {
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (emptySince == 0L) emptySince = now
+                            if (now - emptySince > 5_000L) {
+                                Log.w(TAG, "Cast has no decoded PCM for 5s while player is READY; sent=$sent")
+                                stop("no_decoded_pcm")
+                            }
+                        } else emptySince = 0L
+                        continue
+                    }
+                    emptySince = 0L
                     output.writeInt(packet.size)
                     output.write(packet)
                     output.flush()
+                    if (sent == 0L) Log.i(TAG, "First cast PCM sent: ${packet.size} bytes to ${device.address}:${handshake.port}")
+                    sent += packet.size
                 }
             } catch (error: Exception) {
                 if (socket != null) onStopped(error.message)
@@ -224,9 +269,17 @@ internal class MeloXLanCastSender(
     }
 
     private fun offer(bytes: ByteArray) {
-        if (!queue.offer(bytes)) {
-            queue.poll()
-            queue.offer(bytes)
+        // Decoder buffers can exceed the wire's 64 KiB maximum. Send ~20 ms frames.
+        val packetSize = (handshake.format.sampleRate / 50).coerceAtLeast(1) * handshake.format.channels * 2
+        var offset = 0
+        while (offset < bytes.size) {
+            val end = minOf(offset + packetSize, bytes.size)
+            val packet = bytes.copyOfRange(offset, end)
+            if (!queue.offer(packet)) {
+                queue.poll()
+                queue.offer(packet)
+            }
+            offset = end
         }
     }
 
@@ -239,7 +292,7 @@ internal class MeloXLanCastSender(
 
     private fun closeSocket() {
         MeloXCastAudioTap.detach(tapListener)
-        MeloXCastAudioTap.setFormatListener(null)
+        MeloXCastAudioTap.clearFormatListener(formatListener)
         runCatching { socket?.close() }
         socket = null
         job?.cancel()

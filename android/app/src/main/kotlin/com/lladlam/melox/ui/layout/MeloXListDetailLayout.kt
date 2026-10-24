@@ -134,10 +134,18 @@ class MeloXDetailPaneState {
 }
 
 internal fun Context.openMeloXDetailPage(intent: Intent): Boolean {
-    // 0.6.4 settings use the platform Activity transition in a single pane.
-    // Only the landscape settings list needs an inline secondary-pane page.
+    // Settings and its account/service pages share platform Activity transitions
+    // in a single pane. Inline pages would also hide the shell's dock/miniplayer
+    // until their exit animation finishes. Only split landscape uses the pane.
     val config = resources.configuration
-    if (intent.component?.className == MeloXSettingsDetailActivity::class.java.name &&
+    val settingsPage = when (intent.component?.className) {
+        MeloXSettingsDetailActivity::class.java.name,
+        MeloXAccountActivity::class.java.name,
+        MeloXNeteaseLoginActivity::class.java.name,
+        MeloXProviderServicesActivity::class.java.name -> true
+        else -> false
+    }
+    if (settingsPage &&
         (!MeloXSettingsRuntime.splitScreenEnabled || config.screenWidthDp <= config.screenHeightDp)) return false
     var current = this
     while (true) {

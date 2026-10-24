@@ -93,11 +93,17 @@ private data class MeloXAudioOutputOption(
 internal fun MeloXAudioOutputDialog(
     visible: Boolean,
     onDismiss: () -> Unit,
+    state: MeloXPlaybackUiState,
 ) {
     val context = LocalContext.current
     var refreshTick by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showLanDevices by remember { mutableStateOf(false) }
+    var showOutputOptions by remember { mutableStateOf(false) }
+    LaunchedEffect(visible) {
+        if (!visible) {
+            showOutputOptions = false
+        }
+    }
     val router = remember(context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             runCatching { MediaRouter2.getInstance(context) }.getOrNull()
@@ -162,7 +168,21 @@ internal fun MeloXAudioOutputDialog(
     val options = remember(router, refreshTick) { router?.audioOutputOptions(context).orEmpty() }
     val selectedName = options.firstOrNull { it.selected }?.name
 
-    MeloXGlassDialog(visible = visible, onDismiss = onDismiss) {
+    val selectedOption = options.firstOrNull { it.selected }
+    MeloXLanOutputPanel(
+        visible = visible && !showOutputOptions,
+        state = state,
+        outputName = if (selectedOption == null || selectedOption.type == MediaRoute2Info.TYPE_BUILTIN_SPEAKER) {
+            stringResource(R.string.player_output_local)
+        } else selectedOption.name,
+        onLocalOptions = { showOutputOptions = true },
+        onDismiss = onDismiss,
+    )
+
+    MeloXGlassDialog(
+        visible = visible && showOutputOptions,
+        onDismiss = { showOutputOptions = false },
+    ) {
         Text(
             stringResource(R.string.player_output_devices),
             style = MaterialTheme.typography.titleLarge,
@@ -269,7 +289,7 @@ internal fun MeloXAudioOutputDialog(
         }
         Spacer(Modifier.height(10.dp))
         MeloXGlassButton(
-            onClick = { showLanDevices = true },
+            onClick = { showOutputOptions = false },
             modifier = Modifier.fillMaxWidth(),
             style = MeloXGlassButtonStyle.Bordered,
             shape = MeloXShapes.capsule,
@@ -297,7 +317,7 @@ internal fun MeloXAudioOutputDialog(
                 Text(stringResource(R.string.player_output_open_system), fontSize = 13.sp)
             }
             MeloXGlassButton(
-                onClick = onDismiss,
+                onClick = { showOutputOptions = false },
                 modifier = Modifier.width(92.dp),
                 style = MeloXGlassButtonStyle.BorderedProminent,
                 shape = MeloXShapes.capsule,
@@ -306,7 +326,6 @@ internal fun MeloXAudioOutputDialog(
             }
         }
     }
-    MeloXLanDialog(visible = showLanDevices, onDismiss = { showLanDevices = false })
 }
 
 private fun MediaRouter2.audioOutputOptions(context: Context): List<MeloXAudioOutputOption> {

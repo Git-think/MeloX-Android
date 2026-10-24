@@ -48,7 +48,8 @@ android {
         targetSdk = 37
         versionCode = 24
         versionName = "0.6.5"
-        testInstrumentationRunner = "com.lladlam.melox.core.autosync.AutoSyncDeviceRunner"
+        testInstrumentationRunner = providers.gradleProperty("meloxTestInstrumentationRunner")
+            .getOrElse("com.lladlam.melox.core.autosync.AutoSyncDeviceRunner")
         // One APK for real phones: both ARM architectures stay in the package,
         // so 32-bit devices keep working exactly as before. Only the
         // emulator-only x86/x86_64 copies are removed — ONNX Runtime alone
@@ -131,7 +132,8 @@ android {
             //   INSTALL_FAILED_UPDATE_INCOMPATIBLE，两个包只能留一个。
             // Manifest 的 authorities 全是 ${applicationId}.xxx 模板（.androidx-startup
             // / .fileprovider / .shizuku），换 id 自动错开，无需额外改动。
-            applicationIdSuffix = ".dev"
+            // Override for same-phone LAN regression with a second debug install.
+            applicationIdSuffix = providers.gradleProperty("meloxDebugApplicationIdSuffix").getOrElse(".dev")
         }
 
         // ── debugPerf：不卡的 debug ──────────────────────────────────────────

@@ -180,6 +180,13 @@ object MusicExperiences {
         ),
     )
 
+    val qishui = MusicExperience(
+        source = MusicSource.Qishui,
+        homeSections = listOf(HomeSectionKind.Recommendations, HomeSectionKind.Playlists),
+        providerNativeCapabilities = setOf(MusicCapability.Search, MusicCapability.Playback,
+            MusicCapability.Lyrics, MusicCapability.HomeRecommendations, MusicCapability.Library, MusicCapability.Playlists),
+    )
+
     fun forSource(source: MusicSource): MusicExperience = when (source) {
         MusicSource.Netease -> netease
         MusicSource.QQMusic -> qqMusic
@@ -192,5 +199,6 @@ object MusicExperiences {
         MusicSource.YouTubeMusic -> youtubeMusic
         MusicSource.Jellyfin -> jellyfin
         MusicSource.Local -> local
+        MusicSource.Qishui -> qishui
     }
 }

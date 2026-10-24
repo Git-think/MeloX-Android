@@ -283,7 +283,10 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 - `librespot-java` — Spotify 账号会话、播放和离线缓存；Apache License 2.0。
 - [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — YouTube Music 匿名搜索和流地址解析；GPL-3.0。
 - [Metrolist InnerTube](https://github.com/mostafaalagamy/Metrolist) — YouTube Music 登录态目录、账号库和歌单操作；GPL-3.0，模块已随本项目 vendored 于 `android/innertube/`。
-- [Miuix](https://github.com/compose-miuix-ui/miuix) — 当前 Android Backdrop / Blur 实验实现使用 `miuix-blur`；Apache License 2.0。
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) — AutoSync 本地逐字歌词对齐推理；MIT。
+- [QuickJS Android](https://github.com/HarlonWang/quickjs-wrapper) — LX Music 兼容音源脚本的隔离运行时；分别遵循 wrapper 与 QuickJS 的许可证。
+- [ZXing](https://github.com/zxing/zxing) — 二维码生成；Apache License 2.0。
+- [Shizuku](https://github.com/RikkaApps/Shizuku) — 可选的免 Root HyperOS 兼容接入；Apache License 2.0。
 
 ### Liquid Glass / Backdrop 实现来源
 
@@ -295,9 +298,17 @@ SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；
 
 ### API 与 UI 参考项目
 
+- [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — 汽水音乐原生接口、扫码登录、目录、歌词与播放字段参考；MIT，接入范围与验证记录见 [QISHUI.md](docs/QISHUI.md)。
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — 一个基于 Mei 的仿 Apple Music 网易云音乐客户端，为弥乐 Android 版提供 UI 参考。
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API Python 客户端，为 Spotify API 接入提供参考。
 - [bromothymolb/bilibili-api-zoku](https://github.com/bromothymolb/bilibili-api-zoku) — Bilibili API 调用与常用功能整合项目，为 Bilibili API 接入提供参考。
+- [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) — 酷狗概念版协议、请求签名、每日 VIP 领取及升级参数参考；MIT，详见 [KUGOU-LITE.md](docs/KUGOU-LITE.md)。
+- [MoeKoeMusic/MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic) — 酷狗概念版桌面账号与签到领会员流程参考；GPL-2.0。
+- [MoeKoeMusic/MoeKoeMusic-mobile](https://github.com/MoeKoeMusic/MoeKoeMusic-mobile) — 移动端签到交互与活动结果处理参考；GPL-2.0。MoeKoe 两个项目仅用于行为核对，未复制其代码或界面资源。
+- [lladlam/Square](https://github.com/lladlam/Square) — Spotify / YouTube Music 双后端架构参考。
+- [lladlam/MeloX-AutoSync](https://github.com/lladlam/MeloX-AutoSync) — 本地逐字歌词对齐与发音映射参考；各组件许可证见随附声明。
+- [neteasecloudmusicapienhanced/api-enhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced) — 听歌识曲与音频指纹运行时参考。
+- [mjhydri/BeatNet](https://github.com/mjhydri/BeatNet) — AutoMix 节拍、重拍与速度分析；CC BY 4.0。
 
 ### 上游弥乐的参考来源
 
@@ -361,6 +372,7 @@ Text PV / PV Tool、BeatNet 及其他弥乐功能继续按照上游项目要求�
 | 爱发电用户\_26d40 | 50 元 |
 | 爱发电用户\_aec4c | 6 元（包月） |
 | Bai | 5 元 |
+| 中末 | 8.88 元 |
 
 ## 友情链接
 

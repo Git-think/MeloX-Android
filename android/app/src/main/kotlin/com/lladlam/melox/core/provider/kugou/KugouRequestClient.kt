@@ -11,6 +11,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 internal class KugouAuthException(message: String) : IOException(message)
+internal class KugouApiException(val errorCode: Int, message: String) : IOException(message)
 
 internal class KugouRequestClient(
     private val sessionProvider: () -> KugouSession,
@@ -211,7 +212,7 @@ internal class KugouRequestClient(
                 ) {
                     throw KugouAuthException("酷狗音乐登录状态已失效，请重新登录：$message")
                 }
-                throw IOException("酷狗音乐请求失败：$message")
+                throw KugouApiException(errorCode, "酷狗音乐请求失败：$message")
             }
             return result
         }
