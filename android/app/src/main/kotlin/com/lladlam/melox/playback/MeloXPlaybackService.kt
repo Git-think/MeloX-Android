@@ -638,17 +638,24 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             },
         )
         val cookieProvider = { com.lladlam.melox.core.music.provider.PlaybackAccountStore.neteaseCookie(this@MeloXPlaybackService) }
+        val thirdPartyResolver = ThirdPartyPlaybackResolver(
+            context = this,
+            enabledProvider = { ThirdPartyMusicSourceConsentStore.enabled(this@MeloXPlaybackService) },
+            membershipOnlyProvider = {
+                ThirdPartyMusicSourceConsentStore.membershipFallbackOnly(this@MeloXPlaybackService)
+            },
+        )
         playbackResolver = NeteasePlaybackResolver(
             cookieProvider = cookieProvider,
             client = NeteaseSearchClient(cookieProvider = cookieProvider),
             localSourceProvider = downloadStore::localPlaybackUri,
             providerLocalSourceProvider = providerDownloadStore::localPlaybackUri,
             crossProviderFallback = crossProviderFallback,
+            thirdPartyResolver = thirdPartyResolver,
             providerPlaybackEnabled = { source ->
                 MeloXRemoteConfigPolicy.providerPlaybackEnabled(this@MeloXPlaybackService, source)
             },
             thirdPartySourcesEnabled = { ThirdPartyMusicSourceConsentStore.enabled(this@MeloXPlaybackService) },
-            thirdPartyOnlyForMembership = { ThirdPartyMusicSourceConsentStore.membershipFallbackOnly(this@MeloXPlaybackService) },
         )
         autoMixAnalyzer = MeloXAutoMixAudioAnalyzer(this)
         val upstream = DefaultDataSource.Factory(this, httpFactory)

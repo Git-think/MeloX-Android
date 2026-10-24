@@ -132,6 +132,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.shapes.Capsule
 import com.lladlam.melox.ui.library.LibraryScreen
+import com.lladlam.melox.core.provider.kugou.KugouLiteDailyCheckIn
 import com.lladlam.melox.ui.legal.MELOX_LEGAL_VERSION
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigConsent
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigSource
@@ -303,6 +304,13 @@ fun MeloXApp(
                 MeloXRemoteConfigConsent.enabled(context) &&
                 remoteConfigStatus.source == MeloXRemoteConfigSource.VerifiedRemote &&
                 MeloXRemoteNoticeStore.shouldShow(context, it)
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (MeloXSettingsPreferences.boolean(context, "onboarding_completed", false)) {
+            withContext(Dispatchers.IO) {
+                runCatching { KugouLiteDailyCheckIn.run(context) }
+            }
         }
     }
     var heartModeLaunchAttempted by remember { mutableStateOf(false) }

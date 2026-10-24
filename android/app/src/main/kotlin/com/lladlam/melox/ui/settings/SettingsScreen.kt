@@ -1910,6 +1910,15 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
 @Composable
 private fun LyricsSettings(context: android.content.Context) {
     var lyricsStyle by remember { mutableStateOf(MeloXSettingsRuntime.lyricsStyle) }
+    // Only the Apple Music style is offered for now. Other renderers stay in the
+    // codebase; if one was selected before, move the stored preference back so
+    // the visible selector matches what is actually rendered.
+    LaunchedEffect(Unit) {
+        if (lyricsStyle != MeloXLyricsStyle.AppleMusic) {
+            lyricsStyle = MeloXLyricsStyle.AppleMusic
+            MeloXSettingsPreferences.setString(context, "lyrics_style", MeloXLyricsStyle.AppleMusic.name)
+        }
+    }
     // Group 1: 歌词样式-歌词渲染质量-逐字歌词-普通LRC-点击跳转-长按分享-间奏倒计时-自动跟随-手动滚动恢复-减弱动画
     SettingsGlassGroup {
         MeloXSettingsDropdown(
@@ -1917,8 +1926,6 @@ private fun LyricsSettings(context: android.content.Context) {
             selected = lyricsStyle,
             items = listOf(
                 MeloXLyricsStyle.AppleMusic to stringResource(R.string.settings_apple_music),
-                MeloXLyricsStyle.Eva to stringResource(R.string.settings_lyrics_style_eva),
-                MeloXLyricsStyle.TextPV to stringResource(R.string.settings_lyrics_style_text_pv),
             ),
             onSelected = { lyricsStyle = it; MeloXSettingsPreferences.setString(context, "lyrics_style", it.name) },
             grouped = true,

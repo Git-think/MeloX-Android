@@ -27,9 +27,12 @@ MIT 仓库的接口行为重新编写 Kotlin 代码。MoeKoe 的界面仅作为�
   `KugouPlaylistClient` / `KugouLyricsClient`，通过 `source` 参数区分资源 ID。
 - `KugouLoginScreen(lite = true)`：概念版 QR 登录入口。
 - `ProviderSettingsHub`：概念版账号、退出、领取今日 VIP（需二次确认）。
+- `KugouLiteDailyReward.kt`：每日奖励状态与执行逻辑。一次签到同时调用畅听 VIP 领取和
+  概念版 VIP 升级；可按天记录结果、`131001`/`20028` 状态，并限制自动重试频率。
 - `SettingsRoute.KugouLiteVip` / `KugouLiteVipSettings`：仅概念版显示的
   「设置 → 扩展 → 签到领会员」独立设置子页，复用设置宿主、分组列表、玻璃按钮和确认弹窗。
-  展示概念版账号与会员有效期；手动签到后可单独确认申请升级，返回登录页后刷新账号状态。
+  展示概念版账号与会员有效期、两项每日奖励状态和「自动签到会员」开关；手动签到会同时
+  执行畅听与概念版操作，返回登录页后刷新账号状态。
 
 ## 接口映射
 
@@ -47,14 +50,14 @@ MIT 仓库的接口行为重新编写 Kotlin 代码。MoeKoe 的界面仅作为�
 | 专辑/歌手 | `/kmr/v2/albums`、`/v1/album_audio/lite`、`/kmr/v3/author` |
 | 歌单 | `/v3/get_list_info`、`/pubsongs/v2/get_other_list_file_nofilt`、`/v7/get_all_list` |
 | 排行榜 | `/openapi/kmr/v2/rank/audio`、`/ocean/v6/rank/*` |
-| 每日 VIP | `/youth/v1/recharge/receive_vip_listen_song`（仅用户确认后调用） |
-| 今日 VIP 升级 | `/youth/v1/listen_song/upgrade_vip_reward`（签到成功／已签后，另行确认） |
+| 每日畅听 VIP | `/youth/v1/recharge/receive_vip_listen_song`（手动确认或自动签到） |
+| 今日概念版 VIP 升级 | `/youth/v1/listen_song/upgrade_vip_reward`（与畅听领取同一次执行） |
 
 签到流程核对了上述三个本地参考仓库：MIT API 模块提供领取日期、`source_id=90139`、
-升级参数 `kugouid` / `ad_type=1`；桌面与移动参考用于核对「领取 → 可选升级」流程、
-`131001`（今日已领）与 `20028`（当前账号无法领取）的提示。未复制其界面实现。
-只有响应 `status=1` 才显示领取成功；本地已签到标记只记录本次页面确认过的日期，
-没有查询时显示「待确认」，不把它当作服务端历史记录。
+升级参数 `kugouid` / `ad_type=1`；桌面与移动参考用于核对 `131001`（今日已领）与
+`20028`（当前账号无法领取）的提示。未复制其界面实现。一次执行会依次领取畅听 VIP
+并申请概念版 VIP 升级，任一步失败不影响另一步；只有响应 `status=1` 才显示成功。
+本地状态记录尝试日期、实际成功日期和结果消息，不把它当作服务端历史记录。
 
 ## 安全与隔离
 
@@ -65,7 +68,9 @@ MIT 仓库的接口行为重新编写 Kotlin 代码。MoeKoe 的界面仅作为�
 - 播放 URL 的请求头只带 UA/Referer，不把账号 Cookie 交给 CDN。
 - 不破解 DRM、不伪造会员权益、不绕过付费限制。音质是否可用完全依据上游
   `relate_goods` 的 `privilege/status/pay_type` 和账号返回的 VIP 状态。
-- 每日 VIP 领取只在设置页由用户点击「确认领取」后执行一次；没有定时或启动时自动领取。
+- 每日奖励默认开启自动签到：登录概念版后，每天首次启动 MeloX 会各尝试一次；可在
+  设置页关闭。自动执行仅在本地已有概念版登录态时进行，失败后 10 分钟内不重复请求，
+  已成功的当天不再请求。手动签到始终需要确认。
 
 ## 音质策略
 

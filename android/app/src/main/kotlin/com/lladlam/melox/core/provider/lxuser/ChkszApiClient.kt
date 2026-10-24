@@ -24,7 +24,7 @@ class ChkszApiClient(
                 .build()
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "MeloX/0.4.5")
+            .header("User-Agent", "MeloX/Android")
             .header("Accept", "application/json, text/plain, */*")
             .build()
         return httpClient.newCall(request).execute().use { response ->
@@ -56,7 +56,7 @@ class ChkszApiClient(
             .addQueryParameter("apikey", key)
             .build()
         val request = Request.Builder().url(url)
-            .header("User-Agent", "MeloX/0.4.5")
+            .header("User-Agent", "MeloX/Android")
             .header("Accept", "application/json, text/plain, */*")
             .build()
         return httpClient.newCall(request).execute().use { response ->

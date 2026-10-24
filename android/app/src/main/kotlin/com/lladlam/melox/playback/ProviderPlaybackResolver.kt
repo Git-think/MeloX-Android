@@ -35,12 +35,14 @@ class ProviderPlaybackResolver(
     private val authKeyProvider: (MusicSource) -> String = { "" },
     private val providerPlaybackEnabled: (MusicSource) -> Boolean = { true },
     private val thirdPartySourcesEnabled: () -> Boolean = { true },
-    private val thirdPartyOnlyForMembership: () -> Boolean = { false },
+    private val crossProviderFallback: CrossProviderPlaybackFallbackResolver? = null,
+    private val thirdPartyResolver: ThirdPartyPlaybackResolver? = null,
 ) : ResolvingDataSource.Resolver {
     private data class ResolveKey(
         val requestUri: String,
         val authKey: String,
         val quality: AudioQualityTier,
+        val fallbackIdentity: String,
     )
     private data class ResolvedRequest(
         val uri: Uri,
@@ -54,6 +56,8 @@ class ProviderPlaybackResolver(
             size > MAX_RESOLVED_URIS
     }
     private val inFlight = ConcurrentHashMap<ResolveKey, CompletableFuture<ResolvedRequest>>()
+
+    private val fallbackChain = PlaybackFallbackChain(crossProviderFallback, thirdPartyResolver)
 
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val uri = dataSpec.uri
@@ -75,7 +79,7 @@ class ProviderPlaybackResolver(
         if (uri.host != ProviderTrackHost) return uri
         val source = parseSource(uri) ?: return uri
         val quality = currentQuality(uri)
-        return cached(ResolveKey(uri.toString(), authKeyProvider(source), quality))?.uri ?: uri
+        return cached(ResolveKey(uri.toString(), authKeyProvider(source), quality, fallbackIdentity()))?.uri ?: uri
     }
 
     internal fun prefetch(uri: Uri) {
@@ -93,7 +97,7 @@ class ProviderPlaybackResolver(
             ?.takeIf(String::isNotBlank)
             ?: throw IOException("Invalid MeloX provider track ID: $uri")
         val quality = currentQuality(uri)
-        val key = ResolveKey(uri.toString(), authKeyProvider(source), quality)
+        val key = ResolveKey(uri.toString(), authKeyProvider(source), quality, fallbackIdentity())
         cached(key)?.let { return it }
         val pending = CompletableFuture<ResolvedRequest>()
         val existing = inFlight.putIfAbsent(key, pending)
@@ -128,15 +132,38 @@ class ProviderPlaybackResolver(
             }
 
             /**
-             * 官方音源不可用时的统一兜底入口：当前上传版本不带第三方脚本音源，
-             * 官方明确失败（会员 / 版权 / 地区 / 拿不到链接）时直接抛不可播放异常。
+             * Playback order: current provider → strict full-audio match from
+             * another built-in source → user-configured third-party resolvers.
+             *
+             * The cross-provider stage only runs when the user enabled
+             * "fetch unavailable resources from other platforms"; the final
+             * stage only runs when a third-party source is configured and its
+             * consent switch is on.
              */
-            fun thirdPartyFallbackOrThrow(
+            fun fallbackOrThrow(
                 track: MusicTrack,
                 quality: AudioQualityTier,
-                source: MusicSource,
                 message: String,
+                membershipFailure: Boolean,
             ): ResolvedRequest {
+                val fallback = runCatching {
+                    fallbackChain.resolve(track, quality, membershipFailure)
+                }.onFailure { Log.w(TAG, "Playback fallback failed", it) }
+                    .getOrNull()
+                if (fallback != null) {
+                    fallback.crossProvider?.let { cross ->
+                        ProviderPlaybackQualityRuntime.recordActual(
+                            id = id,
+                            requested = quality,
+                            actual = cross.actualQuality,
+                        )
+                    }
+                    return ResolvedRequest(
+                        uri = Uri.parse(fallback.url),
+                        headers = fallback.requestHeaders,
+                        expiresAtEpochMs = fallback.expiresAtEpochMs,
+                    )
+                }
                 throw MeloXPlaybackUnavailableException(message)
             }
             val result = when (resolution) {
@@ -156,20 +183,19 @@ class ProviderPlaybackResolver(
                 //   注意 `LoginRequired` **不**归这一类 —— 登录态是全局的，一旦缺失
                 //   整队都播不了，逐个跳过只会把整个队列清空，应该保留现曲目等人处理。
                 PlaybackResolution.LoginRequired -> throw IOException("${provider.displayName} 需要登录后播放")
-                // 会员 / 版权 / 地区 / 拿不到链接 都归「官方音源不可用」，统一走第三方兜底。
-                // 第三方只在官方失败后兜底，正常歌（Playable）永远先用官方，不会被脚本抢占。
-                PlaybackResolution.SubscriptionRequired -> thirdPartyFallbackOrThrow(
-                    track, quality, source, "${provider.displayName} 当前歌曲需要对应会员权益",
+                PlaybackResolution.SubscriptionRequired -> fallbackOrThrow(
+                    track, quality, "${provider.displayName} 当前歌曲需要对应会员权益", membershipFailure = true,
                 )
-                PlaybackResolution.RegionRestricted -> thirdPartyFallbackOrThrow(
-                    track, quality, source, "${provider.displayName} 当前地区不可播放",
+                PlaybackResolution.RegionRestricted -> fallbackOrThrow(
+                    track, quality, "${provider.displayName} 当前地区不可播放", membershipFailure = true,
                 )
-                PlaybackResolution.CopyrightRestricted -> thirdPartyFallbackOrThrow(
-                    track, quality, source, "${provider.displayName} 当前版权不可播放",
+                PlaybackResolution.CopyrightRestricted -> fallbackOrThrow(
+                    track, quality, "${provider.displayName} 当前版权不可播放", membershipFailure = true,
                 )
-                is PlaybackResolution.Unavailable -> thirdPartyFallbackOrThrow(
-                    track, quality, source,
+                is PlaybackResolution.Unavailable -> fallbackOrThrow(
+                    track, quality,
                     resolution.reason ?: "${provider.displayName} 暂时没有可播放音源",
+                    membershipFailure = false,
                 )
             }
             synchronized(cacheLock) { resolvedUris[key] = result }
@@ -191,6 +217,9 @@ class ProviderPlaybackResolver(
             }
         }
     }
+
+    /** Settings that change the fallback chain must invalidate resolved URLs too. */
+    private fun fallbackIdentity(): String = fallbackChain.cacheIdentity()
 
     private fun currentQuality(uri: Uri): AudioQualityTier {
         // The quality selector updates this runtime before Media3 prepare(). That

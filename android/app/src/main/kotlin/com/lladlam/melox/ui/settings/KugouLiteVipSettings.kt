@@ -26,13 +26,15 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.lladlam.melox.core.provider.kugou.KugouApiException
+import com.lladlam.melox.core.provider.kugou.KugouLiteCheckInStore
+import com.lladlam.melox.core.provider.kugou.KugouLiteDailyCheckIn
 import com.lladlam.melox.core.provider.kugou.KugouLiteProvider
 import com.lladlam.melox.core.provider.kugou.KugouLiteVip
 import com.lladlam.melox.core.provider.kugou.KugouSessionStore
 import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
 import com.lladlam.melox.ui.glass.MeloXGlassDialog
+import com.lladlam.melox.ui.glass.MeloXGlassToggle
 import com.lladlam.melox.ui.glass.MeloXIosGroupedList
 import com.lladlam.melox.ui.glass.MeloXIosListRow
 import com.lladlam.melox.ui.provider.MeloXProviderServicesActivity
@@ -52,10 +54,9 @@ internal fun KugouLiteVipSettings() {
     var session by remember { mutableStateOf(KugouSessionStore.readLite(app)) }
     var today by remember { mutableStateOf(LocalDate.now().toString()) }
     var vip by remember { mutableStateOf<KugouLiteVip?>(null) }
+    var checkIn by remember { mutableStateOf(KugouLiteCheckInStore.read(app)) }
     var busy by remember { mutableStateOf(false) }
-    var confirmUpgrade by remember { mutableStateOf<Boolean?>(null) }
-    var claimedDay by rememberSaveable(session.userId) { mutableStateOf<String?>(null) }
-    var upgradedDay by rememberSaveable(session.userId) { mutableStateOf<String?>(null) }
+    var confirmCheckIn by remember { mutableStateOf(false) }
     var message by rememberSaveable(session.userId) { mutableStateOf<String?>(null) }
     val provider = remember(app) {
         KugouLiteProvider(
@@ -79,12 +80,20 @@ internal fun KugouLiteVipSettings() {
                 try {
                     val current = KugouSessionStore.readLite(app)
                     if (current.userId != session.userId || current.token != session.token) {
-                        confirmUpgrade = null
                         vip = null
                     }
                     session = current
                     today = LocalDate.now().toString()
-                    vip = if (session.isLoggedIn) provider.vipStatus(force = true) else null
+                    if (session.isLoggedIn) {
+                        // Automatic daily reward; no-op when disabled or already done today.
+                        KugouLiteDailyCheckIn.run(app)
+                        checkIn = KugouLiteCheckInStore.read(app)
+                        checkIn.message?.let { message = it }
+                        vip = provider.vipStatus(force = true)
+                    } else {
+                        checkIn = KugouLiteCheckInStore.read(app)
+                        vip = null
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -136,63 +145,96 @@ internal fun KugouLiteVipSettings() {
     Text("每日签到", Modifier.padding(start = 8.dp, bottom = 8.dp), fontSize = 13.sp,
         color = MaterialTheme.colorScheme.onBackground.copy(alpha = .48f))
     MeloXIosGroupedList(surfaceColor = MaterialTheme.colorScheme.surface) {
-        MeloXIosListRow(title = "今日签到", subtitle = today,
-            detail = if (claimedDay == today) "已签到" else "待确认", showTopSeparator = false)
+        MeloXIosListRow(
+            title = "今日签到",
+            subtitle = today,
+            detail = when {
+                !session.isLoggedIn -> "未登录"
+                checkIn.successDay == today -> "已签到"
+                checkIn.attemptDay == today -> "待重试"
+                else -> "待签到"
+            },
+            showTopSeparator = false,
+        )
+        MeloXIosListRow(
+            title = "今日畅听 VIP",
+            detail = if (checkIn.successDay == today) "已领取" else "待领取",
+            showTopSeparator = true,
+        )
+        MeloXIosListRow(
+            title = "今日概念版 VIP",
+            detail = if (checkIn.upgradedDay == today) "已升级" else "待升级",
+            showTopSeparator = true,
+        )
+        MeloXIosListRow(
+            title = "自动签到会员",
+            subtitle = "每天首次打开 MeloX 时自动领取畅听 VIP，并同时申请概念版 VIP 升级",
+            trailing = {
+                MeloXGlassToggle(
+                    checked = checkIn.autoEnabled,
+                    onCheckedChange = { enabled ->
+                        KugouLiteCheckInStore.setAutoEnabled(app, enabled)
+                        checkIn = KugouLiteCheckInStore.read(app)
+                        if (enabled && session.isLoggedIn) refresh()
+                    },
+                )
+            },
+            showTopSeparator = true,
+        )
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("签到可领取今日畅听 VIP，领取后还可手动申请升级为概念版 VIP。实际权益与有效期以酷狗返回结果为准。",
-                fontSize = 13.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
+            Text(
+                "签到会同时领取今日畅听 VIP 并申请概念版 VIP 升级，两项分别受酷狗活动规则限制；" +
+                    "已领取过的一天不会重复领取。实际权益与有效期以酷狗返回结果为准。",
+                fontSize = 13.sp, lineHeight = 19.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+            )
             MeloXGlassButton(
-                onClick = { confirmUpgrade = false }, enabled = session.isLoggedIn && !busy && claimedDay != today,
-                modifier = Modifier.fillMaxWidth(), style = MeloXGlassButtonStyle.BorderedProminent,
-            ) { Text(if (busy) "处理中…" else if (claimedDay == today) "今日已签到" else "签到领取今日 VIP") }
-            if (claimedDay == today) {
-                MeloXGlassButton(
-                    onClick = { confirmUpgrade = true }, enabled = session.isLoggedIn && !busy && upgradedDay != today,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (upgradedDay == today) "今日已申请升级" else "升级为概念版 VIP") }
-            }
+                onClick = { confirmCheckIn = true },
+                enabled = session.isLoggedIn && !busy,
+                modifier = Modifier.fillMaxWidth(),
+                style = MeloXGlassButtonStyle.BorderedProminent,
+            ) { Text(if (busy) "处理中…" else "签到领取畅听 + 概念版 VIP") }
             MeloXGlassButton(onClick = refresh, enabled = !busy, modifier = Modifier.fillMaxWidth(),
                 style = MeloXGlassButtonStyle.Plain) { Text("刷新会员状态") }
             message?.let { Text(it, fontSize = 13.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurface) }
         }
     }
-    Text("仅在你确认后执行本次领取，不会自动签到。每日额度、活动开放情况和账号资格由酷狗决定。",
+    Text(
+        "开启自动签到后，每天首次启动 MeloX 会各尝试一次，失败后 10 分钟内不重复请求；" +
+            "关闭后仅在你手动确认时执行。每日额度、活动开放情况和账号资格由酷狗决定。",
         Modifier.padding(horizontal = 6.dp, vertical = 10.dp), fontSize = 12.sp, lineHeight = 18.sp,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f),
+    )
 
-    confirmUpgrade?.let { upgrade ->
-        MeloXGlassDialog(visible = true, onDismiss = { confirmUpgrade = null }) {
-            Text(if (upgrade) "升级概念版 VIP" else "签到领会员", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Text(if (upgrade) "确认向酷狗申请今日概念版 VIP 升级？" else "确认使用当前概念版账号领取今日畅听 VIP？",
-                Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
+    if (confirmCheckIn) {
+        MeloXGlassDialog(visible = true, onDismiss = { confirmCheckIn = false }) {
+            Text("签到领会员", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "确认使用当前概念版账号领取今日畅听 VIP，并同时申请概念版 VIP 升级？",
+                Modifier.padding(top = 10.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
+            )
             Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MeloXGlassButton(onClick = { confirmUpgrade = null }, modifier = Modifier.weight(1f),
+                MeloXGlassButton(onClick = { confirmCheckIn = false }, modifier = Modifier.weight(1f),
                     style = MeloXGlassButtonStyle.Plain) { Text("取消") }
                 MeloXGlassButton(
                     enabled = !busy,
                     onClick = {
-                        confirmUpgrade = null
+                        confirmCheckIn = false
                         if (!busy) {
                             busy = true
-                            val day = LocalDate.now().toString()
-                            today = day
                             scope.launch {
                                 try {
-                                    if (upgrade) provider.upgradeDailyVip() else provider.claimDailyVip()
-                                    if (upgrade) upgradedDay = day else claimedDay = day
-                                    message = if (upgrade) "概念版 VIP 升级申请成功，已刷新会员状态。" else "今日签到成功，已领取畅听 VIP。"
+                                    val result = KugouLiteDailyCheckIn.run(
+                                        app, force = true, requireAutoEnabled = false,
+                                    )
+                                    checkIn = KugouLiteCheckInStore.read(app)
+                                    message = result?.message ?: checkIn.message
                                     vip = provider.vipStatus(force = true)
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (error: Exception) {
-                                    message = when ((error as? KugouApiException)?.errorCode) {
-                                        131001 -> {
-                                            if (upgrade) upgradedDay = day else claimedDay = day
-                                            if (upgrade) "今日已申请过升级。" else "今天已经签到过了。"
-                                        }
-                                        20028 -> "当前账号暂时无法在此领取，请前往酷狗概念版官方客户端查看。"
-                                        else -> error.message ?: "领取失败，请稍后重试"
-                                    }
+                                    message = error.message ?: "领取失败，请稍后重试"
                                 } finally {
                                     busy = false
                                 }

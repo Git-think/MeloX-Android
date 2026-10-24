@@ -152,8 +152,8 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Spotify, YouTube Music, NetEase, and the other sources share the provider-neutral download and offline path (`MeloXProviderDownloadStore`).
 - vivo devices automatically try OriginOS Atomic Island. There is no separate switch. Unsupported devices keep the standard Android media notification. The adapter uses the documented local `notification.superx.*` extras and does not depend on EMAS push.
 - LX Music compatible JavaScript sources can be imported and resolved in a restricted QuickJS runtime.
-- A personal CHKSZ API key can be configured to resolve NetEase, QQ Music, and Kugou tracks first. Register at `api.chksz.com`. Registration currently requires a LinuxDo account.
-- If third-party resolution fails, playback falls back to the platform's native player. Lyrics still use MeloX's own lyric path.
+- A personal CHKSZ API key can be configured to resolve NetEase, QQ Music, and Kugou tracks **after** the current source and the built-in cross-provider fallback both fail. Register at `api.chksz.com`. Registration currently requires a LinuxDo account.
+- Playback order is: the current source → a strict full-audio match from another built-in source (only when "fetch unavailable resources from other platforms" is on) → configured third-party resolvers (only when that switch and its agreement are on). If every stage fails, the track is reported as unavailable instead of playing a preview.
 
 ## Platform scope
 
