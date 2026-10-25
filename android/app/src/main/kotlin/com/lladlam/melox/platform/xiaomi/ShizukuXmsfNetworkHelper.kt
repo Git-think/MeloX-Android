@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.os.INetworkManagementService
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -60,8 +61,17 @@ internal object ShizukuXmsfNetworkHelper {
         ServiceBackend("network_management", "android.os.INetworkManagementService\$Stub", "NetworkManagementService"),
     )
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val permissionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    @Volatile
+    private var compatibilityUnavailable = false
+
+    // SupervisorJob alone does not consume exceptions from launch: an optional
+    // Shizuku/ROM failure would otherwise reach Android's uncaught handler.
+    private val exceptionHandler = CoroutineExceptionHandler { _, error ->
+        compatibilityUnavailable = true
+        Log.w(TAG, "Disabling Shizuku compatibility after an asynchronous failure", error)
+    }
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
+    private val permissionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptionHandler)
     private val networkMutex = Mutex()
     private val permissionMutex = Mutex()
     private val wrappedServices = ConcurrentHashMap<String, Any>()
@@ -82,6 +92,7 @@ internal object ShizukuXmsfNetworkHelper {
      * calls requestPermission(). Authorization stays on the settings button.
      */
     fun prepare(context: Context) {
+        if (compatibilityUnavailable) return
         val appContext = context.applicationContext
         installHiddenApiExemptions()
         synchronized(this) {
@@ -105,6 +116,7 @@ internal object ShizukuXmsfNetworkHelper {
      * Call this from the settings screen after an explicit user action.
      */
     fun requestPermission(context: Context) {
+        if (compatibilityUnavailable) return
         val appContext = context.applicationContext
         installHiddenApiExemptions()
         permissionScope.launch {
@@ -131,7 +143,7 @@ internal object ShizukuXmsfNetworkHelper {
         val appContext = context.applicationContext
         installHiddenApiExemptions()
         ioScope.launch {
-            if (!isPermissionGrantedWhenReady()) {
+            if (compatibilityUnavailable || !isPermissionGrantedWhenReady()) {
                 Log.i(TAG, "sending Focus notification directly")
                 publishDirect(appContext, notification)
                 return@launch

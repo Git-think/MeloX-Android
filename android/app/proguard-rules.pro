@@ -27,6 +27,9 @@
 -keep class rikka.shizuku.** { *; }
 -dontwarn rikka.shizuku.**
 -keep class com.lladlam.melox.platform.xiaomi.ShizukuKeepAliveService { *; }
+# Keep optional vendor references behind their guarded call sites in release builds.
+-keep class com.lladlam.melox.platform.xiaomi.HyperOsFocusBridge { *; }
+-keep class com.lladlam.melox.platform.xiaomi.ShizukuXmsfNetworkHelper { *; }
 -keep class org.lsposed.hiddenapibypass.** { *; }
 -dontwarn org.lsposed.hiddenapibypass.**
 -dontwarn com.apple.android.music.**

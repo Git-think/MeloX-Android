@@ -2057,16 +2057,20 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             isPlaying = player?.isPlaying == true,
             clickIntent = pendingIntent,
         )
-        HyperOsFocusBridge.playbackPayload(
-            context = this,
-            lyric = line,
-            nextLyric = nextLine,
-            songTitle = metadata.title?.toString().orEmpty(),
-            artist = metadata.artist?.toString().orEmpty(),
-            positionMs = player?.currentPosition ?: 0L,
-            durationMs = player?.duration?.takeIf { it != C.TIME_UNSET } ?: 0L,
-            isPlaying = player?.isPlaying == true,
-        )?.let { HyperOsFocusBridge.attachFocusParams(notification, it) }
+        if (MeloXSettingsPreferences.boolean(this, "hyperos_super_island_enabled", false)) {
+            runCatching {
+                HyperOsFocusBridge.playbackPayload(
+                    context = this,
+                    lyric = line,
+                    nextLyric = nextLine,
+                    songTitle = metadata.title?.toString().orEmpty(),
+                    artist = metadata.artist?.toString().orEmpty(),
+                    positionMs = player?.currentPosition ?: 0L,
+                    durationMs = player?.duration?.takeIf { it != C.TIME_UNSET } ?: 0L,
+                    isPlaying = player?.isPlaying == true,
+                )?.let { HyperOsFocusBridge.attachFocusParams(notification, it) }
+            }.onFailure { Log.w(TAG, "Unable to publish optional Super Island lyrics", it) }
+        }
         getSystemService(NotificationManager::class.java).notify(LYRICS_NOTIFICATION_ID, notification)
     }
 

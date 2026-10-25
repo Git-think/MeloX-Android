@@ -792,6 +792,9 @@ private fun SystemPlaybackSettings(context: android.content.Context) {
         ) { enabled ->
             hyperIsland.value = enabled
             MeloXSettingsPreferences.setBoolean(context, "hyperos_super_island_enabled", enabled)
+            if (!enabled) {
+                runCatching { HyperOsFocusBridge.clearSuperIsland(context) }
+            }
         }
     }
     Spacer(Modifier.height(10.dp))
