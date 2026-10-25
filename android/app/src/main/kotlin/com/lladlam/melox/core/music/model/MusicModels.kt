@@ -154,6 +154,10 @@ data class MusicTrack(
     val durationMs: Long? = null,
     val availability: TrackAvailability = TrackAvailability.Unknown,
     val providerMetadata: ProviderTrackMetadata = ProviderTrackMetadata.Empty,
+    /** Best quality advertised by the provider's search response, when it exposes one. */
+    val bestQuality: AudioQualityTier? = null,
+    /** Best advertised bitrate in bits per second, when known. */
+    val bestBitrate: Int? = null,
 ) {
     val artistText: String
         get() = artists.joinToString(" / ") { it.name }.ifBlank { "未知歌手" }

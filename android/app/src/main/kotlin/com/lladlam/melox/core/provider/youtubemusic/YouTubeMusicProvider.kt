@@ -429,6 +429,8 @@ class YouTubeMusicProvider(
         durationMs = duration?.takeIf { it > 0 }?.times(1000L),
         availability = TrackAvailability.Playable,
         providerMetadata = ProviderTrackMetadata.YouTube(videoId = id, setVideoId = setVideoId),
+        bestQuality = AudioQualityTier.High,
+        bestBitrate = 256_000,
     )
 
     private fun PlaylistItem.toPlaylistSummary() = MusicPlaylistSummary(

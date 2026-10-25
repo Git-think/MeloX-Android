@@ -3,6 +3,7 @@ package com.lladlam.melox.core.provider.spotify
 import android.content.Context
 import com.lladlam.melox.core.music.model.MusicAccountSummary
 import com.lladlam.melox.core.music.model.MusicAlbumDetail
+import com.lladlam.melox.core.music.model.AudioQualityTier
 import com.lladlam.melox.core.music.model.MusicAlbumRef
 import com.lladlam.melox.core.music.model.MusicAlbumSummary
 import com.lladlam.melox.core.music.model.MusicArtistDetail
@@ -57,6 +58,8 @@ internal object SpotifyJsonMapper {
                 trackId = id,
                 isrc = value.optJSONObject("external_ids")?.optString("isrc")?.takeIf(String::isNotBlank),
             ),
+            bestQuality = AudioQualityTier.High,
+            bestBitrate = 320_000,
         )
     }
 

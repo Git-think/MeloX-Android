@@ -13,6 +13,7 @@ import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.PlaybackResolution
 import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.model.TrackAvailability
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.Base64
@@ -275,6 +276,7 @@ class KugouApiClient(
         ).takeIf { it > 0L }
         val durationSeconds = kugouFirstLong(item, "Duration", "duration", "time_length").takeIf { it > 0L }
         val artwork = kugouArtworkUrl(item)
+        val quality = kugouSearchQuality(item)
         return MusicTrack(
             id = MusicResourceId(MusicSource.Kugou, hash),
             title = title,
@@ -288,11 +290,14 @@ class KugouApiClient(
             },
             artworkUrl = artwork,
             durationMs = durationSeconds?.times(1_000L),
+            availability = TrackAvailability.Playable,
             providerMetadata = ProviderTrackMetadata.Kugou(
                 hash = hash,
                 albumAudioId = albumAudioId,
                 albumId = albumId,
             ),
+            bestQuality = quality?.tier,
+            bestBitrate = quality?.bitrate,
         )
     }
 

@@ -278,6 +278,15 @@ class AppleMusicApiClient(
         val artistName = attributes.optString("artistName").ifBlank { "未知歌手" }
         val albumName = attributes.optString("albumName").takeIf(String::isNotBlank)
         val storefront = sessionProvider().storefront
+        val audioTraits = attributes.optJSONArray("audioTraits")?.let { traits ->
+            (0 until traits.length()).mapNotNull { index -> traits.optString(index).takeIf(String::isNotBlank) }
+        }.orEmpty().map(String::lowercase)
+        val bestQuality = when {
+            audioTraits.any { it.contains("hi-res") || it.contains("hires") } -> AudioQualityTier.HiResolution
+            audioTraits.any { it.contains("lossless") } -> AudioQualityTier.Lossless
+            audioTraits.any { it.contains("atmos") || it.contains("spatial") } -> AudioQualityTier.Immersive
+            else -> null
+        }
         return MusicTrack(
             id = MusicResourceId(MusicSource.AppleMusic, id),
             title = title,
@@ -287,6 +296,13 @@ class AppleMusicApiClient(
             durationMs = attributes.optLong("durationInMillis").takeIf { it > 0L },
             availability = if (preview != null) TrackAvailability.PreviewOnly else TrackAvailability.SubscriptionRequired,
             providerMetadata = ProviderTrackMetadata.AppleMusic(id, storefront, preview),
+            bestQuality = bestQuality,
+            bestBitrate = when (bestQuality) {
+                AudioQualityTier.HiResolution -> 1_411_200
+                AudioQualityTier.Lossless -> 1_000_000
+                AudioQualityTier.Immersive -> 1_000_000
+                else -> null
+            },
         )
     }
 

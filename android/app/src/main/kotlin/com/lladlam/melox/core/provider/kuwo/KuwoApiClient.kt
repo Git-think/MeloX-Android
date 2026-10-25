@@ -10,6 +10,7 @@ import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.PlaybackResolution
 import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.model.TrackAvailability
 import java.io.IOException
 import okhttp3.OkHttpClient
 import org.json.JSONArray
@@ -142,6 +143,7 @@ class KuwoApiClient(
         val albumId = item.optString("ALBUMID").takeIf(String::isNotBlank)
         val durationSeconds = item.optString("DURATION").toLongOrNull()?.takeIf { it > 0L }
         val artwork = normalizeAlbumArtwork(item.optString("web_albumpic_short"))
+        val quality = kuwoSearchQuality(item)
 
         return MusicTrack(
             id = MusicResourceId(MusicSource.Kuwo, mid.toString()),
@@ -156,7 +158,10 @@ class KuwoApiClient(
             },
             artworkUrl = artwork,
             durationMs = durationSeconds?.times(1_000L),
+            availability = TrackAvailability.Playable,
             providerMetadata = ProviderTrackMetadata.Kuwo(mid = mid),
+            bestQuality = quality?.tier,
+            bestBitrate = quality?.bitrate,
         )
     }
 

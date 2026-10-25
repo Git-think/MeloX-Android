@@ -1,6 +1,7 @@
 package com.lladlam.melox.core.provider.jellyfin
 
 import com.lladlam.melox.core.music.model.AudioQualityTier
+import com.lladlam.melox.core.music.model.audioQualityForBitrate
 import com.lladlam.melox.core.music.model.MusicAlbumRef
 import com.lladlam.melox.core.music.model.MusicAlbumDetail
 import com.lladlam.melox.core.music.model.MusicAlbumSummary
@@ -216,6 +217,9 @@ class JellyfinProvider(
             artworkUrl = artwork,
             durationMs = item.optLong("RunTimeTicks").takeIf { it > 0L }?.div(10_000L),
             availability = TrackAvailability.Playable,
+            bestBitrate = item.optLong("Bitrate").takeIf { it > 0L }?.toInt(),
+            bestQuality = audioQualityForBitrate(item.optLong("Bitrate").takeIf { it > 0L }?.toInt())
+                ?: AudioQualityTier.Lossless,
         )
     }
 

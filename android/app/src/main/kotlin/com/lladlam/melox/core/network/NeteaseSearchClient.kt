@@ -5,6 +5,8 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.lyrics.NeteaseLyricParser
 import com.lladlam.melox.core.model.SearchSong
+import com.lladlam.melox.core.music.model.AudioQualityTier
+import com.lladlam.melox.core.music.model.audioQualityForBitrate
 import com.lladlam.melox.core.remoteconfig.MeloXHotRules
 import com.lladlam.melox.core.remoteconfig.MeloXHotScripts
 import java.io.IOException
@@ -116,6 +118,7 @@ class NeteaseSearchClient(
                 val album = albumObject?.optString("name").orEmpty()
                 val artwork = artworkFromAlbum(albumObject)
 
+                val quality = neteaseSearchQuality(song)
                 add(
                     SearchSong(
                         id = id,
@@ -124,10 +127,35 @@ class NeteaseSearchClient(
                         album = album,
                         artworkUrl = artwork,
                         durationMs = neteaseSearchDurationMs(song),
+                        bestQuality = quality?.first,
+                        bestBitrate = quality?.second,
                     ),
                 )
             }
         }
+    }
+
+    /**
+     * NetEase search embeds one object per quality tier (`hr`, `sq`, `h`, `m`,
+     * `l`). Some accounts/responses omit all of them, so no hint is better
+     * than claiming a tier the item may not actually have.
+     */
+    private fun neteaseSearchQuality(song: JSONObject): Pair<AudioQualityTier, Int?>? {
+        val tiers = listOf(
+            "hr" to AudioQualityTier.HiResolution,
+            "sq" to AudioQualityTier.Lossless,
+            "h" to AudioQualityTier.High,
+            "m" to AudioQualityTier.Standard,
+            "l" to AudioQualityTier.Standard,
+        )
+        for ((key, tier) in tiers) {
+            val value = song.optJSONObject(key) ?: continue
+            val bitrate = value.optInt("br", value.optInt("bitrate", 0)).takeIf { it > 0 }
+            if (bitrate != null) return tier to bitrate
+        }
+        val embedded = song.optJSONObject("quality") ?: return null
+        val bitrate = embedded.optInt("br", embedded.optInt("bitrate", 0)).takeIf { it > 0 }
+        return audioQualityForBitrate(bitrate)?.let { it to bitrate }
     }
 
     suspend fun ensureArtwork(songs: List<SearchSong>): List<SearchSong> =

@@ -1,5 +1,6 @@
 package com.lladlam.melox.core.model
 
+import com.lladlam.melox.core.music.model.AudioQualityTier
 import com.lladlam.melox.core.music.model.MusicTrack
 
 data class SearchSong(
@@ -20,6 +21,8 @@ data class SearchSong(
      * and data loading are dispatched by the bridge/data layer.
      */
     val providerTrack: MusicTrack? = null,
+    val bestQuality: AudioQualityTier? = null,
+    val bestBitrate: Int? = null,
 ) {
     val playbackUrl: String
         get() = "https://music.163.com/song/media/outer/url?id=$id"
