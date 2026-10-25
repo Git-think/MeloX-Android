@@ -34,8 +34,31 @@ object PlaybackTrackIdentity {
         val source = MusicSource.entries.firstOrNull {
             it.storageValue == payload.substring(0, separator)
         } ?: return null
-        val value = Uri.decode(payload.substring(separator + 1)).trim()
+        val value = percentDecode(payload.substring(separator + 1)).trim()
         return value.takeIf(String::isNotBlank)?.let { MusicResourceId(source, it) }
+    }
+
+
+    /** JVM-safe percent decoding; keeps '+' literal like Android's Uri.decode. */
+    private fun percentDecode(value: String): String {
+        if ('%' !in value) return value
+        val out = java.io.ByteArrayOutputStream(value.length)
+        var index = 0
+        while (index < value.length) {
+            val char = value[index]
+            if (char == '%' && index + 2 < value.length) {
+                val byte = value.substring(index + 1, index + 3).toIntOrNull(16)
+                if (byte != null) {
+                    out.write(byte)
+                    index += 3
+                    continue
+                }
+            }
+            val bytes = char.toString().toByteArray(Charsets.UTF_8)
+            out.write(bytes, 0, bytes.size)
+            index++
+        }
+        return out.toString(Charsets.UTF_8.name())
     }
 
     fun fromMediaItem(item: MediaItem?): MusicResourceId? {

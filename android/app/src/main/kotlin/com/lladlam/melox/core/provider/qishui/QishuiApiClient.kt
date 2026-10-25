@@ -40,21 +40,36 @@ internal class QishuiApiClient(
         val session = sessionProvider()
         val builder = Request.Builder().url(url).header("Accept", "application/json")
             .header("User-Agent", if (path.startsWith("/passport") || path.contains("/h5/")) WebAgent else if (app) "Luna/19.1.0 Android" else "LunaPC/3.0.0(290101097)")
-        val credentials = cookie ?: session.sessionId.takeIf(String::isNotBlank)?.let { "sessionid=$it" }.orEmpty()
+        val credentials = cookie
+            ?: session.cookie.takeIf(String::isNotBlank)
+            ?: session.sessionId.takeIf(String::isNotBlank)?.let { "sessionid=$it" }
+            ?: ""
         if (credentials.isNotBlank()) builder.header("Cookie", credentials)
         if (body != null) builder.post(body)
         http.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("汽水音乐请求失败：HTTP ${response.code}")
+            // Douyin passport may answer a confirmed QR with a redirect whose
+            // Set-Cookie carries the session. Treat 3xx as a result, not an error.
+            val passportRedirect = path.startsWith("/passport") && response.code in 300..399
+            if (!response.isSuccessful && !passportRedirect) {
+                throw IOException("汽水音乐请求失败：HTTP ${response.code}（$path）")
+            }
             val text = response.body.string()
-            if (text.isBlank()) throw IOException(if (path.contains("/pc/search/"))
+            if (text.isBlank() && !passportRedirect) throw IOException(if (path.contains("/pc/search/"))
                 "汽水音乐搜索未返回数据，请先登录；此接口可能需要上游 PC 签名" else "汽水音乐返回了空响应，请稍后重试")
-            val json = runCatching { JSONObject(text) }.getOrElse { throw IOException("汽水音乐返回了无法解析的数据") }
+            val json = if (text.isBlank()) JSONObject() else runCatching { JSONObject(text) }
+                .getOrElse { throw IOException("汽水音乐返回了无法解析的数据") }
             val info = json.optJSONObject("status_info")
             val code = json.optInt("status_code", json.optInt("error_code", info?.optInt("status_code", 0) ?: 0))
             if (code != 0) throw IOException("汽水音乐请求未获通过（$code），请检查登录状态后重试")
             val error = QishuiParsing.text(info, "status_msg")
             if (error.startsWith("ERR_")) throw IOException("汽水音乐暂未允许本次请求，请登录后重试")
-            json to Cookie.parseAll(url, response.headers).joinToString("; ") { "${it.name}=${it.value}" }
+            // Keep every Set-Cookie value verbatim. OkHttp's domain-aware parser
+            // drops cookies issued for a parent domain, which broke the passport
+            // handshake and left the QR poll without its CSRF/session cookies.
+            val cookies = response.headers.values("Set-Cookie")
+                .mapNotNull { header -> header.substringBefore(';').trim().takeIf { it.contains('=') } }
+                .joinToString("; ")
+            json to cookies
         }
     }
 
@@ -152,7 +167,7 @@ internal class QishuiApiClient(
     }
 
     data class Qr(val token: String, val image: String, val link: String)
-    data class QrState(val status: String, val sessionId: String)
+    data class QrState(val status: String, val sessionId: String, val cookie: String = "")
 
     suspend fun createQr(): Qr {
         qrCookies = ""; qrToken = ""
@@ -172,8 +187,12 @@ internal class QishuiApiClient(
             .add("token", token).add("is_new_login", "1").add("next", "https://api.qishui.com").build()
         val (response, cookies) = request("/passport/web/check_qrconnect/", passport + ("iid" to "27960026095955"), form, cookie = qrCookies)
         val data = response.optJSONObject("data") ?: response
-        val sessionId = cookies.split(';').firstOrNull { it.trim().startsWith("sessionid=") }?.trim()?.removePrefix("sessionid=").orEmpty()
-        return QrState(QishuiParsing.text(data, "status"), sessionId)
+        val sessionId = cookies.split(';')
+            .map(String::trim)
+            .firstOrNull { it.startsWith("sessionid=") }
+            ?.removePrefix("sessionid=")
+            .orEmpty()
+        return QrState(QishuiParsing.text(data, "status"), sessionId, cookies)
     }
 
     companion object {

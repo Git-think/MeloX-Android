@@ -60,10 +60,13 @@ fun QishuiLoginScreen(onDismiss: () -> Unit, onLoggedIn: () -> Unit) {
                 delay(2_000)
                 val state = api.pollQr(created.token)
                 if (state.sessionId.isNotBlank()) {
-                    val temporary = QishuiSessionStore.read(context).copy(sessionId = state.sessionId)
+                    val temporary = QishuiSessionStore.read(context).copy(
+                        sessionId = state.sessionId,
+                        cookie = state.cookie,
+                    )
                     val profile = QishuiApiClient({ temporary }).profile() ?: throw IllegalStateException("汽水音乐没有返回账号资料")
                     coroutineContext.ensureActive()
-                    QishuiSessionStore.save(context, state.sessionId, profile.id, profile.displayName)
+                    QishuiSessionStore.save(context, state.sessionId, state.cookie, profile.id, profile.displayName)
                     latestOnLoggedIn()
                     return@LaunchedEffect
                 }

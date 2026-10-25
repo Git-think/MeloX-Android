@@ -14,7 +14,7 @@ import org.junit.Test
 class QishuiProviderTest {
     private val trackId = "7079108541549643812"
     private val trackJson = """{"id":"$trackId","name":"测试歌曲","duration":297240,"artists":[{"id":"a1","name":"歌手"}],"album":{"id":"b1","name":"专辑","url_cover":{"urls":["https://example.com/"],"uri":"cover.jpg"}}}"""
-    private val session = QishuiSession("session-test", "u1", "用户", "1234567890123456", "2345678901234567")
+    private val session = QishuiSession(sessionId = "session-test", userId = "u1", nickname = "用户", deviceId = "1234567890123456", installId = "2345678901234567")
     private fun client(body: (Request) -> String) = OkHttpClient.Builder().addInterceptor { chain ->
         Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
             .body(body(chain.request()).toResponseBody()).build()
@@ -104,5 +104,37 @@ class QishuiProviderTest {
         val authorized = api.pollQr(qr.token)
         assertEquals("confirmed", authorized.status)
         assertEquals("confirmed-session", authorized.sessionId)
+    }
+
+    @Test fun qrConfirmationKeepsFullPassportCookieAndAcceptsRedirect() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val creating = chain.request().url.encodedPath.endsWith("get_qrcode/")
+            if (creating) {
+                assertNull(chain.request().header("Cookie"))
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                    .code(200).message("OK")
+                    .addHeader("Set-Cookie", "sessionid=qr-session; Path=/; Domain=.douyin.com")
+                    .addHeader("Set-Cookie", "passport_csrf_token=csrf-token; Path=/")
+                    .body("""{"data":{"token":"qr-token","qrcode":"data:image/png;base64,AA=="}}""".toResponseBody())
+                    .build()
+            } else {
+                val cookie = chain.request().header("Cookie").orEmpty()
+                assertTrue(cookie.contains("sessionid=qr-session"))
+                assertTrue(cookie.contains("passport_csrf_token=csrf-token"))
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                    .code(302).message("Found")
+                    .addHeader("Location", "https://api.qishui.com/")
+                    .addHeader("Set-Cookie", "sessionid=confirmed-session; Path=/")
+                    .addHeader("Set-Cookie", "sid_tt=tt-session; Path=/")
+                    .body("".toResponseBody())
+                    .build()
+            }
+        }.build()
+        val api = QishuiApiClient({ QishuiSession() }, client)
+        val qr = api.createQr()
+        val authorized = api.pollQr(qr.token)
+        assertEquals("confirmed-session", authorized.sessionId)
+        assertTrue(authorized.cookie.contains("sessionid=confirmed-session"))
+        assertTrue(authorized.cookie.contains("sid_tt=tt-session"))
     }
 }

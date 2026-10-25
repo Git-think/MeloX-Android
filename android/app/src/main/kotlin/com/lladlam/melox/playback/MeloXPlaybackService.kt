@@ -62,7 +62,7 @@ import com.lladlam.melox.core.network.NeteaseMusicOperationsClient
 import com.lladlam.melox.core.model.SearchSong
 import com.lladlam.melox.core.network.MeloXNetworkAvailability
 import com.lladlam.melox.core.network.NeteaseSearchClient
-import com.lladlam.melox.core.lyrics.LyricTimelineProcessor
+import com.lladlam.melox.ui.player.MeloXProviderLyricsLoader
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.music.model.AudioQualityTier
 import com.lladlam.melox.core.music.model.MusicPage
@@ -130,7 +130,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     private var recommendationRetrySeed: String? = null
     private var recommendationRetryAfterRealtimeMs = 0L
     private var systemLyricsJob: Job? = null
-    private var systemLyricsSongId: Long? = null
+    private var systemLyricsMediaId: String? = null
     private var systemLyricsDocument: LyricsDocument? = null
     private var systemLyricsOriginalMetadata: MediaMetadata? = null
     private var systemLyricsLastIndex = Int.MIN_VALUE
@@ -337,7 +337,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             // not only after a Media3 automatic transition.
             mediaItem?.let { scheduleSmartQueueNext(it.mediaId) }
             val active = player
-            if (transitionedId != systemLyricsSongId) {
+            if (mediaItem?.mediaId != systemLyricsMediaId) {
                 active?.let(::restoreSystemLyricsMetadata)
                 resetSystemLyrics(mediaItem)
             }
@@ -1805,14 +1805,14 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         val notificationEnabled = MeloXSettingsRuntime.lyricNotificationsEnabled
         val hyperIslandEnabled = MeloXSettingsPreferences.boolean(this, "hyperos_super_island_enabled", false)
         val effectiveNotification = notificationEnabled || hyperIslandEnabled
-        val songId = currentItem.mediaId.toLongOrNull()?.takeIf { it > 0L }
+        val mediaId = currentItem.mediaId.takeIf(String::isNotBlank)
         if (shouldClearLegacySystemLyrics(currentItem.mediaId)) {
             restoreSystemLyricsMetadata(active)
             resetSystemLyrics(null)
             getSystemService(NotificationManager::class.java).cancel(LYRICS_NOTIFICATION_ID)
             return
         }
-        songId ?: return
+        mediaId ?: return
         if (!metadataEnabled && !effectiveNotification && !VivoAtomicIslandBridge.isSupported()) {
             restoreSystemLyricsMetadata(active)
             superLyricPublisher?.stop()
@@ -1820,8 +1820,8 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             (getSystemService(NotificationManager::class.java)).cancel(LYRICS_NOTIFICATION_ID)
             return
         }
-        if (systemLyricsSongId != songId) resetSystemLyrics(currentItem)
-        if (systemLyricsDocument == null && systemLyricsJob?.isActive != true) loadSystemLyrics(songId, currentItem)
+        if (systemLyricsMediaId != mediaId) resetSystemLyrics(currentItem)
+        if (systemLyricsDocument == null && systemLyricsJob?.isActive != true) loadSystemLyrics(mediaId, currentItem)
         val document = systemLyricsDocument ?: return
         val advance = MeloXSettingsRuntime.lyricAdvanceMs.toLong()
         val index = document.highlightedIndex(active.currentPosition + advance) ?: return
@@ -1845,7 +1845,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             runCatching {
                 val payload = buildColorOsLyricPayload(
                     document = document,
-                    songId = songId,
+                    songId = legacyNumericSystemId(mediaId),
                     songName = original.title?.toString().orEmpty(),
                     artistName = original.artist?.toString().orEmpty(),
                     albumName = original.albumTitle?.toString(),
@@ -1853,7 +1853,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                     sessionGeneration = systemLyricsSessionGeneration,
                 )
                 colorOsLyricsPublisher?.setLyrics(
-                    mediaId = songId.toString(),
+                    mediaId = mediaId,
                     payload = payload,
                     hasTranslation = systemLyricHasTranslation,
                 )
@@ -1861,7 +1861,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             runCatching {
                 superLyricPublisher?.setSong(
                     document = document,
-                    songId = songId.toString(),
+                    songId = mediaId,
                     songName = original.title?.toString(),
                     artistName = original.artist?.toString(),
                     albumName = original.albumTitle?.toString(),
@@ -1915,21 +1915,38 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
     }
 
-    private fun loadSystemLyrics(songId: Long, item: MediaItem) {
-        systemLyricsSongId = songId
+    private fun loadSystemLyrics(mediaId: String, item: MediaItem) {
+        systemLyricsMediaId = mediaId
         systemLyricsOriginalMetadata = item.mediaMetadata
         systemLyricsJob = serviceScope.launch {
+            val metadata = item.mediaMetadata
             val loaded = withContext(Dispatchers.IO) {
-                downloadStore.localLyrics(songId) ?: runCatching {
-                    NeteaseSearchClient(
-                        cookieProvider = { com.lladlam.melox.core.music.provider.PlaybackAccountStore.neteaseCookie(this@MeloXPlaybackService) },
-                    ).lyrics(songId)
+                runCatching {
+                    MeloXProviderLyricsLoader.load(
+                        context = this@MeloXPlaybackService,
+                        mediaId = mediaId,
+                        title = metadata.title?.toString().orEmpty(),
+                        artist = metadata.artist?.toString().orEmpty(),
+                        album = metadata.albumTitle?.toString().orEmpty(),
+                        artworkUrl = metadata.artworkUri?.toString(),
+                        durationMs = metadata.durationMs?.takeIf { it > 0L }
+                            ?: player?.duration?.takeIf { it != C.TIME_UNSET && it > 0L }
+                            ?: 0L,
+                        // System/floating surfaces only need line text, so keep
+                        // the fast document and skip background AutoSync jobs.
+                        onUpgrade = null,
+                    )
                 }.getOrNull()
             }
-            if (systemLyricsSongId == songId) systemLyricsDocument = loaded?.let(LyricTimelineProcessor::process)
+            if (systemLyricsMediaId == mediaId) systemLyricsDocument = loaded
             systemLyricsJob = null
         }
     }
+
+    /** ColorOS only needs a stable numeric identity; real NetEase IDs stay intact. */
+    private fun legacyNumericSystemId(mediaId: String): Long =
+        mediaId.toLongOrNull()?.takeIf { it > 0L }
+            ?: (mediaId.hashCode().toLong() and 0xffffffffL)
 
     private fun resetSystemLyrics(item: MediaItem?) {
         VivoAtomicIslandBridge.clear(this)
@@ -1938,7 +1955,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         systemLyricsSessionGeneration++
         systemLyricsJob?.cancel()
         systemLyricsJob = null
-        systemLyricsSongId = item?.mediaId?.toLongOrNull()
+        systemLyricsMediaId = item?.mediaId
         systemLyricsDocument = null
         systemLyricsOriginalMetadata = item?.mediaMetadata
         systemLyricsLastIndex = Int.MIN_VALUE
@@ -1951,10 +1968,10 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         val index = currentIndex.takeIf { candidate ->
             candidate in 0 until active.mediaItemCount &&
                 active.getMediaItemAt(candidate).mediaMetadata.extras?.containsKey(SYSTEM_ORIGINAL_TITLE_KEY) == true
-        } ?: systemLyricsSongId?.let { songId ->
+        } ?: systemLyricsMediaId?.let { mediaId ->
             (0 until active.mediaItemCount).firstOrNull { candidate ->
                 val item = active.getMediaItemAt(candidate)
-                item.mediaId.toLongOrNull() == songId &&
+                item.mediaId == mediaId &&
                     item.mediaMetadata.extras?.containsKey(SYSTEM_ORIGINAL_TITLE_KEY) == true
             }
         } ?: return
@@ -2858,7 +2875,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
 }
 
 internal fun shouldClearLegacySystemLyrics(mediaId: String?): Boolean =
-    mediaId?.toLongOrNull()?.takeIf { it > 0L } == null
+    mediaId.isNullOrBlank() || PlaybackTrackIdentity.decode(mediaId) == null
 
 internal fun shouldResumeEndedAutoplay(playbackState: Int, hasNextMediaItem: Boolean): Boolean =
     playbackState == Player.STATE_ENDED && hasNextMediaItem

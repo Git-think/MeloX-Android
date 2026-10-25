@@ -42,6 +42,17 @@ android {
     // app/src/main/cpp/third_party/open_jtalk (Modified BSD).
     ndkVersion = "29.0.14206865"
 
+    // Publish one APK per CPU architecture so a phone downloads only its own
+    // native libraries instead of carrying both ONNX/FFmpeg copies.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
+    }
+
     defaultConfig {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
@@ -50,13 +61,6 @@ android {
         versionName = "0.7.0"
         testInstrumentationRunner = providers.gradleProperty("meloxTestInstrumentationRunner")
             .getOrElse("com.lladlam.melox.core.autosync.AutoSyncDeviceRunner")
-        // One APK for real phones: both ARM architectures stay in the package,
-        // so 32-bit devices keep working exactly as before. Only the
-        // emulator-only x86/x86_64 copies are removed — ONNX Runtime alone
-        // ships ~39 MB of native code per x86 ABI and no phone loads them.
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DANDROID_STL=c++_static")

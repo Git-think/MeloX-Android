@@ -2,6 +2,13 @@
 
 [English](../README.md)
 
+## 未发布
+
+- 构建产物按 CPU 架构拆分为 `arm64-v8a` 与 `armeabi-v7a` 两个 APK，不再发布同时包含两套原生库的通用包。
+- 修复汽水音乐扫码登录：保留抖音 Passport 下发的完整 Cookie（不再按域名丢弃），兼容扫码确认后的 3xx 响应，并在登录后使用完整会话 Cookie 请求账号接口，修复扫码后 404。
+
+- 修复系统歌词、悬浮窗歌词、HyperOS 超级岛、vivo 原子岛、ColorOS 锁屏歌词与 SuperLyric 只识别网易云歌曲的问题：统一使用与歌词页相同的 Provider 歌词加载链，支持 QQ音乐、酷狗概念版、汽水、酷我、Bilibili、Spotify、YouTube Music、Apple Music、Jellyfin 与本地歌曲。
+
 ## 0.7.0 — 2026-10-25
 
 - 版本号升级为 `0.7.0`，`versionCode` 提升至 **25**；正式产物名为 `MeloX-Android-0.7.0.apk`，发布标签 `0.7.0`。

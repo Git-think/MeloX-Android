@@ -119,11 +119,36 @@ internal object MeloXProviderLyricsLoader {
         context: Context,
         state: MeloXPlaybackUiState,
         onUpgrade: ((LyricsDocument) -> Unit)? = null,
+    ): LyricsDocument = load(
+        context = context,
+        mediaId = state.mediaId,
+        title = state.title,
+        artist = state.artist,
+        album = state.album,
+        artworkUrl = state.artworkUrl,
+        durationMs = state.durationMs,
+        onUpgrade = onUpgrade,
+    )
+
+    /**
+     * Value-based variant used by system lyrics and the floating overlay. It
+     * shares the exact provider matching, fallbacks and cache with the in-app
+     * lyrics panel so every source gets identical lyrics.
+     */
+    suspend fun load(
+        context: Context,
+        mediaId: String?,
+        title: String,
+        artist: String,
+        album: String,
+        artworkUrl: String?,
+        durationMs: Long,
+        onUpgrade: ((LyricsDocument) -> Unit)? = null,
     ): LyricsDocument {
         val appContext = context.applicationContext
-        val mediaId = state.mediaId?.takeIf(String::isNotBlank)
+        val resolvedMediaId = mediaId?.takeIf(String::isNotBlank)
             ?: return LyricsDocument(emptyList())
-        val resourceId = PlaybackTrackIdentity.decode(mediaId)
+        val resourceId = PlaybackTrackIdentity.decode(resolvedMediaId)
             ?: return LyricsDocument(emptyList())
         val localRecord = if (resourceId.source == MusicSource.Local) {
             LocalMusicRepository(appContext).track(resourceId.value)
@@ -141,9 +166,9 @@ internal object MeloXProviderLyricsLoader {
         val preference = requestedLyricPreference()
         val cacheKey = lyricCacheKey(
             resourceId = resourceId,
-            title = state.title,
-            artist = state.artist,
-            durationMs = state.durationMs,
+            title = title,
+            artist = artist,
+            durationMs = durationMs,
             automaticSelection = auto,
             bilibiliAlignment = bilibiliAlignment,
             binding = binding,
@@ -169,11 +194,11 @@ internal object MeloXProviderLyricsLoader {
         // avoids reading rapidly changing snapshot state from the worker thread.
         val snapshot = LyricTrackSnapshot(
             resourceId = resourceId,
-            title = localRecord?.recognizedTitle ?: localRecord?.title ?: state.title,
-            artist = localRecord?.recognizedArtist ?: localRecord?.artist ?: state.artist,
-            album = localRecord?.recognizedAlbum ?: localRecord?.album ?: state.album,
-            artworkUrl = localRecord?.recognizedArtworkUrl ?: localRecord?.artworkUri ?: state.artworkUrl,
-            durationMs = state.durationMs,
+            title = localRecord?.recognizedTitle ?: localRecord?.title ?: title,
+            artist = localRecord?.recognizedArtist ?: localRecord?.artist ?: artist,
+            album = localRecord?.recognizedAlbum ?: localRecord?.album ?: album,
+            artworkUrl = localRecord?.recognizedArtworkUrl ?: localRecord?.artworkUri ?: artworkUrl,
+            durationMs = durationMs,
             automaticSelection = auto,
             bilibiliAlignment = bilibiliAlignment,
             binding = binding,

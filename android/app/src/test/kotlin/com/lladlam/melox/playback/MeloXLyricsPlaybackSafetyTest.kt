@@ -31,12 +31,22 @@ class MeloXLyricsPlaybackSafetyTest {
     }
 
     @Test
-    fun nonNumericProviderIdsClearLegacyNeteaseLyrics() {
+    fun providerMediaIdsKeepLyricsAndOnlyMalformedIdsClear() {
         assertFalse(shouldClearLegacyNeteaseLyrics("123"))
         assertFalse(shouldClearLegacySystemLyrics("123"))
-        listOf(null, "", "melox:qq_music:abc", "not-a-number").forEach { mediaId ->
-            assertTrue(shouldClearLegacyNeteaseLyrics(mediaId))
-            assertTrue(shouldClearLegacySystemLyrics(mediaId))
+        listOf(
+            "melox:qq_music:abc",
+            "melox:qishui:7079108541549643812",
+            "melox:kugou_lite:hash",
+            "melox:spotify:track",
+            "melox:local:file",
+        ).forEach { mediaId ->
+            assertFalse(mediaId, shouldClearLegacyNeteaseLyrics(mediaId))
+            assertFalse(mediaId, shouldClearLegacySystemLyrics(mediaId))
+        }
+        listOf(null, "", "not-a-number", "melox:qq_music", "melox::abc").forEach { mediaId ->
+            assertTrue("$mediaId", shouldClearLegacyNeteaseLyrics(mediaId))
+            assertTrue("$mediaId", shouldClearLegacySystemLyrics(mediaId))
         }
     }
 }
