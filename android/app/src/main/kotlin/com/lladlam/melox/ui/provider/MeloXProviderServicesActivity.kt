@@ -21,6 +21,7 @@ import com.lladlam.melox.ui.prepareMeloXPageWindow
 import com.lladlam.melox.ui.theme.MeloXTheme
 import com.lladlam.melox.ui.MeloXPageHost
 import com.lladlam.melox.ui.startMeloXPage
+import com.lladlam.melox.ui.finishMeloXPage
 
 class MeloXProviderServicesActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,7 +31,7 @@ class MeloXProviderServicesActivity : ComponentActivity() {
         setContent {
             MeloXPageHost {
                 MeloXTheme {
-                    ProviderServicesPage(onBack = ::finish)
+                    ProviderServicesPage(onBack = ::finishMeloXPage)
                 }
             }
         }

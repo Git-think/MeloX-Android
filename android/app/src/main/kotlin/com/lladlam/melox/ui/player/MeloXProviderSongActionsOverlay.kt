@@ -618,6 +618,7 @@ private fun shareProviderSong(
     val providerUrl = when (identity.source) {
         MusicSource.QQMusic -> "https://y.qq.com/n/ryqq/songDetail/${identity.value}"
         MusicSource.Kugou,
+        MusicSource.KugouLite,
         MusicSource.Kuwo,
         MusicSource.Netease -> null
         MusicSource.AppleMusic -> "https://music.apple.com/song/${identity.value}"
@@ -626,6 +627,7 @@ private fun shareProviderSong(
         }
         MusicSource.Spotify -> "https://open.spotify.com/track/${identity.value}"
         MusicSource.YouTubeMusic -> "https://music.youtube.com/watch?v=${identity.value}"
+        MusicSource.Qishui -> "https://music.douyin.com/qishui/song/${identity.value}"
         MusicSource.Jellyfin -> null
         MusicSource.Local -> null
     }

@@ -132,9 +132,8 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.shapes.Capsule
 import com.lladlam.melox.ui.library.LibraryScreen
+import com.lladlam.melox.core.provider.kugou.KugouLiteDailyCheckIn
 import com.lladlam.melox.ui.legal.MELOX_LEGAL_VERSION
-import com.lladlam.melox.ui.legal.MeloXFirstLaunchLegalConsent
-import com.lladlam.melox.ui.legal.MeloXCloudControlConsentDialog
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigConsent
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigSource
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime
@@ -149,6 +148,7 @@ import com.lladlam.melox.ui.discovery.MeloXHomeScreen
 import com.lladlam.melox.ui.glass.LocalMeloXBackdrop
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.ui.glass.MeloXSymbolVariant
 import com.lladlam.melox.ui.glass.MeloXSystemColors
 import com.lladlam.melox.ui.glass.MeloXGlassDialog
@@ -202,6 +202,7 @@ import com.lladlam.melox.ui.player.MeloXSmoothCorner
 import com.lladlam.melox.ui.player.MeloXPlayerRecedeCompatFallbackDp
 import com.lladlam.melox.ui.player.meloXPlayerTransitionDurationMillis
 import com.lladlam.melox.ui.player.rememberMeloXPlaybackUiState
+import com.lladlam.melox.ui.player.MeloXAudioOutputDialog
 import com.lladlam.melox.ui.provider.ProviderExploreScreen
 import com.lladlam.melox.ui.provider.ProviderHomeScreen
 import com.lladlam.melox.ui.provider.ProviderLibraryScreen
@@ -287,7 +288,8 @@ fun MeloXApp(
         if (MeloXSettingsRuntime.disableAutomaticTabBarShrink) tabBarMinimized = false
     }
     var libraryModalVisible by remember { mutableStateOf(false) }
-    var onboardingPage by remember {
+    var onboardingLoginRequested by rememberSaveable { mutableStateOf(false) }
+    var onboardingPage by rememberSaveable {
         mutableStateOf(if (MeloXSettingsPreferences.boolean(context, "onboarding_completed", false)) -1 else 0)
     }
     var availableUpdate by remember { mutableStateOf<MeloXRelease?>(null) }
@@ -302,6 +304,13 @@ fun MeloXApp(
                 MeloXRemoteConfigConsent.enabled(context) &&
                 remoteConfigStatus.source == MeloXRemoteConfigSource.VerifiedRemote &&
                 MeloXRemoteNoticeStore.shouldShow(context, it)
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (MeloXSettingsPreferences.boolean(context, "onboarding_completed", false)) {
+            withContext(Dispatchers.IO) {
+                runCatching { KugouLiteDailyCheckIn.run(context) }
+            }
         }
     }
     var heartModeLaunchAttempted by remember { mutableStateOf(false) }
@@ -671,6 +680,13 @@ fun MeloXApp(
               .layerBackdrop(pageBackdrop),
       )
       CompositionLocalProvider(LocalMeloXBackdrop provides pageBackdrop) {
+        CompositionLocalProvider(LocalMeloXBackdrop provides playerControlBackdrop) {
+            MeloXAudioOutputDialog(
+                visible = playbackState.showOutputPicker,
+                onDismiss = { playbackState.showOutputPicker = false },
+                state = playbackState,
+            )
+        }
         SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
             val sharedScope = this
             val fullPlayerVisible = playbackState.hasMedia &&
@@ -1349,12 +1365,17 @@ fun MeloXApp(
             )
         }
         if (onboardingPage >= 0) {
+            fun finishOnboarding() {
+                MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
+                onboardingPage = -1
+                if (onboardingLoginRequested) launchNeteaseLogin(AppTab.Settings)
+            }
             when (onboardingPage) {
-                0 -> MeloXFirstLaunchLegalConsent(
+                2 -> MeloXOnboardingLegalPage(
                     onAgree = {
                         MeloXSettingsPreferences.setString(context, "legal_consent_version", MELOX_LEGAL_VERSION)
                         MeloXSettingsPreferences.setLong(context, "legal_consent_at", System.currentTimeMillis())
-                        onboardingPage = 1
+                        if (cloudControlChoicePending) onboardingPage = 3 else finishOnboarding()
                     },
                     onDecline = { (hostContext as? Activity)?.finish() },
                     onOpenProject = {
@@ -1365,8 +1386,8 @@ fun MeloXApp(
                         }
                     },
                 )
-                1 -> MeloXOnboardingWelcomePage(
-                    onContinue = { onboardingPage = 2 },
+                0 -> MeloXOnboardingWelcomePage(
+                    onContinue = { onboardingPage = 1 },
                     onLicenses = {
                         runCatching {
                             hostContext.startActivity(
@@ -1378,24 +1399,37 @@ fun MeloXApp(
                         }
                     },
                 )
-                else -> MeloXOnboardingAccountPage(
+                1 -> MeloXOnboardingAccountPage(
                     isLoggedIn = neteaseSession.isLoggedIn,
                     nickname = neteaseSession.profile?.nickname,
                     avatarUrl = neteaseSession.profile?.avatarUrl,
                     onLogin = {
-                        MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
-                        onboardingPage = -1
-                        launchNeteaseLogin(AppTab.Settings)
+                        onboardingLoginRequested = true
+                        onboardingPage = 2
                     },
                     onFinish = {
-                        MeloXSettingsPreferences.setBoolean(context, "onboarding_completed", true)
-                        onboardingPage = -1
+                        onboardingLoginRequested = false
+                        onboardingPage = 2
+                    },
+                )
+                else -> MeloXOnboardingCloudPage(
+                    onReject = {
+                        MeloXRemoteConfigConsent.reject(context)
+                        playerScope.launch { MeloXRemoteConfigRuntime.clearCache(context) }
+                        cloudControlChoicePending = false
+                        finishOnboarding()
+                    },
+                    onAccept = {
+                        MeloXRemoteConfigConsent.accept(context)
+                        MeloXRemoteConfigRuntime.initializeAndRefresh(context, BuildConfig.VERSION_CODE, force = true)
+                        cloudControlChoicePending = false
+                        finishOnboarding()
                     },
                 )
             }
         }
         if (onboardingPage < 0 && cloudControlChoicePending) {
-            MeloXCloudControlConsentDialog(
+            MeloXOnboardingCloudPage(
                 onReject = {
                     MeloXRemoteConfigConsent.reject(context)
                     playerScope.launch { MeloXRemoteConfigRuntime.clearCache(context) }
@@ -1411,12 +1445,10 @@ fun MeloXApp(
         availableUpdate?.takeIf {
             onboardingPage < 0 && !cloudControlChoicePending && pendingRemoteNotice == null
         }?.let { release ->
-            MeloXAppDialog(
-                title = stringResource(R.string.app_update_found, release.version),
-                message = release.name + release.notes.takeIf(String::isNotBlank)?.let { "\n\n${it.take(500)}" }.orEmpty(),
-                dismissLabel = stringResource(R.string.app_update_later),
-                confirmLabel = if (release.apkUrl != null) stringResource(R.string.app_update_download) else stringResource(R.string.app_update_view),
-                onDismiss = { availableUpdate = null },
+            MeloXUpdateDialog(
+                release = release,
+                downloadAvailable = release.apkUrl != null,
+                onLater = { availableUpdate = null },
                 onConfirm = {
                     availableUpdate = null
                     playerScope.launch {
@@ -1498,6 +1530,71 @@ private fun MeloXAppDialog(
                 style = MeloXGlassButtonStyle.BorderedProminent,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) { Text(confirmLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+@Composable
+private fun MeloXUpdateDialog(
+    release: MeloXRelease,
+    downloadAvailable: Boolean,
+    onLater: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    // Capped to the safe drawing area: a long release note scrolls inside the
+    // panel instead of pushing the buttons off screen.
+    MeloXGlassDialog(visible = true, onDismiss = onLater, maxHeightFraction = 0.92f) {
+        Text(
+            stringResource(R.string.app_update_found, release.version),
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .padding(top = 10.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (release.name.isNotBlank()) {
+                Text(
+                    release.name,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (release.notes.isNotBlank()) {
+                Text(
+                    release.notes,
+                    modifier = Modifier.padding(top = if (release.name.isNotBlank()) 8.dp else 0.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f),
+                    lineHeight = 21.sp,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            MeloXGlassButton(
+                onClick = onLater,
+                modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
+                style = MeloXGlassButtonStyle.Plain,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            ) { Text(stringResource(R.string.app_update_later), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.width(10.dp))
+            MeloXGlassButton(
+                onClick = onConfirm,
+                modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
+                style = MeloXGlassButtonStyle.BorderedProminent,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    if (downloadAvailable) stringResource(R.string.app_update_download) else stringResource(R.string.app_update_view),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -2366,7 +2463,7 @@ private fun RootGlyphIcon(
         Icon(
             painter = painterResource(R.drawable.melox_home_tab),
             contentDescription = null,
-            modifier = modifier,
+            modifier = modifier.meloXIconDrawingScale(),
             tint = color,
         )
         return

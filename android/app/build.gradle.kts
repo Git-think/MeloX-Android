@@ -42,20 +42,26 @@ android {
     // app/src/main/cpp/third_party/open_jtalk (Modified BSD).
     ndkVersion = "29.0.14206865"
 
+    // Publish one APK per CPU architecture so a phone downloads only its own
+    // native libraries instead of carrying both ONNX/FFmpeg copies.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            // Fixed-name fork update assets need an APK that supports both ARM architectures.
+            isUniversalApk = true
+        }
+    }
+
     defaultConfig {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
         targetSdk = 37
-        versionCode = 24
-        versionName = "0.6.5"
-        testInstrumentationRunner = "com.lladlam.melox.core.autosync.AutoSyncDeviceRunner"
-        // One APK for real phones: both ARM architectures stay in the package,
-        // so 32-bit devices keep working exactly as before. Only the
-        // emulator-only x86/x86_64 copies are removed — ONNX Runtime alone
-        // ships ~39 MB of native code per x86 ABI and no phone loads them.
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
+        versionCode = 25
+        versionName = "0.7.0"
+        testInstrumentationRunner = providers.gradleProperty("meloxTestInstrumentationRunner")
+            .getOrElse("com.lladlam.melox.core.autosync.AutoSyncDeviceRunner")
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DANDROID_STL=c++_static")
@@ -131,7 +137,8 @@ android {
             //   INSTALL_FAILED_UPDATE_INCOMPATIBLE，两个包只能留一个。
             // Manifest 的 authorities 全是 ${applicationId}.xxx 模板（.androidx-startup
             // / .fileprovider / .shizuku），换 id 自动错开，无需额外改动。
-            applicationIdSuffix = ".dev"
+            // Override for same-phone LAN regression with a second debug install.
+            applicationIdSuffix = providers.gradleProperty("meloxDebugApplicationIdSuffix").getOrElse(".dev")
         }
 
         // ── debugPerf：不卡的 debug ──────────────────────────────────────────
@@ -173,17 +180,13 @@ android {
             meloxReleaseSigning?.let { signingConfig = it }
 
             // ── Package id ──────────────────────────────────────────────────
-            // Fork patch: release builds keep the official id
-            // (com.lladlam.melox.android). Upstream defaults to ".fork" so a
-            // fork install can coexist with the official app; this fork ships
-            // the official id instead. The APK is still signed with the fork
-            // key, so it cannot update an official install in place — the
-            // official app (or a previous ".fork" build) must be uninstalled
-            // first. Manifest authorities are all
-            // ${applicationId} templates, so nothing else has to change.
-            // Override with -PmeloxReleaseIdSuffix=.suffix to add one back.
-            val releaseIdSuffix = providers.gradleProperty("meloxReleaseIdSuffix").orNull
-                ?: ""
+            // Published releases MUST keep com.lladlam.melox.android: previous
+            // MeloX Android releases (0.6.5 and earlier) use that id and the same
+            // MeloX signing certificate, so a suffix would install a second app
+            // and existing users would never receive the update.
+            // For a side-by-side test build pass
+            // -PmeloxReleaseIdSuffix=.fork explicitly.
+            val releaseIdSuffix = providers.gradleProperty("meloxReleaseIdSuffix").orNull.orEmpty()
             if (releaseIdSuffix.isNotBlank()) {
                 applicationIdSuffix = releaseIdSuffix
             }
@@ -216,6 +219,7 @@ android {
     }
 
     packaging {
+        jniLibs.excludes += setOf("**/x86/**", "**/x86_64/**")
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/google/protobuf/**"
     }
@@ -341,6 +345,7 @@ dependencies {
 
     // External lyric integrations.
     implementation("io.github.proify.lyricon:provider:0.1.70")
+    implementation("com.github.HChenX:SuperLyricApi:3.4")
     // HyperOS Focus / Super Island notification payload builder.
     implementation("com.xzakota.hyper.notification:focus-api:1.4")
     // Optional non-root HyperOS compatibility path. If Shizuku is unavailable or

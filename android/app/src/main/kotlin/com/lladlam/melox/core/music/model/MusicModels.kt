@@ -8,12 +8,14 @@ enum class MusicSource(
     Netease("netease", "网易云音乐"),
     QQMusic("qq_music", "QQ音乐"),
     Kugou("kugou", "酷狗音乐"),
+    KugouLite("kugou_lite", "酷狗概念版"),
     Kuwo("kuwo", "酷我音乐"),
     AppleMusic("apple_music", "Apple Music"),
     Bilibili("bilibili", "Bilibili"),
     Spotify("spotify", "Spotify"),
     YouTubeMusic("youtube_music", "YouTube Music"),
     Jellyfin("jellyfin", "Jellyfin"),
+    Qishui("qishui", "汽水音乐"),
     Local("local", "本地音乐");
 
     companion object {
@@ -173,6 +175,8 @@ data class MusicPlaylistDetail(
     val summary: MusicPlaylistSummary,
     val tracks: List<MusicTrack>,
     val total: Long? = null,
+    /** Upstream resource pagination may differ from track count (e.g. Bilibili multi-part videos). */
+    val hasMore: Boolean? = null,
 )
 
 /** A ranking is intentionally not modelled as a playlist: some services expose different semantics. */

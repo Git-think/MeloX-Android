@@ -4,7 +4,7 @@ import android.content.Context
 import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.provider.applemusic.AppleMusicApiClient
 import com.lladlam.melox.core.provider.applemusic.AppleMusicSessionStore
-import com.lladlam.melox.core.provider.kugou.KugouProvider
+import com.lladlam.melox.core.provider.kugou.KugouLiteProvider
 import com.lladlam.melox.core.provider.kugou.KugouSessionStore
 import com.lladlam.melox.core.provider.kuwo.KuwoProvider
 import com.lladlam.melox.core.provider.kuwo.KuwoSessionStore
@@ -23,6 +23,8 @@ import com.lladlam.melox.core.provider.jellyfin.JellyfinSessionStore
 import com.lladlam.melox.core.provider.local.LocalProvider
 import com.lladlam.melox.core.network.MeloXHttpClient
 import okhttp3.OkHttpClient
+import com.lladlam.melox.core.provider.qishui.QishuiProvider
+import com.lladlam.melox.core.provider.qishui.QishuiSessionStore
 
 /** Creates provider instances that all read their authentication state locally. */
 object MeloXMusicProviders {
@@ -49,7 +51,8 @@ object MeloXMusicProviders {
         val nativeProviders = listOf<MusicProvider>(
                 NeteaseProvider({ PlaybackAccountStore.neteaseCookie(appContext) }, httpClient),
                 QQMusicProvider({ PlaybackAccountStore.qqSession(appContext) }, httpClient),
-                KugouProvider({ PlaybackAccountStore.kugouSession(appContext) }, httpClient),
+                liteProvider(appContext, httpClient),
+                QishuiProvider({ QishuiSessionStore.read(appContext) }, httpClient),
                 KuwoProvider({ PlaybackAccountStore.kuwoSession(appContext) }, httpClient),
                 AppleMusicApiClient({ AppleMusicSessionStore.read(appContext) }, httpClient),
                 BilibiliProvider(
@@ -72,6 +75,25 @@ object MeloXMusicProviders {
         )
     }
 
+    private fun liteProvider(context: Context, httpClient: OkHttpClient): KugouLiteProvider =
+        KugouLiteProvider(
+            sessionProvider = { KugouSessionStore.readLite(context) },
+            httpClient = httpClient,
+            persistAuth = { auth -> KugouSessionStore.updateLiteEntitlements(context, auth = auth) },
+            persistDfid = { dfid -> KugouSessionStore.updateLiteDfid(context, dfid) },
+            onAuthExpired = { KugouSessionStore.clearLiteLogin(context) },
+            persistVip = { vip ->
+                KugouSessionStore.updateLiteEntitlements(
+                    context = context,
+                    vipType = vip.vipType,
+                    vipExpiresAtEpochSeconds = vip.expiresAtEpochSeconds,
+                    superVip = vip.superVip,
+                    vipActive = vip.isVip,
+                    freeListenEligible = vip.freeListen,
+                )
+            },
+        )
+
     private fun buildRegistry(context: Context, httpClient: OkHttpClient): MusicProviderRegistry {
         val nativeProviders = listOf<MusicProvider>(
                 NeteaseProvider(
@@ -82,10 +104,8 @@ object MeloXMusicProviders {
                     sessionProvider = { QQMusicSessionStore.read(context) },
                     httpClient = httpClient,
                 ),
-                KugouProvider(
-                    sessionProvider = { KugouSessionStore.read(context) },
-                    httpClient = httpClient,
-                ),
+                liteProvider(context, httpClient),
+                QishuiProvider({ QishuiSessionStore.read(context) }, httpClient),
                 KuwoProvider({ KuwoSessionStore.read(context) }, httpClient),
                 AppleMusicApiClient(
                     sessionProvider = { AppleMusicSessionStore.read(context) },

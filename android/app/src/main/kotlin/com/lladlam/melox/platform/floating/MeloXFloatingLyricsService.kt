@@ -25,12 +25,12 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.lladlam.melox.MainActivity
 import com.lladlam.melox.R
-import com.lladlam.melox.core.account.NeteaseSessionStore
-import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.lyrics.LyricTimelineProcessor
 import com.lladlam.melox.core.lyrics.LyricsDocument
-import com.lladlam.melox.core.network.NeteaseSearchClient
 import com.lladlam.melox.playback.MeloXPlaybackService
+import com.lladlam.melox.playback.PlaybackTrackIdentity
+import com.lladlam.melox.playback.ProviderPlaybackRuntime
+import com.lladlam.melox.ui.player.MeloXProviderLyricsLoader
 import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
 import com.lladlam.melox.ui.settings.MeloXSecondaryLyricMode
 import java.util.concurrent.Executor
@@ -53,7 +53,7 @@ class MeloXFloatingLyricsService : Service() {
     private var primaryText: TextView? = null
     private var secondaryText: TextView? = null
     private var lyrics: LyricsDocument? = null
-    private var lyricsSongId: Long? = null
+    private var lyricsMediaId: String? = null
     private var lyricsJob: Job? = null
     private var lastIndex = Int.MIN_VALUE
     private var anchorPositionMs = 0L
@@ -61,7 +61,7 @@ class MeloXFloatingLyricsService : Service() {
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-            loadLyrics(mediaItem?.mediaId)
+            loadLyrics(mediaItem)
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
@@ -123,41 +123,53 @@ class MeloXFloatingLyricsService : Service() {
             runCatching { future.get() }.onSuccess { player ->
                 controller = player
                 player.addListener(listener)
-                loadLyrics(player.currentMediaItem?.mediaId)
+                loadLyrics(player.currentMediaItem)
             }
         }, mainExecutor)
     }
 
-    private fun loadLyrics(mediaId: String?) {
-        val songId = mediaId?.toLongOrNull()?.takeIf { it > 0L }
+    private fun loadLyrics(item: androidx.media3.common.MediaItem?) {
+        val mediaId = item?.mediaId?.takeIf(String::isNotBlank)
         if (shouldClearLegacyNeteaseLyrics(mediaId)) {
             clearLyrics()
             return
         }
-        if (songId == null || lyricsSongId == songId) return
-        lyricsSongId = songId
+        if (mediaId == null || lyricsMediaId == mediaId) return
+        lyricsMediaId = mediaId
         lyrics = null
         lastIndex = Int.MIN_VALUE
         primaryText?.text = getString(R.string.floating_lyrics_loading)
         secondaryText?.text = ""
         lyricsJob?.cancel()
+        val metadata = item.mediaMetadata
+        val durationMs = metadata.durationMs?.takeIf { it > 0L }
+            ?: controller?.duration?.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0L }
+            ?: 0L
         lyricsJob = scope.launch {
+            // Shares the in-app provider matching/cache, so every music source
+            // gets the same lyrics instead of only NetEase IDs.
+            ProviderPlaybackRuntime.initialize(this@MeloXFloatingLyricsService)
             val document = withContext(Dispatchers.IO) {
-                MeloXDownloadStore.get(this@MeloXFloatingLyricsService).localLyrics(songId)
-                    ?: runCatching {
-                        NeteaseSearchClient(
-                            cookieProvider = { NeteaseSessionStore.readCookie(this@MeloXFloatingLyricsService) },
-                        ).lyrics(songId)
-                    }.getOrNull()
+                runCatching {
+                    MeloXProviderLyricsLoader.load(
+                        context = this@MeloXFloatingLyricsService,
+                        mediaId = mediaId,
+                        title = metadata.title?.toString().orEmpty(),
+                        artist = metadata.artist?.toString().orEmpty(),
+                        album = metadata.albumTitle?.toString().orEmpty(),
+                        artworkUrl = metadata.artworkUri?.toString(),
+                        durationMs = durationMs,
+                    )
+                }.getOrNull()
             }
-            if (lyricsSongId == songId) lyrics = document?.let(LyricTimelineProcessor::process)
+            if (lyricsMediaId == mediaId) lyrics = document
         }
     }
 
     private fun clearLyrics() {
         lyricsJob?.cancel()
         lyricsJob = null
-        lyricsSongId = null
+        lyricsMediaId = null
         lyrics = null
         lastIndex = Int.MIN_VALUE
         primaryText?.text = ""
@@ -343,4 +355,4 @@ class MeloXFloatingLyricsService : Service() {
 }
 
 internal fun shouldClearLegacyNeteaseLyrics(mediaId: String?): Boolean =
-    mediaId?.toLongOrNull()?.takeIf { it > 0L } == null
+    mediaId.isNullOrBlank() || PlaybackTrackIdentity.decode(mediaId) == null

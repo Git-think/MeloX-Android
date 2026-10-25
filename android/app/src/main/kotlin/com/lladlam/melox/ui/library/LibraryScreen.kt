@@ -171,6 +171,7 @@ import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
 import com.lladlam.melox.ui.glass.meloXLiquidButton
 import com.lladlam.melox.ui.glass.meloXLiquidTabSelection
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.ui.player.MeloXFlowingLightBackdrop
 import com.lladlam.melox.ui.player.MeloXSongActionsOverlay
 import com.lladlam.melox.ui.sharing.MeloXNeteaseResourceShareActivity
@@ -186,6 +187,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -875,6 +877,7 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
     var exportMessage by remember { mutableStateOf<String?>(null) }
 
     val active = downloads.activeDownloads.values.toList()
+    val paused = downloads.pausedDownloads.values.toList()
     val completed = downloads.downloads.toList()
     val providerCompleted = providerDownloads.downloads.toList()
     val groups = downloads.downloadedPlaylists
@@ -1184,10 +1187,42 @@ private fun MeloXLibraryDownloadsPage(downloads: MeloXDownloadStore) {
                   fontSize = 12.sp,
               )
           }
+          Text(stringResource(R.string.action_pause), color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { downloads.pause(item.song.id) }.padding(10.dp))
           Text(stringResource(R.string.action_cancel), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.cancel(item.song.id) }.padding(10.dp))
       }
   }
-  if (active.isEmpty()) {
+  if (paused.isNotEmpty()) {
+      item {
+          Text(
+              stringResource(R.string.library_paused),
+              fontSize = 15.sp,
+              fontWeight = FontWeight.SemiBold,
+              modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+          )
+      }
+      items(paused, key = { "paused-${it.song.id}" }) { item ->
+          Row(Modifier.fillMaxWidth().height(66.dp), verticalAlignment = Alignment.CenterVertically) {
+              AsyncImage(
+                  model = item.song.artworkUrl,
+                  contentDescription = null,
+                  contentScale = ContentScale.Crop,
+                  modifier = Modifier.size(48.dp).clip(RoundedCornerShape(9.dp)),
+              )
+              Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                  Text(item.song.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                  val progress = item.fractionCompleted?.let { "${(it * 100).toInt()}%" } ?: stringResource(R.string.library_preparing)
+                  Text(
+                      "$progress · ${item.quality.title}",
+                      color = MaterialTheme.colorScheme.onBackground.copy(alpha = .48f),
+                      fontSize = 12.sp,
+                  )
+              }
+              Text(stringResource(R.string.action_resume), color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { downloads.resume(item.song.id) }.padding(10.dp))
+              Text(stringResource(R.string.action_cancel), color = MaterialTheme.colorScheme.error, modifier = Modifier.clickable { downloads.cancel(item.song.id) }.padding(10.dp))
+          }
+      }
+  }
+  if (active.isEmpty() && paused.isEmpty()) {
       item { Text(stringResource(R.string.library_none_active), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .5f), modifier = Modifier.padding(top = 24.dp)) }
   }
         }
@@ -2035,8 +2070,7 @@ internal fun MeloXUnifiedPlaylistDetailScreen(
     artworkSharedKey: String? = null,
 ) {
     val context = LocalContext.current.applicationContext
-    val client = remember(context) {
-        NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
+    val client = remember(context) {    NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(context) })
     }
     if (!LocalMeloXListDetail.current && sharedTransitionScope != null && animatedVisibilityScope != null) {
         MeloXPlaylistDetailScreen(
@@ -2226,6 +2260,12 @@ private fun MeloXPlaylistDetailScreen(
         (detail?.summary?.providerPlaylist ?: providerPlaylist)?.isEditable == false
     }
     var loading by remember(initialPlaylist.id) { mutableStateOf(true) }
+    val pagedBilibiliPlaylist = providerPlaylist?.id?.source == MusicSource.Bilibili && providedSongs == null
+    var providerPage by remember(initialPlaylist.id) { mutableStateOf(1) }
+    var providerHasMore by remember(initialPlaylist.id) { mutableStateOf(false) }
+    var providerLoadingMore by remember(initialPlaylist.id) { mutableStateOf(false) }
+    var providerPageError by remember(initialPlaylist.id) { mutableStateOf<String?>(null) }
+    var providerLoadGeneration by remember(initialPlaylist.id) { mutableStateOf(0) }
     var errorMessage by remember(initialPlaylist.id) { mutableStateOf<String?>(null) }
     var searchQuery by remember(initialPlaylist.id) { mutableStateOf("") }
     var showPlaylistActions by remember(initialPlaylist.id) { mutableStateOf(false) }
@@ -2292,6 +2332,9 @@ private fun MeloXPlaylistDetailScreen(
     }
 
     suspend fun refreshPlaylist() {
+        providerLoadGeneration++
+        providerHasMore = false
+        providerPageError = null
         loading = true
         errorMessage = null
         if (providedSongs != null) {
@@ -2350,10 +2393,15 @@ private fun MeloXPlaylistDetailScreen(
             }
             runCatching {
                 withContext(Dispatchers.IO) {
-                    capability.loadAllPlaylistTracks(providerPlaylist, pageSize = 200)
+                    if (pagedBilibiliPlaylist) capability.playlistDetail(providerPlaylist, page = 1, pageSize = 20)
+                    else capability.loadAllPlaylistTracks(providerPlaylist, pageSize = 200)
                 }
             }.onSuccess { providerDetail ->
                 detail = MeloXLegacyUiBridge.playlistDetail(providerDetail)
+                if (pagedBilibiliPlaylist) {
+                    providerPage = 1
+                    providerHasMore = providerDetail.hasMore ?: (providerDetail.tracks.size.toLong() < (providerDetail.total ?: 0L))
+                }
             }.onFailure { errorMessage = it.message ?: "歌单加载失败" }
         } else {
             runCatching { client.playlistDetail(initialPlaylist.id) }
@@ -2364,6 +2412,31 @@ private fun MeloXPlaylistDetailScreen(
                 .onFailure { errorMessage = it.message ?: "歌单加载失败" }
         }
         loading = false
+    }
+
+    suspend fun loadNextProviderPage() {
+        val playlist = providerPlaylist ?: return
+        val capability = providerPlaylistCapability ?: return
+        if (!pagedBilibiliPlaylist || loading || providerLoadingMore || !providerHasMore) return
+        val generation = providerLoadGeneration
+        providerLoadingMore = true
+        providerPageError = null
+        try {
+            val nextPage = providerPage + 1
+            val next = withContext(Dispatchers.IO) { capability.playlistDetail(playlist, page = nextPage, pageSize = 20) }
+            if (generation != providerLoadGeneration) return
+            val mapped = MeloXLegacyUiBridge.playlistDetail(next)
+            val merged = (detail?.songs.orEmpty() + mapped.songs).distinctBy { it.id }
+            detail = mapped.copy(songs = merged)
+            providerPage = nextPage
+            providerHasMore = next.hasMore ?: next.tracks.isNotEmpty()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (generation == providerLoadGeneration) providerPageError = error.message ?: "下一页加载失败"
+        } finally {
+            providerLoadingMore = false
+        }
     }
 
     LaunchedEffect(initialPlaylist.id, providerPlaylist?.id, providedSongs) {
@@ -2383,6 +2456,12 @@ private fun MeloXPlaylistDetailScreen(
     }
 
     val displayed = detail?.summary ?: initialPlaylist
+    // 只有网易云本源歌单才可能走服务端「云端随机」；专辑/第三方源保留本地随机。
+    val cloudPlaylistId = if (isAlbum || providerPlaylist != null) {
+        null
+    } else {
+        displayed.id.takeIf { it > 0L }
+    }
     val songs = detail?.songs.orEmpty()
     val ownedPlaylistId = displayed.id.takeIf {
         !isAlbum &&
@@ -2674,6 +2753,7 @@ private fun MeloXPlaylistDetailScreen(
                                 context = context,
                                 songs = filteredSongs,
                                 onFailure = { errorMessage = it.message ?: "播放失败" },
+                                playlistId = cloudPlaylistId,
                             )
                         },
                         onShuffle = {
@@ -2682,6 +2762,7 @@ private fun MeloXPlaylistDetailScreen(
                                 songs = filteredSongs,
                                 shuffle = true,
                                 onFailure = { errorMessage = it.message ?: "播放失败" },
+                                playlistId = cloudPlaylistId,
                             )
                         },
                         isSaved = isSaved == true,
@@ -2792,7 +2873,7 @@ private fun MeloXPlaylistDetailScreen(
                             )
                         }
                     }
-                    filteredSongs.isEmpty() -> item {
+                    filteredSongs.isEmpty() && !providerHasMore -> item {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2818,6 +2899,7 @@ private fun MeloXPlaylistDetailScreen(
                                     songs = filteredSongs,
                                     selectedSongId = song.id,
                                     onFailure = { errorMessage = it.message ?: "播放失败" },
+                                    playlistId = cloudPlaylistId,
                                 )
                             },
                             onMore = {
@@ -2878,6 +2960,25 @@ private fun MeloXPlaylistDetailScreen(
                                 thickness = 0.6.dp,
                                 color = foreground.copy(alpha = 0.12f),
                             )
+                        }
+                    }
+                }
+                if (pagedBilibiliPlaylist && providerHasMore && !loading) {
+                    item(key = "provider-playlist-next-page", span = { GridItemSpan(maxLineSpan) }) {
+                        LaunchedEffect(providerPage) {
+                            if (providerPageError == null) loadNextProviderPage()
+                        }
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (providerLoadingMore) CircularProgressIndicator(color = foreground)
+                            providerPageError?.let { message ->
+                                Text(message, color = secondary, textAlign = TextAlign.Center)
+                                Text("重试加载下一页", color = foreground,
+                                    modifier = Modifier.clickable { scope.launch { loadNextProviderPage() } }.padding(8.dp))
+                            }
                         }
                     }
                 }
@@ -3452,7 +3553,7 @@ private fun glassColor(foreground: Color): Color =
 
 @Composable
 private fun MeloXPlayGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val path = Path().apply {
             moveTo(size.width * 0.24f, size.height * 0.12f)
             lineTo(size.width * 0.86f, size.height * 0.50f)
@@ -3465,7 +3566,7 @@ private fun MeloXPlayGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXPlusGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.11f
         val half = size.width * 0.30f
         drawLine(color, Offset(center.x - half, center.y), Offset(center.x + half, center.y), strokeWidth = stroke, cap = StrokeCap.Round)
@@ -3475,7 +3576,7 @@ private fun MeloXPlusGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXCheckGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.13f
         val p = Path().apply {
             moveTo(size.width * 0.22f, size.height * 0.53f)
@@ -3488,7 +3589,7 @@ private fun MeloXCheckGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXBackGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.14f
         val p = Path().apply {
             moveTo(size.width * 0.67f, size.height * 0.14f)
@@ -3501,7 +3602,7 @@ private fun MeloXBackGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXSearchGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.11f
         drawCircle(
             color = color,
@@ -3521,7 +3622,7 @@ private fun MeloXSearchGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXShareGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.09f
         drawRoundRect(
             color = color,
@@ -3548,7 +3649,7 @@ private fun MeloXShareGlyph(modifier: Modifier, color: Color) {
 
 @Composable
 private fun MeloXShuffleGlyph(modifier: Modifier, color: Color) {
-    Canvas(modifier) {
+    Canvas(modifier.meloXIconDrawingScale()) {
         val stroke = size.minDimension * 0.095f
         val top = Path().apply {
             moveTo(size.width * 0.10f, size.height * 0.28f)

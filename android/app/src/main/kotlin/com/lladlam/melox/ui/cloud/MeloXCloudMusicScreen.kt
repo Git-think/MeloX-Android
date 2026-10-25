@@ -96,6 +96,7 @@ fun MeloXCloudMusicScreen(
     var searchReloadToken by remember { mutableIntStateOf(0) }
     var pendingDelete by remember { mutableStateOf<MeloXCloudSong?>(null) }
     var uploading by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableStateOf<Float?>(null) }
     var uploadError by remember { mutableStateOf<String?>(null) }
 
     fun applyPage(page: MeloXCloudPage, append: Boolean) {
@@ -175,14 +176,21 @@ fun MeloXCloudMusicScreen(
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             uploading = true
+            uploadProgress = 0f
             error = null
-            runCatching { client.uploadCloudSong(app, uri) }
+            runCatching {
+                client.uploadCloudSong(app, uri) { sent, total ->
+                    if (total > 0L) uploadProgress = (sent.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                }
+            }
                 .onSuccess {
+                    uploadProgress = 1f
                     refresh()
                     if (query.isNotBlank()) loadRemainingForSearch()
                 }
                 .onFailure { uploadError = it.message ?: app.getString(R.string.cloud_upload_failed) }
             uploading = false
+            uploadProgress = null
         }
     }
 
@@ -368,9 +376,22 @@ fun MeloXCloudMusicScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                val progress = uploadProgress
+                                if (progress != null) {
+                                    CircularProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                }
                                 Text(
-                                    stringResource(R.string.cloud_uploading),
+                                    if (progress != null) {
+                                        stringResource(R.string.cloud_upload_percent, (progress * 100).toInt())
+                                    } else {
+                                        stringResource(R.string.cloud_uploading)
+                                    },
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f),
                                 )
                             }

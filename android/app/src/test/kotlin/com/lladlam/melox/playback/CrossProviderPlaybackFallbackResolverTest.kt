@@ -23,15 +23,15 @@ class CrossProviderPlaybackFallbackResolverTest {
     @Test
     fun resolvesOnlyStrictFullPlaybackMatch() {
         val wrong = track(MusicSource.QQMusic, artist = "Other Artist")
-        val exact = track(MusicSource.Kugou)
+        val exact = track(MusicSource.Bilibili)
         val resolver = resolver(
             FakeProvider(MusicSource.QQMusic, listOf(wrong), playable = true),
-            FakeProvider(MusicSource.Kugou, listOf(exact), playable = true),
+            FakeProvider(MusicSource.Bilibili, listOf(exact), playable = true),
         )
 
         val result = resolver.resolve(request())
 
-        assertEquals(MusicSource.Kugou, result?.source)
+        assertEquals(MusicSource.Bilibili, result?.source)
         assertEquals(exact.id.value, result?.resourceId)
         assertEquals("https://audio.example/${exact.id.value}", result?.url)
     }
@@ -41,8 +41,8 @@ class CrossProviderPlaybackFallbackResolverTest {
         val resolver = resolver(
             FakeProvider(MusicSource.QQMusic, listOf(track(MusicSource.QQMusic)), playable = false),
             FakeProvider(
-                MusicSource.Kugou,
-                listOf(track(MusicSource.Kugou, artist = "Other Artist")),
+                MusicSource.Bilibili,
+                listOf(track(MusicSource.Bilibili, artist = "Other Artist")),
                 playable = true,
             ),
         )
@@ -57,12 +57,12 @@ class CrossProviderPlaybackFallbackResolverTest {
             artist = "Primary Artist",
         )
         val exact = track(
-            source = MusicSource.Kugou,
+            source = MusicSource.Bilibili,
             artists = listOf("Primary Artist", "Guest"),
         )
         val resolver = resolver(
             FakeProvider(MusicSource.QQMusic, listOf(partialArtists), playable = true),
-            FakeProvider(MusicSource.Kugou, listOf(exact), playable = true),
+            FakeProvider(MusicSource.Bilibili, listOf(exact), playable = true),
         )
 
         val result = resolver.resolve(
@@ -72,7 +72,7 @@ class CrossProviderPlaybackFallbackResolverTest {
             ),
         )
 
-        assertEquals(MusicSource.Kugou, result?.source)
+        assertEquals(MusicSource.Bilibili, result?.source)
         assertEquals(exact.id.value, result?.resourceId)
     }
 
@@ -91,20 +91,20 @@ class CrossProviderPlaybackFallbackResolverTest {
     @Test
     fun remotePolicyExcludesDisabledProviderAndControlsOrder() {
         val qq = track(MusicSource.QQMusic)
-        val kugou = track(MusicSource.Kugou)
+        val bilibili = track(MusicSource.Bilibili)
         val resolver = CrossProviderPlaybackFallbackResolver(
             enabledProvider = { true },
             registryProvider = {
                 MusicProviderRegistry(
                     listOf(
                         FakeProvider(MusicSource.QQMusic, listOf(qq), playable = true),
-                        FakeProvider(MusicSource.Kugou, listOf(kugou), playable = true),
+                        FakeProvider(MusicSource.Bilibili, listOf(bilibili), playable = true),
                     ),
                 )
             },
             fallbackConfigProvider = {
                 MeloXRemoteConfigDefaults.Config.fallback.copy(
-                    order = listOf("kugou", "qq_music", "bilibili"),
+                    order = listOf("bilibili", "qq_music"),
                     disabledProviders = setOf("qq_music"),
                 )
             },
@@ -112,7 +112,7 @@ class CrossProviderPlaybackFallbackResolverTest {
 
         val result = resolver.resolve(request())
 
-        assertEquals(MusicSource.Kugou, result?.source)
+        assertEquals(MusicSource.Bilibili, result?.source)
     }
 
     @Test
@@ -121,6 +121,13 @@ class CrossProviderPlaybackFallbackResolverTest {
             listOf("Primary Artist", "Guest"),
             CrossProviderPlaybackFallbackResolver.splitArtists("Primary Artist / Guest"),
         )
+    }
+
+    @Test
+    fun retiredStandardKugouIsIgnoredEvenWhenRemotePolicyListsIt() {
+        val standard = FakeProvider(MusicSource.Kugou, listOf(track(MusicSource.Kugou)), playable = true)
+        assertNull(resolver(standard).resolve(request()))
+        assertEquals(0, standard.searchCount)
     }
 
     private fun resolver(vararg providers: MusicProvider) = CrossProviderPlaybackFallbackResolver(

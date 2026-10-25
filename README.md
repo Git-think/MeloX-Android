@@ -29,15 +29,15 @@ The **Windows** and **Linux** editions are in their final verification stage. If
 
 > MeloX Android is an unofficial open-source project. It is not affiliated with, partnered with, or authorized by NetEase Cloud Music, Xiaomi, Apple, or their related companies.
 
-## Current version: 0.6.5
+## Current version: 0.7.0
 
-`0.6.5` (versionCode **24**, 2026-10-18) adds configurable split-screen layouts, independent Dock / mini-player placement, shared multi-provider actions, and YouTube Music account and library improvements. It also restores application language selection, fixes lyric translation language routing, and retains the signed hot-update channel.
+`0.7.0` (versionCode **25**, 2026-10-25) adds the Qishui music provider, LAN Together / DLNA / MiPlay casting, and experimental USB audio output, while reworking playback fallbacks, Kugou Lite daily rewards and lyric romanization.
 
-- Split-screen is enabled by default. In **Settings → General**, place the Dock and mini player independently at the bottom-left, bottom-right, top-left, top-right, or vertically along either screen edge. Matching positions retain linked scroll-collapse behaviour; separate positions stay expanded.
-- Search, collection details, song menus and downloads use each provider's actual capabilities. YouTube Music adds channel switching, editable-playlist filtering and continuation paging, with fixes for request region and browser-session authentication.
-- All music sources use the same lyric-loading pipeline, including matching, bindings, caching and translation-language preferences. Language changes reload the current track; immersive bottom-area taps reveal controls without seeking.
+- Qishui Music supports Douyin QR sign-in, recommendations, search, playlists, lyrics and playback. LAN Together now coordinates queue and seek changes; DLNA and MiPlay expose discovery and playback sessions; USB output is available as an experimental UAC1 path.
+- Playback resolves the current source first, then a strict full-audio match from another built-in source (NetEase, QQ Music, Kugou Lite, Qishui, Kuwo, Bilibili), and only then configured CHKSZ/LX resolvers. Bilibili collected folders use the correct endpoints and page lazily.
+- Kugou Lite checks in automatically once a day for both free-listening and concept VIP rewards. First-run onboarding is now a four-step full-screen flow, the privacy policy and disclaimer are version 1.3, lyric romanization stays under each visual line with per-unit alignment, and the update dialog stays inside screen safe areas.
 
-- Download and full notes: [GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/v0.6.5)
+- Download and full notes: [GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.7.0)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
@@ -80,7 +80,7 @@ Root is not required. Platform extras use standard Android or OEM APIs and degra
 - Charts, home recommendations, daily recommendations, private FM, and heart mode;
 - Podcast home, categories, subscriptions, and episode details;
 - NetEase cloud drive read, search, upload, playback, and delete;
-- Multi-select download, per-download quality, offline lyrics, auto cache, and storage repair;
+- Multi-select download, per-download quality, offline lyrics, auto cache, storage repair, and pause / resume;
 - App-private offline copies, optional MediaStore export, and a local library by song, artist, album, and folder;
 - Play directly from the library or search results;
 - Library-wide search across songs, playlists, albums, artists, and recent playback.
@@ -99,7 +99,10 @@ Root is not required. Platform extras use standard Android or OEM APIs and degra
 - AutoMix dual-player preload, analysis, transition planning, tempo matching, fades, and EQ envelope;
 - 10-band equalizer from 31 Hz to 16 kHz, presets, system or player volume, and a sleep timer;
 - Shared-element player transitions, expand and collapse, and landscape player;
-- Tap the now-playing title for a glass menu to open the artist, album, or current queue.
+- Tap the now-playing title for a glass menu to open the artist, album, or current queue;
+- Lyrics picture-in-picture with previous / play-pause / next remote actions.
+- In-app playback device picker for the phone speaker, Bluetooth, wired and USB outputs.
+- Nearby MeloX over LAN: control, cast (MeloX PCM), transfer, and listen together; see `docs/MELOX-LAN.md`.
 
 ### Quality
 
@@ -126,7 +129,8 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Apple Music trailing scroll, bounce, blur, highlight, long-tone, and refresh-rate settings;
 - EVA layouts and 18 TextPV templates;
 - Skyline landscape lyrics;
-- System media lyrics, a dedicated lyric notification, and a draggable floating lyric window.
+- System media lyrics, a dedicated lyric notification, and a draggable floating lyric window;
+- ColorOS lockscreen lyrics (`lyricInfo`) and SuperLyricApi publishing share the same lyric timeline.
 
 ### HyperOS
 
@@ -139,7 +143,7 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Listen Together rooms, members, progress, and queue sync;
 - Contacts, conversations, text messages, and in-app sharing;
 - Microphone recording, NetEase audio fingerprinting, and continuous recognition;
-- First-run welcome and account pages, in-app release notes, sponsor acknowledgements, clipboard link detection, page ordering, and feature switches;
+- First-run welcome and account pages, in-app release notes, in-app log viewer, sponsor acknowledgements, clipboard link detection, page ordering, and feature switches;
 - GitHub version check, update prompt, license, and settings reset.
 
 ### Third-party music sources
@@ -151,11 +155,11 @@ The playable quality depends on the track, account entitlement, region, and the 
 - vivo devices automatically try OriginOS Atomic Island. There is no separate switch. Unsupported devices keep the standard Android media notification. The adapter uses the documented local `notification.superx.*` extras and does not depend on EMAS push.
 - LX Music compatible JavaScript sources can be imported and resolved in a restricted QuickJS runtime.
 - A Meting API server (metowolf/Meting compatible) can be configured as the default third-party resolver for NetEase, QQ Music, and Kugou tracks; the CHKSZ resolver from earlier releases is still available as an optional API key resolver. Enter the Meting server base URL (and auth token if required), or a CHKSZ API key, under Music Services. Resolution order: Meting → CHKSZ → UNM → LX scripts.
-- If third-party resolution fails, playback falls back to the platform's native player. Lyrics still use MeloX's own lyric path.
+- Playback order is: the current source → a strict full-audio match from another built-in source (only when "fetch unavailable resources from other platforms" is on) → configured third-party resolvers (only when that switch and its agreement are on). If every stage fails, the track is reported as unavailable instead of playing a preview.
 
 ## Platform scope
 
-iOS Live Activity and Dynamic Island map to the Android media notification, lyric notification, and optional HyperOS Focus Notification. iOS picture-in-picture lyrics map to the Android floating lyric window. Apple Watch, watchOS, and macOS targets are not part of the Android APK.
+iOS Live Activity and Dynamic Island map to the Android media notification, lyric notification, and optional HyperOS Focus Notification. iOS picture-in-picture lyrics map to Android's native picture-in-picture window, with the draggable floating lyric window as a fallback. Apple Watch, watchOS, and macOS targets are not part of the Android APK.
 
 Liquid Glass uses Kyant0 `AndroidLiquidGlass` Backdrop. The result still depends on the Android version, GPU, and OEM compositor.
 
@@ -222,10 +226,21 @@ Some RuntimeShader and Backdrop effects need a newer Android version. Older vers
 5. Output:
 
    ```text
-   android/app/build/outputs/apk/debug/app-debug.apk
+    android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+    android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
    ```
 
 GitHub Actions builds a debug APK when `main` changes. Development APKs published to users are signed with the project release key and attached to the matching GitHub Release.
+
+## Experimental CLI
+
+Enable **Settings → Experimental features → CLI mode** to control playback over ADB:
+
+```bash
+python3 tools/melox_cli.py --package com.lladlam.melox.android.dev status
+```
+
+Supports playback controls, queue/status queries, seeking, volume, shuffle/repeat, and provider search/play. See [CLI documentation](docs/CLI.md) for setup and commands.
 
 ## Release signature
 
@@ -280,7 +295,10 @@ MeloX Android comes from the MeloX Android migration and also uses or references
 - `librespot-java` — Spotify session, playback, and offline cache. Apache License 2.0.
 - [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — anonymous YouTube Music search and stream URLs. GPL-3.0.
 - [Metrolist InnerTube](https://github.com/mostafaalagamy/Metrolist) — signed-in YouTube Music catalog, library, and playlists. GPL-3.0, vendored at `android/innertube/`.
-- [Miuix](https://github.com/compose-miuix-ui/miuix) — current Backdrop / Blur experiment uses `miuix-blur`. Apache License 2.0.
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) — on-device AutoSync lyric-alignment inference. MIT.
+- [QuickJS Android](https://github.com/HarlonWang/quickjs-wrapper) — isolated runtime for LX Music-compatible source scripts. See the wrapper and QuickJS licenses.
+- [ZXing](https://github.com/zxing/zxing) — QR-code generation. Apache License 2.0.
+- [Shizuku](https://github.com/RikkaApps/Shizuku) — optional non-root HyperOS compatibility integration. Apache License 2.0.
 
 ### Liquid Glass
 
@@ -292,9 +310,17 @@ The glass effect is still experimental.
 
 ### API and UI references
 
+- [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — Qishui Music native API, QR sign-in, catalog, lyric, and playback-field reference. MIT; scope and validation: [QISHUI.md](docs/QISHUI.md).
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — Mei-based Apple Music style NetEase client used as a UI reference.
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API reference.
 - [bromothymolb/bilibili-api-zoku](https://github.com/bromothymolb/bilibili-api-zoku) — Bilibili API reference.
+- [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) — KuGou Lite protocol, request signing, daily VIP claims, and upgrade parameters. MIT; implementation notes: [KUGOU-LITE.md](docs/KUGOU-LITE.md).
+- [MoeKoeMusic/MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic) — desktop KuGou Lite account and daily-VIP flow reference. GPL-2.0.
+- [MoeKoeMusic/MoeKoeMusic-mobile](https://github.com/MoeKoeMusic/MoeKoeMusic-mobile) — mobile sign-in flow and activity-result handling reference. GPL-2.0. The MoeKoe projects were used for behavioural reference; their code and UI assets were not copied.
+- [lladlam/Square](https://github.com/lladlam/Square) — Spotify / YouTube Music dual-backend architecture reference.
+- [lladlam/MeloX-AutoSync](https://github.com/lladlam/MeloX-AutoSync) — local word-level lyric alignment and pronunciation-mapping reference; see the bundled component notices for individual licenses.
+- [neteasecloudmusicapienhanced/api-enhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced) — song recognition and audio-fingerprint runtime reference.
+- [mjhydri/BeatNet](https://github.com/mjhydri/BeatNet) — AutoMix beat, downbeat, and tempo analysis. CC BY 4.0.
 
 ### Upstream MeloX references
 
@@ -358,6 +384,7 @@ Thank you to the following sponsors for supporting MeloX Android!
 | Afdian user\_26d40 | CNY 50 |
 | Afdian user\_aec4c | CNY 6 (monthly) |
 | Bai | CNY 5 |
+| 中末 | CNY 8.88 |
 
 ## Links
 

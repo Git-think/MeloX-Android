@@ -41,7 +41,9 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.lladlam.melox.core.provider.kugou.KugouLiteApiClient
 import com.lladlam.melox.core.provider.kugou.KugouLoginClient
+import com.lladlam.melox.core.provider.kugou.KugouPlatform
 import com.lladlam.melox.core.provider.kugou.KugouQrLoginSession
 import com.lladlam.melox.core.provider.kugou.KugouQrLoginState
 import com.lladlam.melox.core.provider.kugou.KugouSessionStore
@@ -55,12 +57,16 @@ fun KugouLoginScreen(
     onDismiss: () -> Unit,
     onLoggedIn: () -> Unit,
     targetSlot: PlaybackAccountSlot = PlaybackAccountSlot.Main,
+    lite: Boolean = false,
 ) {
     val activityContext = LocalContext.current
     val context = activityContext.applicationContext
-    val client = remember {
+    val client = remember(lite) {
         KugouLoginClient(
-            sessionProvider = { KugouSessionStore.read(context) },
+            sessionProvider = {
+                if (lite) KugouSessionStore.readLite(context) else KugouSessionStore.read(context)
+            },
+            platform = if (lite) KugouPlatform.Lite else KugouPlatform.Standard,
         )
     }
     var qrSession by remember { mutableStateOf<KugouQrLoginSession?>(null) }
@@ -92,14 +98,44 @@ fun KugouLoginScreen(
                     return@LaunchedEffect
                 }
                 is KugouQrLoginState.Authorized -> {
-                    KugouSessionStore.updateLogin(
-                        context = context,
-                        token = state.token,
-                        userId = state.userId,
-                        vipToken = state.vipToken,
-                        vipType = state.vipType,
-                        playback = targetSlot == PlaybackAccountSlot.Playback,
-                    )
+                    if (lite) {
+                        KugouSessionStore.updateLiteLogin(
+                            context = context,
+                            token = state.token,
+                            userId = state.userId,
+                            vipToken = state.vipToken,
+                            vipType = state.vipType,
+                        )
+                        // Fetch the account auth and concept-VIP state once so the
+                        // first song can use the authorized URL path immediately.
+                        runCatching {
+                            KugouLiteApiClient(
+                                sessionProvider = { KugouSessionStore.readLite(context) },
+                                persistAuth = { auth ->
+                                    KugouSessionStore.updateLiteEntitlements(context, auth = auth)
+                                },
+                                persistVip = { vip ->
+                                    KugouSessionStore.updateLiteEntitlements(
+                                        context = context,
+                                        vipType = vip.vipType,
+                                        vipExpiresAtEpochSeconds = vip.expiresAtEpochSeconds,
+                                        superVip = vip.superVip,
+                                        vipActive = vip.isVip,
+                                        freeListenEligible = vip.freeListen,
+                                    )
+                                },
+                            ).vipStatus(force = true)
+                        }
+                    } else {
+                        KugouSessionStore.updateLogin(
+                            context = context,
+                            token = state.token,
+                            userId = state.userId,
+                            vipToken = state.vipToken,
+                            vipType = state.vipType,
+                            playback = targetSlot == PlaybackAccountSlot.Playback,
+                        )
+                    }
                     stateText = activityContext.getString(R.string.account_login_success)
                     onLoggedIn()
                     return@LaunchedEffect
@@ -137,7 +173,10 @@ fun KugouLoginScreen(
                 color = Color(0xFFFF3147),
                 fontSize = 16.sp,
             )
-            Text(stringResource(R.string.account_login_kugou), fontSize = 17.sp)
+            Text(
+                stringResource(if (lite) R.string.account_login_kugou_lite else R.string.account_login_kugou),
+                fontSize = 17.sp,
+            )
             Text(stringResource(R.string.action_cancel), modifier = Modifier.padding(8.dp), color = Color.Transparent, fontSize = 16.sp)
         }
 

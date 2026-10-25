@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Canvas
@@ -24,12 +25,14 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Offset
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -40,6 +43,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.res.painterResource
 import com.lladlam.melox.R
 import com.lladlam.melox.ui.animation.MeloXMotion
+
+private const val MeloXIconVisualScale = 0.83f
+
+/** Shrinks icon ink while preserving its original layout and touch bounds. */
+internal fun Modifier.meloXIconDrawingScale(): Modifier = drawWithContent {
+    val pivot = Offset(size.width / 2f, size.height / 2f)
+    withTransform({ scale(MeloXIconVisualScale, MeloXIconVisualScale, pivot) }) {
+        this@drawWithContent.drawContent()
+    }
+}
 
 /**
  * Semantic icon inventory aligned with SF Symbols names. The bundled SF font is
@@ -192,6 +205,7 @@ fun MeloXSymbolIcon(
     iconSize: TextUnit = 24.sp,
     contentDescription: String? = null,
 ) {
+    val iconModifier = modifier.meloXIconDrawingScale()
     // Brand overrides: these SF Symbol glyphs are replaced by traced vectors.
     //   Settings  -> the MeloX chainring disc instead of the SF gear.
     //   Microphone-> ic_melox_mic, extracted from the same `mic` glyph with its
@@ -201,18 +215,35 @@ fun MeloXSymbolIcon(
     // every 听歌识曲 entry (search field + Home quick action card) gets the
     // sealed-off microphone without any change at the call sites.
     when (symbol) {
+        MeloXSymbol.Circle -> {
+            val density = LocalDensity.current
+            val diameter = with(density) { iconSize.toPx() }
+            Canvas(
+                modifier = iconModifier.semantics {
+                    contentDescription?.let { this.contentDescription = it }
+                },
+            ) {
+                val stroke = diameter * .065f
+                drawCircle(
+                    color = color,
+                    radius = ((diameter * .42f) - stroke / 2f).coerceAtLeast(0f),
+                    style = Stroke(width = stroke),
+                )
+            }
+            return
+        }
         MeloXSymbol.Settings -> {
             Icon(
                 painter = painterResource(R.drawable.ic_melox_brand_gear),
                 contentDescription = contentDescription,
-                modifier = modifier,
+                modifier = iconModifier,
                 tint = color,
             )
             return
         }
         MeloXSymbol.Microphone -> {
             MicrophoneVectorIcon(
-                modifier = modifier,
+                modifier = iconModifier,
                 color = color,
                 iconSize = iconSize,
                 contentDescription = contentDescription,
@@ -221,7 +252,7 @@ fun MeloXSymbolIcon(
         }
         MeloXSymbol.Plus -> {
             PlusVectorIcon(
-                modifier = modifier,
+                modifier = iconModifier,
                 color = color,
                 iconSize = iconSize,
                 contentDescription = contentDescription,
@@ -230,7 +261,7 @@ fun MeloXSymbolIcon(
         }
         MeloXSymbol.Star -> {
             StarVectorIcon(
-                modifier = modifier,
+                modifier = iconModifier,
                 color = color,
                 iconSize = iconSize,
                 contentDescription = contentDescription,
@@ -246,7 +277,7 @@ fun MeloXSymbolIcon(
             // ⚠ 保持横向 `…` 形态，不改成竖向：原版横向省略号在 vivo 上本就显示正常，
             // 问题只在部分机型三点被算得参差，故矢量必须沿用横向排布、只把三点画整齐。
             MoreVerticalVectorIcon(
-                modifier = modifier,
+                modifier = iconModifier,
                 color = color,
                 contentDescription = contentDescription,
             )
@@ -261,7 +292,7 @@ fun MeloXSymbolIcon(
             //   `iconSize` 下都与原字体字形同光学尺寸。
             PlaybackModeVectorIcon(
                 symbol = symbol,
-                modifier = modifier,
+                modifier = iconModifier,
                 color = color,
                 iconSize = iconSize,
                 contentDescription = contentDescription,
@@ -279,7 +310,7 @@ fun MeloXSymbolIcon(
     }
     SfGlyphIcon(
         codePoint = codePoint,
-        modifier = modifier,
+        modifier = iconModifier,
         color = color,
         iconSize = iconSize,
         contentDescription = contentDescription,

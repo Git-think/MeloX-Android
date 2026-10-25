@@ -1,10 +1,6 @@
 package com.lladlam.melox.ui.player
 
-import android.content.Context
-import android.content.Intent
-import android.media.MediaRouter2
 import android.os.Build
-import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -102,6 +98,7 @@ import com.lladlam.melox.ui.glass.meloXLiquidButton
 import com.lladlam.melox.ui.glass.MeloXPlaybackModeGlyph
 import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
+import com.lladlam.melox.ui.glass.meloXIconDrawingScale
 import com.lladlam.melox.platform.MeloXVolumeKeyBridge
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.settings.MeloXVolumeControlMode
@@ -199,10 +196,11 @@ internal fun MeloXNowPlayingCoreControls(
 }
 
 @Composable
-private fun SceneProgressControl(
+internal fun SceneProgressControl(
     state: MeloXPlaybackUiState,
     onShowQuality: () -> Unit,
     modifier: Modifier = Modifier,
+    showQuality: Boolean = true,
 ) {
     val displayedDurationMs = if (state.isInTransition && state.incomingDurationMs > 0L) {
         state.incomingDurationMs
@@ -292,7 +290,7 @@ private fun SceneProgressControl(
                 fontWeight = FontWeight.Medium,
             )
 
-            if (MeloXSettingsRuntime.showPlayerQualityTip) {
+            if (showQuality && MeloXSettingsRuntime.showPlayerQualityTip) {
                 SceneQualityChip(
                     state = state,
                     onShowQuality = onShowQuality,
@@ -1242,7 +1240,7 @@ internal fun ScenePageSelector(
             enabled = true,
             compact = compact,
             useVectorGlyphs = useVectorGlyphs,
-            onClick = { showSystemAudioOutputSwitcher(context) },
+            onClick = { state.showOutputPicker = true },
         )
 
         Box {
@@ -1309,26 +1307,12 @@ private fun ScenePlaybackModeBadge(
         repeatMode == 1 -> MeloXSymbol.RepeatOne
         else -> MeloXSymbol.Repeat
     }
-    MeloXPlaybackModeGlyph(symbol = symbol, size = size, modifier = modifier, color = color)
-}
-
-private fun showSystemAudioOutputSwitcher(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        // ⚠ `MediaRouter2.getInstance()` 的文档明确它**可能返回 null**（设备上没有可用的
-        //   路由服务时）。旧写法直接链式 `.showSystemOutputSwitcher()` ⇒ 在 API 34+ 的
-        //   （也就是能跑液态玻璃的）机型上偶发 NPE 闪退，且整个函数在点击音频输出按钮的
-        //   **唯一路径**上，没有上层 try/catch 接得住。
-        val router = runCatching { MediaRouter2.getInstance(context) }.getOrNull()
-        val shown = router != null &&
-            runCatching { router.showSystemOutputSwitcher() }.getOrDefault(false)
-        if (shown) return
-    }
-    runCatching {
-        context.startActivity(
-            Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
+    MeloXPlaybackModeGlyph(
+        symbol = symbol,
+        size = size,
+        modifier = modifier.meloXIconDrawingScale(),
+        color = color,
+    )
 }
 
 @Composable
@@ -1376,7 +1360,7 @@ private fun ScenePageButton(
             .semantics {
                 contentDescription = when (kind) {
                     SceneGlyphKind.Lyrics -> "歌词"
-                    SceneGlyphKind.AirPlay -> "AirPlay"
+                    SceneGlyphKind.AirPlay -> "播放设备"
                     SceneGlyphKind.Queue -> "接下来播放"
                     else -> kind.name
                 }
@@ -1669,7 +1653,7 @@ private fun SceneCupertinoGlyph(
     compact: Boolean = false,
 ) {
     if (useVectorGlyphs && kind in VECTOR_GLYPHS) {
-        Canvas(modifier = modifier) {
+        Canvas(modifier = modifier.meloXIconDrawingScale()) {
             val w = size.width
             val h = size.height
             when (kind) {
@@ -1806,7 +1790,7 @@ private fun SceneCupertinoGlyph(
         )
         return
     }
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.meloXIconDrawingScale()) {
         val w = size.width
         val h = size.height
         val min = size.minDimension

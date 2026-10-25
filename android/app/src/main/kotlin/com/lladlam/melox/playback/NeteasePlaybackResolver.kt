@@ -12,7 +12,11 @@ import com.lladlam.melox.core.audio.MeloXPlaybackUnavailableException
 import com.lladlam.melox.core.audio.NeteaseQualityClient
 import com.lladlam.melox.core.audio.NeteasePlaybackUnavailableException
 import com.lladlam.melox.core.music.model.AudioQualityTier
+import com.lladlam.melox.core.music.model.MusicArtistRef
 import com.lladlam.melox.core.music.model.MusicResourceId
+import com.lladlam.melox.core.music.model.MusicSource
+import com.lladlam.melox.core.music.model.MusicTrack
+import com.lladlam.melox.core.music.model.ProviderTrackMetadata
 import com.lladlam.melox.core.network.NeteaseSearchClient
 import com.lladlam.melox.core.music.provider.PlaybackAccountStore
 import java.io.IOException
@@ -29,13 +33,9 @@ class NeteasePlaybackResolver(
     private val localSourceProvider: (Long) -> Uri? = { null },
     private val providerLocalSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val crossProviderFallback: CrossProviderPlaybackFallbackResolver? = null,
-    private val metingPlayback: MetingPlaybackResolver? = null,
-    private val chkszPlayback: ChkszPlaybackResolver? = null,
-    private val lxUserPlayback: LxUserPlaybackResolver? = null,
-    private val unmPlayback: UnmPlaybackResolver? = null,
     private val providerPlaybackEnabled: (com.lladlam.melox.core.music.model.MusicSource) -> Boolean = { true },
     private val thirdPartySourcesEnabled: () -> Boolean = { true },
-    private val thirdPartyOnlyForMembership: () -> Boolean = { false },
+    private val thirdPartyResolver: ThirdPartyPlaybackResolver? = null,
 ) : ResolvingDataSource.Resolver {
     private data class ResolveKey(
         val songId: Long,
@@ -78,6 +78,8 @@ class NeteasePlaybackResolver(
 
     private val qualityClient = NeteaseQualityClient(cookieProvider = cookieProvider)
 
+    private val fallbackChain = PlaybackFallbackChain(crossProviderFallback, thirdPartyResolver)
+
     @Volatile
     private var providerDelegate: ProviderPlaybackResolver? = null
 
@@ -102,7 +104,7 @@ class NeteasePlaybackResolver(
             songId = songId,
             quality = quality,
             cookieHeader = cookieHeader,
-            fallbackIdentity = crossProviderFallback?.cacheIdentity().orEmpty(),
+            fallbackIdentity = fallbackChain.cacheIdentity(),
             metadataIdentity = fallbackRequest?.let {
                 "${it.title}\u001f${it.artist}\u001f${it.durationMs.orZero()}"
             }.orEmpty(),
@@ -120,18 +122,55 @@ class NeteasePlaybackResolver(
             }
         }
         return try {
-            // 「遇到会员歌曲时再调用」关闭 ⇒ 第三方优先（含网易云曲目）：先向
-            // Meting / CHKSZ / UNM / LX 要一次链接，拿到即用，官方接口不再请求；
-            // 开启 ⇒ 官方优先，第三方只在官方明确失败后兜底。
-            val thirdPartyFirst = thirdPartySourcesEnabled() && !thirdPartyOnlyForMembership()
-            val resolved = if (thirdPartyFirst) {
-                resolveThirdParty(songId, fallbackRequest, quality)?.also {
+            val thirdPartyTried = thirdPartySourcesEnabled() && thirdPartyResolver?.shouldResolveFirst() == true
+            val thirdParty = if (thirdPartyTried) {
+                thirdPartyResolver?.resolve(fallbackTrack(songId, fallbackRequest), quality.toCommonTier(), false)
+            } else null
+            val resolved = thirdParty?.let {
+                if (quality == MusicQualityRuntime.selected) {
+                    CrossProviderPlaybackRuntime.clear(songId)
+                }
+                ResolvedRequest(
+                    uri = Uri.parse(it.url),
+                    headers = it.requestHeaders,
+                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
+                    cacheIdentity = "third:${it.sourceLabel}",
+                )
+            } ?: try {
+                val source = qualityClient.playbackSourceBlocking(
+                    songId = songId,
+                    requestedQuality = quality,
+                )
+                if (quality == MusicQualityRuntime.selected) {
+                    CrossProviderPlaybackRuntime.clear(songId)
+                }
+                ResolvedRequest(
+                    uri = Uri.parse(source.url),
+                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
+                )
+            } catch (error: NeteasePlaybackUnavailableException) {
+                val track = fallbackTrack(songId, fallbackRequest)
+                // The terminal NetEase failure covers membership/rights/region,
+                // so it counts as a membership failure for the third-party switch.
+                val fallback = fallbackChain.resolve(
+                    track, quality.toCommonTier(), membershipFailure = true, thirdPartyTried = thirdPartyTried,
+                ) ?: throw error
+                fallback.crossProvider?.let { cross ->
+                    MusicQualityRuntime.recordActual(
+                        songId = songId,
+                        requested = quality,
+                        actual = cross.actualQuality.toMusicQuality(quality),
+                    )
                     if (quality == MusicQualityRuntime.selected) {
-                        CrossProviderPlaybackRuntime.clear(songId)
+                        CrossProviderPlaybackRuntime.record(songId, cross.source)
                     }
-                } ?: resolveOfficialSource(songId, quality, fallbackRequest, thirdPartyTried = true)
-            } else {
-                resolveOfficialSource(songId, quality, fallbackRequest, thirdPartyTried = false)
+                }
+                ResolvedRequest(
+                    uri = Uri.parse(fallback.url),
+                    headers = fallback.requestHeaders,
+                    expiresAtEpochMs = fallback.expiresAtEpochMs ?: System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
+                    cacheIdentity = fallback.cacheIdentity,
+                )
             }
             synchronized(cacheLock) {
                 recentFailures.remove(key)
@@ -150,121 +189,6 @@ class NeteasePlaybackResolver(
         } finally {
             inFlight.remove(key, pending)
         }
-    }
-
-    /**
-     * 官方（含跨平台兜底）解析。[thirdPartyTried] 为 true 时失败后不再重复调用
-     * 第三方链（第三方优先模式里前面已经试过一次）。
-     */
-    private fun resolveOfficialSource(
-        songId: Long,
-        quality: MusicQuality,
-        fallbackRequest: CrossProviderFallbackRequest?,
-        thirdPartyTried: Boolean,
-    ): ResolvedRequest = try {
-        val source = qualityClient.playbackSourceBlocking(
-            songId = songId,
-            requestedQuality = quality,
-        )
-        if (quality == MusicQualityRuntime.selected) {
-            CrossProviderPlaybackRuntime.clear(songId)
-        }
-        // 网易云直链约 20 分钟有效：缓存 20 分钟，过期后重新解析，避免拿到失效链接。
-        ResolvedRequest(
-            uri = Uri.parse(source.url),
-            expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-        )
-    } catch (error: NeteasePlaybackUnavailableException) {
-        val fallback = fallbackRequest
-            ?.copy(quality = quality.toCommonTier())
-            ?.let { crossProviderFallback?.resolve(it) }
-        if (fallback != null) {
-            MusicQualityRuntime.recordActual(
-                songId = songId,
-                requested = quality,
-                actual = fallback.actualQuality.toMusicQuality(quality),
-            )
-            if (quality == MusicQualityRuntime.selected) {
-                CrossProviderPlaybackRuntime.record(songId, fallback.source)
-            }
-            ResolvedRequest(
-                uri = Uri.parse(fallback.url),
-                headers = fallback.requestHeaders,
-                expiresAtEpochMs = fallback.expiresAtEpochMs,
-                cacheIdentity = "${fallback.source.storageValue}:${fallback.resourceId}",
-            )
-        } else if (thirdPartyTried) {
-            // 第三方优先模式下前面已经试过一次，避免重复请求。
-            throw error
-        } else {
-            resolveThirdParty(songId, fallbackRequest, quality) ?: throw error
-        }
-    }
-
-    /**
-     * 第三方解析链（Meting → CHKSZ → UNM 解灰 → LX 脚本）。
-     * 「第三方音乐源」开启且「遇到会员歌曲时再调用」关闭时在官方之前优先调用；
-     * 开启时只作为官方 + 跨平台兜底失败后的最后兜底。未配置的解析器直接返回 null。
-     */
-    private fun resolveThirdParty(
-        songId: Long,
-        fallbackRequest: CrossProviderFallbackRequest?,
-        quality: MusicQuality,
-    ): ResolvedRequest? {
-        if (!thirdPartySourcesEnabled()) return null
-        val commonQuality = quality.toCommonTier()
-        runCatching { metingPlayback?.resolve(songId, commonQuality) }
-            .onFailure { Log.w(TAG, "Meting fallback failed song=$songId error=${it.javaClass.simpleName}") }
-            .getOrNull()?.let { result ->
-                Log.i(TAG, "Resolve success song=$songId stage=meting")
-                return ResolvedRequest(
-                    uri = Uri.parse(result.url),
-                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-                    cacheIdentity = "meting:${metingPlayback?.cacheIdentity().orEmpty()}",
-                )
-            }
-        runCatching { chkszPlayback?.resolve(songId, commonQuality) }
-            .onFailure { Log.w(TAG, "CHKSZ fallback failed song=$songId error=${it.javaClass.simpleName}") }
-            .getOrNull()?.let { result ->
-                Log.i(TAG, "Resolve success song=$songId stage=chksz")
-                return ResolvedRequest(
-                    uri = Uri.parse(result.url),
-                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-                    cacheIdentity = "chksz:${chkszPlayback?.cacheIdentity().orEmpty()}",
-                )
-            }
-        runCatching { unmPlayback?.resolve(songId) }
-            .onFailure { Log.w(TAG, "UNM fallback failed song=$songId error=${it.javaClass.simpleName}") }
-            .getOrNull()?.let { result ->
-                Log.i(TAG, "Resolve success song=$songId stage=unm")
-                return ResolvedRequest(
-                    uri = Uri.parse(result.url),
-                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-                    cacheIdentity = "unm:${unmPlayback?.cacheIdentity().orEmpty()}",
-                )
-            }
-        fallbackRequest?.let { request ->
-            runCatching {
-                lxUserPlayback?.resolve(
-                    songId = request.songId,
-                    title = request.title,
-                    artist = request.artist,
-                    durationMs = request.durationMs,
-                    quality = request.quality,
-                )
-            }
-                .onFailure { Log.w(TAG, "LX fallback failed song=$songId error=${it.javaClass.simpleName}") }
-                .getOrNull()?.let { result ->
-                    Log.i(TAG, "Resolve success song=$songId stage=lx script=${result.sourceId}")
-                    return ResolvedRequest(
-                        uri = Uri.parse(result.url),
-                        headers = result.requestHeaders,
-                        expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-                        cacheIdentity = "lx-user:${result.sourceId}",
-                    )
-                }
-        }
-        return null
     }
 
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
@@ -339,7 +263,7 @@ class NeteasePlaybackResolver(
         songId = songId,
         quality = quality,
         cookieHeader = cookieHeader,
-        fallbackIdentity = crossProviderFallback?.cacheIdentity().orEmpty(),
+        fallbackIdentity = fallbackChain.cacheIdentity(),
         metadataIdentity = fallbackRequest?.let {
             "${it.title}\u001f${it.artist}\u001f${it.durationMs.orZero()}"
         }.orEmpty(),
@@ -370,6 +294,25 @@ class NeteasePlaybackResolver(
         }
     }
 
+    /**
+     * Third-party stage for a legacy NetEase song. CHKSZ resolves by song ID;
+     * LX scripts use their own source selection and may also match by metadata.
+     */
+    private fun fallbackTrack(
+        songId: Long,
+        request: CrossProviderFallbackRequest?,
+    ): MusicTrack {
+        return MusicTrack(
+            id = MusicResourceId(MusicSource.Netease, songId.toString()),
+            title = request?.title.orEmpty(),
+            artists = request?.artist.orEmpty()
+                .let(CrossProviderPlaybackFallbackResolver::splitArtists)
+                .map { MusicArtistRef(name = it) },
+            durationMs = request?.durationMs,
+            providerMetadata = ProviderTrackMetadata.Netease(songId),
+        )
+    }
+
     /** 命中冷却期内的失败则原样抛出；过期则清除。 */
     private fun recentFailure(key: ResolveKey): Throwable? = synchronized(cacheLock) {
         val recent = recentFailures[key] ?: return@synchronized null
@@ -391,12 +334,9 @@ class NeteasePlaybackResolver(
                 localSourceProvider = providerLocalSourceProvider,
                 authKeyProvider = ProviderPlaybackRuntime::authKey,
                 providerPlaybackEnabled = providerPlaybackEnabled,
-                metingPlayback = metingPlayback,
-                chkszPlayback = chkszPlayback,
-                lxUserPlayback = lxUserPlayback,
-                unmPlayback = unmPlayback,
                 thirdPartySourcesEnabled = thirdPartySourcesEnabled,
-                thirdPartyOnlyForMembership = thirdPartyOnlyForMembership,
+                crossProviderFallback = crossProviderFallback,
+                thirdPartyResolver = thirdPartyResolver,
             ).also { providerDelegate = it }
         }
     }
@@ -414,8 +354,6 @@ class NeteasePlaybackResolver(
 
         /** 「音源不可用」失败的冷却时长：重试期间不重复跑整条降级链。 */
         private const val FAILURE_COOLDOWN_MS = 15_000L
-
-        /** 网易云直链有效期约 20 分钟：解析结果最多缓存 20 分钟，过期后重新解析。 */
         private const val DIRECT_LINK_TTL_MS = 20 * 60 * 1_000L
 
         private fun playbackCacheKey(

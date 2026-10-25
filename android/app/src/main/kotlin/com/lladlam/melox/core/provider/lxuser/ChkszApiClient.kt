@@ -53,7 +53,7 @@ class ChkszApiClient(
         }
         val url = buildUrl(endpoint, params, key) ?: return null
         val request = Request.Builder().url(url)
-            .header("User-Agent", "MeloX/0.4.5")
+            .header("User-Agent", "MeloX/Android")
             .header("Accept", "application/json, text/plain, */*")
             .build()
         // CHKSZ is a best-effort fallback: a failing base URL must not break playback.

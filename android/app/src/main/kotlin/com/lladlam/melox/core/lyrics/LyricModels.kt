@@ -65,6 +65,16 @@ data class LyricLine(
     val accompaniment: List<LyricAccompaniment> = emptyList(),
 )
 
+/** Paragraph/line markers can precede both voices; compare actual vocal onsets. */
+internal fun LyricAccompaniment.precedesLead(line: LyricLine): Boolean {
+    fun vocalStart(syllables: List<LyricSyllable>, fallback: Long): Long =
+        syllables.asSequence()
+            .filter { it.text.isNotBlank() && it.startTimeMs >= 0L && it.endTimeMs > it.startTimeMs }
+            .minOfOrNull { it.startTimeMs } ?: fallback
+
+    return vocalStart(syllables, timeMs) < vocalStart(line.syllables, line.timeMs)
+}
+
 data class LyricsDocument(
     val lines: List<LyricLine>,
     val source: LyricSource = LyricSource.Local,

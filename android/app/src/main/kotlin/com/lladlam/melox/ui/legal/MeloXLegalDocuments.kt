@@ -47,7 +47,7 @@ import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSymbolIcon
 import com.lladlam.melox.ui.glass.MeloXSystemColors
 
-const val MELOX_LEGAL_VERSION = "1.2-2026-08-27"
+const val MELOX_LEGAL_VERSION = "1.3-2026-10-25"
 
 enum class MeloXLegalDocument(
     val titleRes: Int,

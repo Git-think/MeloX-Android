@@ -46,6 +46,9 @@ object ProviderPlaybackRuntime {
             MusicSource.Kugou -> PlaybackAccountStore.kugouSession(context).let { session ->
                 listOf(session.userId, session.token, session.vipToken, session.dfid).joinToString("|")
             }
+            MusicSource.KugouLite -> KugouSessionStore.readLite(context).let { session ->
+                listOf(session.userId, session.token, session.vipToken, session.dfid, session.auth).joinToString("|")
+            }
             MusicSource.AppleMusic -> AppleMusicSessionStore.read(context).let { session ->
                 listOf(session.developerToken, session.musicUserToken, session.storefront).joinToString("|")
             }
@@ -60,6 +63,7 @@ object ProviderPlaybackRuntime {
                 listOf(session.serverUrl, session.accessToken, session.userId).joinToString("|")
             }
             MusicSource.Local -> "local"
+            MusicSource.Qishui -> com.lladlam.melox.core.provider.qishui.QishuiSessionStore.read(context).sessionId
         }
         return MessageDigest.getInstance("SHA-256").digest(credential.toByteArray())
             .joinToString("") { "%02x".format(it) }

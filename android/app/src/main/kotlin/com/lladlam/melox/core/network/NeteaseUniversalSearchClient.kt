@@ -19,7 +19,12 @@ import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okio.Buffer
+import okio.BufferedSink
+import okio.ForwardingSource
+import okio.source
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -171,7 +176,11 @@ class NeteaseUniversalSearchClient(
         }
     }
 
-    suspend fun uploadCloudSong(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
+    suspend fun uploadCloudSong(
+        context: Context,
+        uri: Uri,
+        onProgress: (sentBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
+    ) = withContext(Dispatchers.IO) {
         val cookie = cookieProvider()
         if (!NeteaseSessionStore.containsMusicU(cookie)) throw IOException("请先登录网易云音乐")
         val resolver = context.contentResolver
@@ -290,7 +299,11 @@ class NeteaseUniversalSearchClient(
                 // audio/mpeg, independent of the local container type.
                 val encodedKey = encodeCloudNosObjectKey(objectKey)
                 val uploadUrl = "${uploadHost.trimEnd('/')}/$bucket/$encodedKey?offset=0&complete=true&version=1.0"
-                val requestBody = temporary.asRequestBody("audio/mpeg".toMediaType())
+                val totalBytes = temporary.length()
+                val requestBody = CountingRequestBody(
+                    temporary,
+                    "audio/mpeg".toMediaType(),
+                ) { sent -> onProgress(sent, totalBytes) }
                 val uploadRequest = Request.Builder().url(uploadUrl)
                     .header("x-nos-token", token)
                     .header("Content-MD5", md5)
@@ -707,3 +720,37 @@ class NeteaseUniversalSearchClient(
  */
 internal fun encodeCloudNosObjectKey(objectKey: String): String =
     URLEncoder.encode(objectKey, Charsets.UTF_8.name()).replace("+", "%20")
+
+/**
+ * Streams a request body while reporting byte progress. Progress is emitted
+ * at most every 64 KiB so the cloud-drive UI can show a live percentage
+ * without recomposing on every buffer.
+ */
+internal class CountingRequestBody(
+    private val file: java.io.File,
+    private val contentType: okhttp3.MediaType?,
+    private val onProgress: (Long) -> Unit,
+) : RequestBody() {
+    override fun contentType() = contentType
+    override fun contentLength(): Long = file.length()
+
+    override fun writeTo(sink: BufferedSink) {
+        val total = contentLength()
+        val streaming = object : ForwardingSource(file.source()) {
+            private var sent = 0L
+            private var lastNotified = 0L
+            override fun read(sink2: Buffer, byteCount: Long): Long {
+                val read = super.read(sink2, byteCount)
+                if (read > 0) {
+                    sent += read
+                    if (sent - lastNotified >= 64L * 1024L || (total > 0 && sent >= total)) {
+                        lastNotified = sent
+                        runCatching { onProgress(sent) }
+                    }
+                }
+                return read
+            }
+        }
+        sink.writeAll(streaming)
+    }
+}

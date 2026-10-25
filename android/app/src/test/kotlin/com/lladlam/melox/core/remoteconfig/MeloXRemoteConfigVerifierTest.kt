@@ -15,7 +15,7 @@ class MeloXRemoteConfigVerifierTest {
         assertEquals(2, verified.config.configVersion)
         assertTrue(verified.config.appliesTo(11))
         assertFalse(verified.config.appliesTo(21))
-        assertEquals(listOf("qq_music", "kugou", "bilibili"), verified.config.fallback.order)
+        assertEquals(MeloXRemoteConfigDefaults.FallbackOrder, verified.config.fallback.order)
     }
 
     @Test(expected = IllegalArgumentException::class)

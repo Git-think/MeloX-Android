@@ -70,7 +70,8 @@ internal suspend fun shareLyricImage(
         }
         MeloXPlayerBackgroundMode.CustomImage -> {
             canvas.drawColor(Color.rgb(28, 28, 30))
-            MeloXCustomBackgroundStore.decodeSampled(MeloXSettingsRuntime.customBackgroundPath, width)?.let { source ->
+            val custom = MeloXCustomBackgroundStore.decodeSampled(MeloXSettingsRuntime.customBackgroundPath, width)
+            (custom ?: cover)?.let { source ->
                 drawCenterCrop(canvas, source, RectF(0f, 0f, width.toFloat(), height.toFloat()), 145)
             }
         }

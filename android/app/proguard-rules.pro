@@ -37,6 +37,13 @@
 -keepclassmembers class ai.onnxruntime.** { *; }
 -dontwarn ai.onnxruntime.**
 
+# SuperLyricApi talks to an optional system service through a hidden API that
+# only exists at runtime on the device; the class itself is fine.
+-dontwarn android.os.ServiceManager
+# The SDK is an inter-app contract (other lyric apps discover these classes),
+# so keep it intact through R8.
+-keep class com.hchen.superlyricapi.** { *; }
+
 # Rhino JS engine references desktop APIs that are unavailable on Android.
 -dontwarn java.beans.BeanDescriptor
 -dontwarn java.beans.BeanInfo

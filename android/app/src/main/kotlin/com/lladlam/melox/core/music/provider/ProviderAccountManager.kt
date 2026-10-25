@@ -11,6 +11,7 @@ import com.lladlam.melox.core.provider.bilibili.BilibiliSessionStore
 import com.lladlam.melox.core.provider.spotify.SpotifySessionStore
 import com.lladlam.melox.core.provider.jellyfin.JellyfinSessionStore
 import com.lladlam.melox.core.provider.youtubemusic.YouTubeSessionStore
+import com.lladlam.melox.core.provider.qishui.QishuiSessionStore
 
 /**
  * Small provider-neutral account facade used by settings/experience UI.
@@ -57,6 +58,14 @@ class ProviderAccountManager(
                 accountId = session.userId.takeIf { it > 0L }?.toString(),
             )
         }
+        MusicSource.KugouLite -> {
+            val session = KugouSessionStore.readLite(appContext)
+            AccountState(
+                source = source,
+                loggedIn = session.isLoggedIn,
+                accountId = session.userId.takeIf { it > 0L }?.toString(),
+            )
+        }
         MusicSource.Kuwo -> {
             val session = KuwoSessionStore.read(appContext)
             AccountState(
@@ -87,6 +96,9 @@ class ProviderAccountManager(
             AccountState(source, session.isLoggedIn, session.userName.takeIf(String::isNotBlank))
         }
         MusicSource.Local -> AccountState(source = source, loggedIn = true, accountId = "local")
+        MusicSource.Qishui -> QishuiSessionStore.read(appContext).let { session ->
+            AccountState(source, session.isLoggedIn, session.userId.takeIf(String::isNotBlank))
+        }
     }
 
     fun allStates(): List<AccountState> = MusicSource.entries.map(::state)
@@ -103,6 +115,7 @@ class ProviderAccountManager(
 
             MusicSource.QQMusic -> QQMusicSessionStore.clear(appContext, clearWebCookies = true)
             MusicSource.Kugou -> KugouSessionStore.clearLogin(appContext)
+            MusicSource.KugouLite -> KugouSessionStore.clearLiteLogin(appContext)
             MusicSource.Kuwo -> KuwoSessionStore.clear(appContext)
             MusicSource.AppleMusic -> AppleMusicSessionStore.clear(appContext)
             MusicSource.Bilibili -> BilibiliSessionStore.clear(appContext, clearWebCookies = true)
@@ -110,6 +123,7 @@ class ProviderAccountManager(
             MusicSource.YouTubeMusic -> YouTubeSessionStore.clear(appContext)
             MusicSource.Jellyfin -> JellyfinSessionStore.clear(appContext)
             MusicSource.Local -> Unit
+            MusicSource.Qishui -> QishuiSessionStore.clear(appContext)
         }
     }
 

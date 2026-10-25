@@ -84,6 +84,7 @@ object TrackAggregation {
             com.lladlam.melox.core.music.model.MusicSource.QQMusic -> 5
             com.lladlam.melox.core.music.model.MusicSource.Netease -> 3
             com.lladlam.melox.core.music.model.MusicSource.Kugou -> 2
+            com.lladlam.melox.core.music.model.MusicSource.KugouLite -> 2
             com.lladlam.melox.core.music.model.MusicSource.Kuwo -> 2
             com.lladlam.melox.core.music.model.MusicSource.AppleMusic -> 4
             com.lladlam.melox.core.music.model.MusicSource.Bilibili -> 1
@@ -93,6 +94,7 @@ object TrackAggregation {
             com.lladlam.melox.core.music.model.MusicSource.YouTubeMusic -> 0
             com.lladlam.melox.core.music.model.MusicSource.Jellyfin -> 0
             com.lladlam.melox.core.music.model.MusicSource.Local -> 0
+            com.lladlam.melox.core.music.model.MusicSource.Qishui -> 0
         }
         return AggregatedTrackCandidate(track, identity, version, quality, sourceBonus, identity + version + quality + sourceBonus, "版本 ${key.version} · ${track.id.source.displayName}")
     }

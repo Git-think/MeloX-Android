@@ -20,13 +20,20 @@ object MusicProviderSelectionStore {
     fun visibleSources(): List<MusicSource> =
         MusicSource.entries.filter { source ->
             source != MusicSource.AppleMusic &&
+                source != MusicSource.Kugou &&
                 source != MusicSource.Kuwo
         }
 
     fun selectedSource(context: Context): MusicSource {
         val preferences = context.applicationContext
             .getSharedPreferences(PreferencesName, Context.MODE_PRIVATE)
-        return MusicSource.fromStorageValue(preferences.getString(KeySelectedSource, null))
+        val stored = MusicSource.fromStorageValue(preferences.getString(KeySelectedSource, null))
+        if (stored == MusicSource.Kugou) {
+            // Switch only the selected source; standard and Lite credentials remain isolated.
+            preferences.edit().putString(KeySelectedSource, MusicSource.KugouLite.storageValue).apply()
+            return MusicSource.KugouLite
+        }
+        return stored
             .takeIf { it in visibleSources() }
             ?: MusicSource.Netease
     }
@@ -35,7 +42,7 @@ object MusicProviderSelectionStore {
         context.applicationContext
             .getSharedPreferences(PreferencesName, Context.MODE_PRIVATE)
             .edit()
-            .putString(KeySelectedSource, source.storageValue)
+            .putString(KeySelectedSource, (if (source == MusicSource.Kugou) MusicSource.KugouLite else source).storageValue)
             .apply()
     }
 
@@ -88,7 +95,8 @@ object MusicProviderSelectionStore {
     fun setUnifiedSources(context: Context, sources: Set<MusicSource>) {
         // An empty whitelist is normalized back to the current provider so a
         // single switch can never accidentally turn into an "all providers" request.
-        val safeSources = sources.ifEmpty { setOf(selectedSource(context)) }
+        val safeSources = sources.filterTo(linkedSetOf()) { it in visibleSources() }
+            .ifEmpty { setOf(selectedSource(context)) }
         context.applicationContext
             .getSharedPreferences(PreferencesName, Context.MODE_PRIVATE)
             .edit()

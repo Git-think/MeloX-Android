@@ -18,9 +18,6 @@ import com.lladlam.melox.core.provider.spotify.SpotifyTrackMatcher
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigDefaults
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteFallbackConfig
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
@@ -62,6 +59,9 @@ internal data class CrossProviderFallbackRequest(
     val artist: String,
     val durationMs: Long?,
     val quality: AudioQualityTier,
+    /** Source that just failed. It is skipped so we never retry the same provider. */
+    val source: MusicSource = MusicSource.Netease,
+    val resourceId: String = songId.toString(),
 )
 
 internal data class CrossProviderFallbackResult(
@@ -103,6 +103,7 @@ class CrossProviderPlaybackFallbackResolver(
         val order = fallbackConfig.order.withIndex().associate { (index, source) -> source to index }
         val providers = registryProvider()?.providers.orEmpty()
             .filter(::isEligibleFallbackProvider)
+            .filterNot { it.source == request.source }
             .filterNot { it.source.storageValue in fallbackConfig.disabledProviders }
             .sortedBy { order[it.source.storageValue] ?: Int.MAX_VALUE }
         if (providers.isEmpty()) {
@@ -113,59 +114,58 @@ class CrossProviderPlaybackFallbackResolver(
         val artists = splitArtists(request.artist)
         val primaryArtist = artists.firstOrNull() ?: return null
         val sourceTrack = MusicTrack(
-            id = MusicResourceId(MusicSource.Netease, request.songId.toString()),
+            id = MusicResourceId(request.source, request.resourceId),
             title = request.title,
             artists = artists.map { MusicArtistRef(name = it) },
             durationMs = request.durationMs?.takeIf { it > 0L },
             availability = TrackAvailability.Unavailable,
-            providerMetadata = ProviderTrackMetadata.Netease(request.songId),
+            providerMetadata = providerMetadata(request),
         )
         val query = "${request.title} $primaryArtist"
 
         return runBlocking(Dispatchers.IO) {
             val resolved = withTimeoutOrNull(fallbackConfig.timeoutMs.toLong()) {
-            val candidates = coroutineScope {
-                providers.map { provider ->
-                    async {
-                        val search = provider as SearchCapability
-                        runCatching { search.searchSongs(query, page = 1, pageSize = 10).items }
-                            .onSuccess { eventLogger("search ${provider.source.storageValue}: ${it.size} candidates") }
-                            .onFailure { eventLogger("search ${provider.source.storageValue} failed: ${it.javaClass.simpleName}") }
-                            .getOrDefault(emptyList())
+                // Sequential by design: the configured order is the priority.
+                // Searching every provider in parallel would let a lower-priority
+                // source win on a tie and would waste mobile data.
+                for (provider in providers) {
+                    val search = provider as SearchCapability
+                    val candidates = runCatching { search.searchSongs(query, page = 1, pageSize = 10).items }
+                        .onSuccess { eventLogger("search ${provider.source.storageValue}: ${it.size} candidates") }
+                        .onFailure { eventLogger("search ${provider.source.storageValue} failed: ${it.javaClass.simpleName}") }
+                        .getOrDefault(emptyList())
+                    val ranked = SpotifyTrackMatcher.rank(sourceTrack, candidates).let { matches ->
+                        if (sourceTrack.durationMs != null) {
+                            matches
+                        } else {
+                            // 没有时长时不能靠时长消歧，只接受歌手名单完全一致的结果。
+                            matches.filter { artistSet(sourceTrack) == artistSet(it.candidate) }
+                        }
                     }
-                }.awaitAll().flatten()
-            }
-            val ranked = SpotifyTrackMatcher.rank(sourceTrack, candidates).let { matches ->
-                if (sourceTrack.durationMs != null) {
-                    matches
-                } else {
-                    // 没有时长时不能靠时长消歧，只接受歌手名单完全一致的结果。
-                    matches.filter { artistSet(sourceTrack) == artistSet(it.candidate) }
+                    eventLogger("strict matches ${provider.source.storageValue} song=${request.songId}: ${ranked.size}")
+                    for (match in ranked) {
+                        val playback = provider as PlaybackCapability
+                        val resolution = runCatching {
+                            playback.resolvePlayback(match.candidate, request.quality)
+                        }.getOrNull()
+                        if (resolution is PlaybackResolution.Playable) {
+                            eventLogger("resolved song=${request.songId} via ${provider.source.storageValue}")
+                            return@withTimeoutOrNull CrossProviderFallbackResult(
+                                source = provider.source,
+                                resourceId = match.candidate.id.value,
+                                url = resolution.url,
+                                requestHeaders = resolution.requestHeaders,
+                                actualQuality = resolution.actualQuality ?: resolution.requestedQuality,
+                                expiresAtEpochMs = resolution.expiresAtEpochMs,
+                            )
+                        }
+                        eventLogger(
+                            "playback ${provider.source.storageValue} rejected: " +
+                                "${resolution?.javaClass?.simpleName ?: "error"}",
+                        )
+                    }
                 }
-            }
-            eventLogger("strict matches song=${request.songId}: ${ranked.size}")
-            for (match in ranked) {
-                val provider = providers.firstOrNull { it.source == match.candidate.id.source } ?: continue
-                val playback = provider as PlaybackCapability
-                val resolution = runCatching {
-                    playback.resolvePlayback(match.candidate, request.quality)
-                }.getOrNull()
-                if (resolution is PlaybackResolution.Playable) {
-                    eventLogger("resolved song=${request.songId} via ${provider.source.storageValue}")
-                    return@withTimeoutOrNull CrossProviderFallbackResult(
-                        source = provider.source,
-                        resourceId = match.candidate.id.value,
-                        url = resolution.url,
-                        requestHeaders = resolution.requestHeaders,
-                        actualQuality = resolution.actualQuality ?: resolution.requestedQuality,
-                        expiresAtEpochMs = resolution.expiresAtEpochMs,
-                    )
-                }
-                eventLogger(
-                    "playback ${provider.source.storageValue} rejected: ${resolution?.javaClass?.simpleName ?: "error"}",
-                )
-            }
-            null
+                null
             }
             if (resolved == null) eventLogger("unresolved or timed out song=${request.songId}")
             resolved
@@ -175,6 +175,14 @@ class CrossProviderPlaybackFallbackResolver(
     private fun isEligibleFallbackProvider(provider: MusicProvider): Boolean =
         provider.source in EligibleSources && provider is SearchCapability && provider is PlaybackCapability
 
+    private fun providerMetadata(request: CrossProviderFallbackRequest): ProviderTrackMetadata = when (request.source) {
+        MusicSource.Netease -> ProviderTrackMetadata.Netease(request.songId)
+        MusicSource.QQMusic -> ProviderTrackMetadata.QQMusic(request.resourceId)
+        MusicSource.Kugou, MusicSource.KugouLite -> ProviderTrackMetadata.Kugou(request.resourceId)
+        MusicSource.Kuwo -> ProviderTrackMetadata.Kuwo(request.songId)
+        else -> ProviderTrackMetadata.Empty
+    }
+
     private fun artistSet(track: MusicTrack): Set<String> = track.artists
         .map { TrackAggregation.normalizeArtist(it.name) }
         .filter(String::isNotBlank)
@@ -182,8 +190,10 @@ class CrossProviderPlaybackFallbackResolver(
 
     companion object {
         val EligibleSources = setOf(
+            MusicSource.Netease,
             MusicSource.QQMusic,
-            MusicSource.Kugou,
+            MusicSource.KugouLite,
+            MusicSource.Qishui,
             MusicSource.Kuwo,
             MusicSource.Bilibili,
         )

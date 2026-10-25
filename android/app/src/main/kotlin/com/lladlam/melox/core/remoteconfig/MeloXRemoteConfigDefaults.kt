@@ -10,8 +10,10 @@ object MeloXRemoteConfigDefaults {
         "spotify_oauth",
         "cross_provider_fallback",
     )
-    val AllowedProviders = setOf("qq_music", "kugou", "bilibili")
-    val FallbackOrder = listOf("qq_music", "kugou", "bilibili")
+    val AllowedProviders = setOf("netease", "qq_music", "kugou_lite", "qishui", "kuwo", "bilibili")
+
+    /** Non-NetEase sources are tried after the current source, in this order. */
+    val FallbackOrder = listOf("netease", "qq_music", "kugou_lite", "qishui", "kuwo", "bilibili")
     val Strategies = mapOf(
         "netease_playback" to "v1",
         "qq_playback" to "v1",

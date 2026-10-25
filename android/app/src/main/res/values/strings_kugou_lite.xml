@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="account_login_kugou_lite">Sign in to Kugou Lite</string>
+    <string name="provider_switch_kugou_lite">Clears the Lite user session (Lite tokens are separate from Kugou Music) and scans again</string>
+    <string name="settings_kugou_lite">Kugou Lite</string>
+    <string name="provider_kugou_lite_daily_vip">Claim today\'s KuGou Lite VIP</string>
+    <string name="provider_kugou_lite_daily_vip_subtitle">Official daily activity; only runs when you tap claim</string>
+    <string name="provider_kugou_lite_daily_vip_body">This calls KuGou\'s official daily VIP activity once. It is never automatic, and it can fail if the activity is closed, the account is not eligible, or the daily quota is used.</string>
+    <string name="provider_kugou_lite_daily_vip_claim">Claim once</string>
+    <string name="provider_kugou_lite_daily_vip_done">The request was accepted. Check the VIP status later; the official service decides eligibility.</string>
+    <string name="provider_kugou_lite_daily_vip_failed">Claim failed</string>
+</resources>

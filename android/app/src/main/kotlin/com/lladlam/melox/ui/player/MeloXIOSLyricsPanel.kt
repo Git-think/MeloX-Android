@@ -1,5 +1,7 @@
 package com.lladlam.melox.ui.player
 
+import com.lladlam.melox.core.lyrics.precedesLead
+
 import android.content.Context
 import android.content.Intent
 import android.graphics.BlurMaskFilter
@@ -34,8 +36,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -96,6 +96,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -113,6 +114,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.LayoutDirection
 import com.lladlam.melox.core.lyrics.LyricHighlightStrategy
 import com.lladlam.melox.core.lyrics.LyricLine
+import com.lladlam.melox.core.lyrics.LyricSyllable
 import com.lladlam.melox.core.lyrics.LyricTimelineProcessor
 import com.lladlam.melox.core.lyrics.LyricRomanizationAligner
 import com.lladlam.melox.core.lyrics.LyricsDocument
@@ -1455,8 +1457,9 @@ private fun MeloXUpstreamLyricLine(
         MeloXLyricsRenderingQuality.Balanced -> requestedBlur * .55f
         MeloXLyricsRenderingQuality.High -> requestedBlur
     }
-    val accompanimentBefore = line.accompaniment.filter { it.timeMs < line.timeMs }
-    val accompanimentAfter = line.accompaniment.filterNot { it.timeMs < line.timeMs }
+    val (accompanimentBefore, accompanimentAfter) = remember(line) {
+        line.accompaniment.partition { it.precedesLead(line) }
+    }
 
     Column(
         modifier = Modifier
@@ -1480,7 +1483,7 @@ private fun MeloXUpstreamLyricLine(
         accompanimentBefore.forEach { vocal ->
             MeloXTimedAccompaniment(vocal, playbackTimeProvider, fontScale, reduceMotion, renderingQuality, effectiveBlur)
         }
-        if (showRomanization) {
+        if (reserveRomanization) {
             MeloXRubyLyricText(
                 line = line,
                 playbackTimeProvider = playbackTimeProvider,
@@ -1489,8 +1492,12 @@ private fun MeloXUpstreamLyricLine(
                 // 60 Hz even though their visual result did not change.
                 supportsTimedLyrics = supportsTimedLyrics,
                 fontScale = fontScale,
+                reduceMotion = reduceMotion,
+                timingEffectsStrength = timingEffectsStrength,
+                unplayedAlpha = timedUnplayedAlpha,
                 renderingQuality = renderingQuality,
                 softBlurDp = effectiveBlur,
+                showRuby = showRomanization,
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
@@ -1513,12 +1520,6 @@ private fun MeloXUpstreamLyricLine(
 
         accompanimentAfter.forEach { vocal ->
             MeloXTimedAccompaniment(vocal, playbackTimeProvider, fontScale, reduceMotion, renderingQuality, effectiveBlur)
-        }
-
-        val romanSize = max(UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricRomanizationFontScale, 13f)
-        if (!showRomanization && reserveRomanization) {
-            val romanHeight = with(LocalDensity.current) { (romanSize * 1.2f).sp.toDp() }
-            Spacer(Modifier.height(romanHeight + UpstreamLyrics.ANNOTATION_SPACING_DP.dp))
         }
 
         val translationSize = max(UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricTranslationFontScale, 13f)
@@ -1586,126 +1587,312 @@ private fun MeloXTimedAccompaniment(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MeloXRubyLyricText(
     line: LyricLine,
     playbackTimeProvider: () -> Long,
     supportsTimedLyrics: Boolean,
     fontScale: Float,
+    reduceMotion: Boolean,
+    timingEffectsStrength: Float,
+    unplayedAlpha: Float,
     renderingQuality: MeloXLyricsRenderingQuality,
     softBlurDp: Float = 0f,
+    showRuby: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    if (MeloXSettingsRuntime.lyricWordByWordEnabled) {
-        Column(modifier = modifier) {
-            MeloXGlyphLyricText(
-                line = line,
-                playbackTimeProvider = playbackTimeProvider,
-                supportsTimedLyrics = supportsTimedLyrics,
-                fontScale = fontScale,
-                reduceMotion = false,
-                timingEffectsStrength = 1f,
-                renderingQuality = renderingQuality,
-                softBlurDp = softBlurDp,
-                modifier = Modifier.fillMaxWidth(),
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val useSystemFont = MeloXSettingsRuntime.lyricSystemFontEnabled
+    val fontTypeface = remember(useSystemFont) {
+        if (useSystemFont) Typeface.DEFAULT
+        else ResourcesCompat.getFont(context, R.font.mi_lan_pro) ?: Typeface.DEFAULT
+    }
+    val measureStyle = TextStyle(
+        fontFamily = if (useSystemFont) FontFamily.Default else MeloXLanTingProFontFamily,
+        fontSize = (UpstreamLyrics.FONT_SIZE_SP * fontScale).sp,
+        fontWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight,
+        textAlign = if (line.agent?.alignment == com.lladlam.melox.core.lyrics.LyricAgentAlignment.Flipped) {
+            TextAlign.End
+        } else {
+            TextAlign.Start
+        },
+    )
+    val textMeasurer = rememberTextMeasurer(cacheSize = 16)
+    val romanSize = max(
+        UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricRomanizationFontScale,
+        13f,
+    )
+    BoxWithConstraints(modifier = modifier) {
+        val widthPx = with(density) { maxWidth.roundToPx().coerceAtLeast(1) }
+        val layout = remember(line.text, widthPx, measureStyle) {
+            textMeasurer.measure(
+                text = AnnotatedString(line.text),
+                style = measureStyle,
+                constraints = Constraints(minWidth = widthPx, maxWidth = widthPx),
+                softWrap = true,
             )
-            if (!line.romanization.isNullOrBlank()) {
-                Text(
-                    text = line.romanization.orEmpty(),
-                    color = Color.White.copy(alpha = MeloXSettingsRuntime.lyricRomanizationOpacity),
-                 modifier = Modifier.fillMaxWidth().padding(top = UpstreamLyrics.ANNOTATION_SPACING_DP.dp),
-                     fontSize = max(
-                        UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricRomanizationFontScale,
-                        13f,
-                    ).sp,
-                    lineHeight = (
-                        max(
-                            UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricRomanizationFontScale,
-                            13f,
-                        ) * 1.2f
-                    ).sp,
-                    fontWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight,
-                    textAlign = if (line.agent?.alignment == com.lladlam.melox.core.lyrics.LyricAgentAlignment.Flipped) TextAlign.End else TextAlign.Start,
-                )
-            }
         }
-        return
-    }
-
-    val flipped = line.agent?.alignment == com.lladlam.melox.core.lyrics.LyricAgentAlignment.Flipped
-    val units = remember(line) { LyricRomanizationAligner.units(line) }
-    if (units.isEmpty()) {
-        MeloXGlyphLyricText(
-            line = line,
-            playbackTimeProvider = playbackTimeProvider,
-            supportsTimedLyrics = supportsTimedLyrics,
-            fontScale = fontScale,
-            reduceMotion = true,
-            timingEffectsStrength = 1f,
-            renderingQuality = renderingQuality,
-            softBlurDp = softBlurDp,
-            modifier = modifier,
-        )
-        return
-    }
-
-    val primarySize = UpstreamLyrics.FONT_SIZE_SP * fontScale
-    val rubySize = max(primarySize * MeloXSettingsRuntime.lyricRomanizationFontScale, 13f)
-    FlowRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(
-            2.dp,
-            alignment = if (flipped) Alignment.End else Alignment.Start,
-        ),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        units.forEach { unit ->
-            val start = unit.originalSyllables.minOfOrNull { it.startTimeMs } ?: 0L
-            val end = unit.originalSyllables.maxOfOrNull { it.endTimeMs }?.coerceAtLeast(start + 1L) ?: 1L
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = unit.originalText,
-                    color = Color.White,
-                    modifier = Modifier.graphicsLayer {
-                        alpha = if (!supportsTimedLyrics || unit.originalSyllables.isEmpty()) {
-                            1f
-                        } else {
-                            val reveal = ((playbackTimeProvider() - start).toFloat() / (end - start).toFloat())
-                                .coerceIn(0f, 1f)
-                            0.3f + reveal * 0.7f
-                        }
-                    },
-                    fontSize = primarySize.sp,
-                    lineHeight = (UpstreamLyrics.LINE_HEIGHT_SP * fontScale).sp,
-                    fontWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight,
-                    maxLines = 1,
-                    style = TextStyle(
-                        shadow = if (softBlurDp > .05f) {
-                            Shadow(Color.White.copy(alpha = .48f), Offset.Zero, softBlurDp)
-                        } else null,
-                    ),
+        // Split a wrapped lyric into its visual rows first, then render each
+        // row as its own glyph line followed by its own romanization row.
+        // This keeps every romanization locked directly under the words it
+        // belongs to instead of placing one block under the whole paragraph.
+        val segments = remember(line, layout) { splitRomanizedSegments(line, layout) }
+        Column(Modifier.fillMaxWidth()) {
+            segments.forEach { segment ->
+                MeloXGlyphLyricText(
+                    line = segment.line,
+                    playbackTimeProvider = playbackTimeProvider,
+                    supportsTimedLyrics = supportsTimedLyrics,
+                    fontScale = fontScale,
+                    reduceMotion = reduceMotion,
+                    timingEffectsStrength = timingEffectsStrength,
+                    unplayedAlpha = unplayedAlpha,
+                    renderingQuality = renderingQuality,
+                    softBlurDp = softBlurDp,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                if (!unit.romanizationText.isNullOrBlank()) {
-                    val originalUnits = unit.originalText.codePointCount(0, unit.originalText.length).coerceAtLeast(1)
-                    val rubyUnits = unit.romanizationText.codePointCount(0, unit.romanizationText.length).coerceAtLeast(1)
-                    val rubyCompression = (originalUnits * 1.85f / rubyUnits).coerceIn(.68f, 1f)
-                    Text(
-                        text = unit.romanizationText,
-                        color = Color.White.copy(alpha = MeloXSettingsRuntime.lyricRomanizationOpacity),
-                        fontSize = (rubySize * rubyCompression).sp,
-                        lineHeight = (rubySize * 1.2f).sp,
-                        fontWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight,
-                        maxLines = 1,
-                        style = TextStyle(
-                            shadow = if (softBlurDp > .05f) {
-                                Shadow(Color.White.copy(alpha = .42f), Offset.Zero, softBlurDp)
-                            } else null,
-                        ),
+                if (showRuby && segment.units.isNotEmpty()) {
+                    MeloXRomanizationRow(
+                        text = segment.line.text,
+                        units = segment.units,
+                        fontScale = fontScale,
+                        flipped = line.agent?.alignment == com.lladlam.melox.core.lyrics.LyricAgentAlignment.Flipped,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
+            if (!showRuby && !line.romanization.isNullOrBlank()) {
+                Spacer(
+                    Modifier.height(
+                        with(density) { (romanSize * 1.2f).sp.toDp() } +
+                            UpstreamLyrics.ANNOTATION_SPACING_DP.dp,
+                    ),
+                )
+            }
         }
+    }
+}
+
+/**
+ * Draws each romanization fragment centred over the exact characters it
+ * belongs to, so the annotation follows per-character alignment instead of
+ * forming one left-aligned text row.
+ */
+@Composable
+private fun MeloXRomanizationRow(
+    text: String,
+    units: List<MeloXRomanizedUnit>,
+    fontScale: Float,
+    flipped: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (units.isEmpty() || text.isEmpty()) return
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val useSystemFont = MeloXSettingsRuntime.lyricSystemFontEnabled
+    val typeface = remember(useSystemFont) {
+        if (useSystemFont) Typeface.DEFAULT
+        else ResourcesCompat.getFont(context, R.font.mi_lan_pro) ?: Typeface.DEFAULT
+    }
+    val weight = MeloXSettingsRuntime.lyricFontWeight.composeWeight
+    val measureStyle = TextStyle(
+        fontFamily = if (useSystemFont) FontFamily.Default else MeloXLanTingProFontFamily,
+        fontSize = (UpstreamLyrics.FONT_SIZE_SP * fontScale).sp,
+        fontWeight = weight,
+        textAlign = if (flipped) TextAlign.End else TextAlign.Start,
+    )
+    val textMeasurer = rememberTextMeasurer(cacheSize = 16)
+    val romanSize = max(
+        UpstreamLyrics.FONT_SIZE_SP * fontScale * MeloXSettingsRuntime.lyricRomanizationFontScale,
+        13f,
+    )
+    val spacingPx = with(density) { UpstreamLyrics.ANNOTATION_SPACING_DP.dp.toPx() }
+    val romanHeightPx = with(density) { (romanSize * 1.2f).sp.toPx() }
+    BoxWithConstraints(modifier) {
+        val widthPx = with(density) { maxWidth.roundToPx().coerceAtLeast(1) }
+        val layout = remember(text, widthPx, measureStyle) {
+            textMeasurer.measure(
+                text = AnnotatedString(text),
+                style = measureStyle,
+                constraints = Constraints(minWidth = widthPx, maxWidth = widthPx),
+                softWrap = true,
+            )
+        }
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(with(density) { (romanHeightPx + spacingPx).toDp() }),
+        ) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                textSize = with(density) { romanSize.sp.toPx() }
+                alpha = (MeloXSettingsRuntime.lyricRomanizationOpacity.coerceIn(0f, 1f) * 255f).roundToInt()
+                this.typeface = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    Typeface.create(typeface, weight.weight, false)
+                } else {
+                    Typeface.create(typeface, if (weight.weight >= 600) Typeface.BOLD else Typeface.NORMAL)
+                }
+            }
+            val metrics = paint.fontMetrics
+            val baseline = spacingPx + (romanHeightPx - (metrics.descent - metrics.ascent)) * .5f - metrics.ascent
+            val baseTextSize = with(density) { romanSize.sp.toPx() }
+            // First pass: the exact horizontal span of each unit's characters.
+            val spans = units.mapNotNull { unit ->
+                val start = unit.start.coerceIn(0, text.length)
+                val end = unit.end.coerceIn(start, text.length)
+                if (end <= start) return@mapNotNull null
+                var left = Float.MAX_VALUE
+                var right = -Float.MAX_VALUE
+                for (offset in start until end) {
+                    val box = runCatching { layout.getBoundingBox(offset) }.getOrNull() ?: continue
+                    if (!box.width.isFinite() || !box.height.isFinite()) continue
+                    left = min(left, box.left)
+                    right = max(right, box.right)
+                }
+                val center = if (right > left) {
+                    (left + right) * .5f
+                } else {
+                    runCatching { layout.getHorizontalPosition(start, true) }.getOrDefault(0f)
+                }
+                MeloXRomanizedSpan(unit.reading, left, right, center)
+            }
+            // Second pass: give every unit the space up to the midpoint of its
+            // neighbours. A reading that would enter the next unit's area is
+            // scaled down until it fits, so annotations never collide.
+            spans.forEachIndexed { index, span ->
+                val previous = spans.getOrNull(index - 1)
+                val next = spans.getOrNull(index + 1)
+                val leftLimit = previous?.let { (it.center + span.center) * .5f } ?: 0f
+                val rightLimit = next?.let { (it.center + span.center) * .5f } ?: size.width
+                val available = (rightLimit - leftLimit).coerceAtLeast(1f)
+                paint.textSize = baseTextSize
+                val naturalWidth = paint.measureText(span.reading)
+                if (naturalWidth > available) {
+                    paint.textSize = (baseTextSize * available / naturalWidth)
+                        .coerceAtLeast(baseTextSize * .35f)
+                }
+                val width = paint.measureText(span.reading)
+                val x = (span.center - width * .5f)
+                    .coerceIn(leftLimit, (rightLimit - width).coerceAtLeast(leftLimit))
+                drawContext.canvas.nativeCanvas.drawText(span.reading, x, baseline, paint)
+            }
+            paint.textSize = baseTextSize
+        }
+    }
+}
+
+private data class MeloXRomanizedSpan(
+    val reading: String,
+    val left: Float,
+    val right: Float,
+    val center: Float,
+)
+
+private data class MeloXRomanizedUnit(val start: Int, val end: Int, val reading: String)
+
+private data class MeloXRomanizedSegment(
+    val line: LyricLine,
+    val units: List<MeloXRomanizedUnit>,
+)
+
+/**
+ * Splits one logical lyric line at the same wrap boundaries measured by the
+ * glyph renderer. Each visual row keeps the original character offsets so its
+ * syllables and romanization units stay on the row where they are drawn.
+ */
+private fun splitRomanizedSegments(
+    line: LyricLine,
+    layout: TextLayoutResult,
+): List<MeloXRomanizedSegment> {
+    val text = line.text
+    if (text.isEmpty()) return listOf(MeloXRomanizedSegment(line.copy(romanization = null), emptyList()))
+
+    val syllableRanges = mutableListOf<Triple<LyricSyllable, Int, Int>>()
+    var syllableSearch = 0
+    for (syllable in line.syllables) {
+        if (syllable.text.isEmpty()) continue
+        val found = text.indexOf(syllable.text, syllableSearch)
+        if (found < 0) continue
+        syllableSearch = found + syllable.text.length
+        syllableRanges += Triple(syllable, found, found + syllable.text.length)
+    }
+    val unitRanges = mutableListOf<Triple<String, Int, Int>>()
+    var unitSearch = 0
+    for (unit in LyricRomanizationAligner.units(line)) {
+        val original = unit.originalText
+        val reading = unit.romanizationText?.trim().orEmpty()
+        if (original.isEmpty() || reading.isEmpty()) continue
+        val found = text.indexOf(original, unitSearch)
+        if (found < 0) continue
+        unitSearch = found + original.length
+        unitRanges += Triple(reading, found, found + original.length)
+    }
+    if (unitRanges.isEmpty()) {
+        line.romanization?.trim()?.takeIf(String::isNotEmpty)?.let { reading ->
+            unitRanges += Triple(reading, 0, text.length)
+        }
+    }
+
+    val segments = mutableListOf<MeloXRomanizedSegment>()
+    for (index in 0 until layout.lineCount) {
+        val start = layout.getLineStart(index)
+        val end = layout.getLineEnd(index, true).coerceAtMost(text.length)
+        if (end <= start) continue
+        val segmentText = text.substring(start, end).trimEnd()
+        if (segmentText.isEmpty()) continue
+        val syllables = syllableRanges.mapNotNull { (syllable, from, to) ->
+            val overlapStart = max(start, from)
+            val overlapEnd = min(end, to)
+            if (overlapEnd <= overlapStart) return@mapNotNull null
+            val total = (to - from).coerceAtLeast(1)
+            val duration = (syllable.endTimeMs - syllable.startTimeMs).coerceAtLeast(0L)
+            val localStart = syllable.startTimeMs + duration * (overlapStart - from) / total
+            val localEnd = syllable.startTimeMs + duration * (overlapEnd - from) / total
+            syllable.copy(
+                text = text.substring(overlapStart, overlapEnd),
+                startTimeMs = localStart,
+                endTimeMs = max(localEnd, localStart + 1L),
+            )
+        }
+        val units = unitRanges.mapNotNull { (reading, from, to) ->
+            val overlapStart = max(start, from)
+            val overlapEnd = min(end, to)
+            if (overlapEnd <= overlapStart) return@mapNotNull null
+            val fragment = if (overlapStart == from && overlapEnd == to) {
+                reading
+            } else {
+                // A unit straddles this wrap: split its reading proportionally
+                // so every visual row still gets the part that belongs to it.
+                val total = (to - from).coerceAtLeast(1)
+                val ratioStart = (overlapStart - from).toFloat() / total
+                val ratioEnd = (overlapEnd - from).toFloat() / total
+                val left = (ratioStart * reading.length).toInt().coerceIn(0, reading.length)
+                val right = (ratioEnd * reading.length).toInt().coerceIn(left, reading.length)
+                reading.substring(left, right).trim()
+            }
+            fragment.takeIf(String::isNotBlank)?.let {
+                MeloXRomanizedUnit(
+                    start = (overlapStart - start).coerceIn(0, segmentText.length),
+                    end = (overlapEnd - start).coerceIn(0, segmentText.length),
+                    reading = it,
+                )
+            }
+        }.filter { it.end > it.start }
+        segments += MeloXRomanizedSegment(
+            line.copy(
+                text = segmentText,
+                syllables = syllables,
+                translation = null,
+                romanization = null,
+                romanizationSyllables = emptyList(),
+                accompaniment = emptyList(),
+            ),
+            units,
+        )
+    }
+    return segments.ifEmpty {
+        listOf(MeloXRomanizedSegment(line.copy(romanization = null), emptyList()))
     }
 }
 
@@ -1975,9 +2162,7 @@ private fun MeloXGlyphLyricText(
                     glyphPaint.maskFilter = null
                 }
             }
-            return@BoxWithConstraints
-        }
-
+        } else {
         Canvas(Modifier.fillMaxWidth().height(height)) {
             val playbackTimeMs = playbackTimeProvider()
             val effectsStrength = if (followOwnTiming) {
@@ -2179,8 +2364,9 @@ private fun MeloXGlyphLyricText(
                 }
             }
         }
+        }
+        }
     }
-}
 
 private fun sourceGlyphTimings(
     line: LyricLine,

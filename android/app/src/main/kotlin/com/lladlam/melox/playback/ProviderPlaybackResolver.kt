@@ -34,17 +34,15 @@ class ProviderPlaybackResolver(
     private val localSourceProvider: (MusicResourceId) -> Uri? = { null },
     private val authKeyProvider: (MusicSource) -> String = { "" },
     private val providerPlaybackEnabled: (MusicSource) -> Boolean = { true },
-    private val metingPlayback: MetingPlaybackResolver? = null,
-    private val chkszPlayback: ChkszPlaybackResolver? = null,
-    private val lxUserPlayback: LxUserPlaybackResolver? = null,
-    private val unmPlayback: UnmPlaybackResolver? = null,
     private val thirdPartySourcesEnabled: () -> Boolean = { true },
-    private val thirdPartyOnlyForMembership: () -> Boolean = { false },
+    private val crossProviderFallback: CrossProviderPlaybackFallbackResolver? = null,
+    private val thirdPartyResolver: ThirdPartyPlaybackResolver? = null,
 ) : ResolvingDataSource.Resolver {
     private data class ResolveKey(
         val requestUri: String,
         val authKey: String,
         val quality: AudioQualityTier,
+        val fallbackIdentity: String,
     )
     private data class ResolvedRequest(
         val uri: Uri,
@@ -58,6 +56,8 @@ class ProviderPlaybackResolver(
             size > MAX_RESOLVED_URIS
     }
     private val inFlight = ConcurrentHashMap<ResolveKey, CompletableFuture<ResolvedRequest>>()
+
+    private val fallbackChain = PlaybackFallbackChain(crossProviderFallback, thirdPartyResolver)
 
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val uri = dataSpec.uri
@@ -79,7 +79,7 @@ class ProviderPlaybackResolver(
         if (uri.host != ProviderTrackHost) return uri
         val source = parseSource(uri) ?: return uri
         val quality = currentQuality(uri)
-        return cached(ResolveKey(uri.toString(), authKeyProvider(source), quality))?.uri ?: uri
+        return cached(ResolveKey(uri.toString(), authKeyProvider(source), quality, fallbackIdentity()))?.uri ?: uri
     }
 
     internal fun prefetch(uri: Uri) {
@@ -97,7 +97,7 @@ class ProviderPlaybackResolver(
             ?.takeIf(String::isNotBlank)
             ?: throw IOException("Invalid MeloX provider track ID: $uri")
         val quality = currentQuality(uri)
-        val key = ResolveKey(uri.toString(), authKeyProvider(source), quality)
+        val key = ResolveKey(uri.toString(), authKeyProvider(source), quality, fallbackIdentity())
         cached(key)?.let { return it }
         val pending = CompletableFuture<ResolvedRequest>()
         val existing = inFlight.putIfAbsent(key, pending)
@@ -124,14 +124,16 @@ class ProviderPlaybackResolver(
             Log.d(TAG, "resolve detail source=${source.storageValue} id=${resourceValue.take(8)} title=${track.title.take(40)} " +
                 "artists=${track.artistText.take(60)} durationMs=${track.durationMs} metadata=${track.providerMetadata.javaClass.simpleName}")
             Log.i(TAG, "Resolve start source=${source.storageValue} quality=${quality.name} thirdParty=${thirdPartySourcesEnabled()}")
-            // 「遇到会员歌曲时再调用」关闭时维持第三方优先：官方之前先试
-            // Meting（未配置时跳过）/ CHKSZ（默认关闭）/ UNM 解灰 / LX 脚本；开启时等官方明确失败后再试。
-            val allowExternalResolver = source != MusicSource.Jellyfin
-            if (allowExternalResolver && thirdPartySourcesEnabled() && !thirdPartyOnlyForMembership()) {
-                resolveThirdParty(track, quality, source)?.let { resolved ->
-                    synchronized(cacheLock) { resolvedUris[key] = resolved }
-                    pending.complete(resolved)
-                    return resolved
+            val thirdPartyTried = thirdPartySourcesEnabled() && thirdPartyResolver?.shouldResolveFirst() == true && source != MusicSource.Jellyfin
+            if (thirdPartyTried) {
+                thirdPartyResolver?.resolve(track, quality, membershipFailure = false)?.let { resolved ->
+                    val result = ResolvedRequest(
+                        uri = Uri.parse(resolved.url),
+                        headers = resolved.requestHeaders,
+                    )
+                    synchronized(cacheLock) { resolvedUris[key] = result }
+                    pending.complete(result)
+                    return result
                 }
             }
             val provider = providers.require(source)
@@ -142,18 +144,38 @@ class ProviderPlaybackResolver(
             }
 
             /**
-             * 官方音源不可用时的统一兜底入口：第三方解析（Meting / CHKSZ / UNM / LX）只在
-             * 「第三方音乐源」打开时参与；「遇到会员歌曲时再调用」开启时官方失败后
-             * 才调用它们，关闭时已经在官方之前优先尝试过，避免重复等待。
+             * Playback order: current provider → strict full-audio match from
+             * another built-in source → user-configured third-party resolvers.
+             * Already-attempted third-party sources must not run twice.
+             *
+             * The cross-provider stage only runs when the user enabled
+             * "fetch unavailable resources from other platforms"; the final
+             * stage only runs when a third-party source is configured and its
+             * consent switch is on.
              */
-            fun thirdPartyFallbackOrThrow(
+            fun fallbackOrThrow(
                 track: MusicTrack,
                 quality: AudioQualityTier,
-                source: MusicSource,
                 message: String,
+                membershipFailure: Boolean,
             ): ResolvedRequest {
-                if (source != MusicSource.Jellyfin && thirdPartySourcesEnabled() && thirdPartyOnlyForMembership()) {
-                    resolveThirdParty(track, quality, source)?.let { return it }
+                val fallback = runCatching {
+                    fallbackChain.resolve(track, quality, membershipFailure, thirdPartyTried)
+                }.onFailure { Log.w(TAG, "Playback fallback failed", it) }
+                    .getOrNull()
+                if (fallback != null) {
+                    fallback.crossProvider?.let { cross ->
+                        ProviderPlaybackQualityRuntime.recordActual(
+                            id = id,
+                            requested = quality,
+                            actual = cross.actualQuality,
+                        )
+                    }
+                    return ResolvedRequest(
+                        uri = Uri.parse(fallback.url),
+                        headers = fallback.requestHeaders,
+                        expiresAtEpochMs = fallback.expiresAtEpochMs,
+                    )
                 }
                 throw MeloXPlaybackUnavailableException(message)
             }
@@ -174,20 +196,19 @@ class ProviderPlaybackResolver(
                 //   注意 `LoginRequired` **不**归这一类 —— 登录态是全局的，一旦缺失
                 //   整队都播不了，逐个跳过只会把整个队列清空，应该保留现曲目等人处理。
                 PlaybackResolution.LoginRequired -> throw IOException("${provider.displayName} 需要登录后播放")
-                // 会员 / 版权 / 地区 / 拿不到链接 都归「官方音源不可用」，统一走第三方兜底。
-                // 第三方只在官方失败后兜底，正常歌（Playable）永远先用官方，不会被脚本抢占。
-                PlaybackResolution.SubscriptionRequired -> thirdPartyFallbackOrThrow(
-                    track, quality, source, "${provider.displayName} 当前歌曲需要对应会员权益",
+                PlaybackResolution.SubscriptionRequired -> fallbackOrThrow(
+                    track, quality, "${provider.displayName} 当前歌曲需要对应会员权益", membershipFailure = true,
                 )
-                PlaybackResolution.RegionRestricted -> thirdPartyFallbackOrThrow(
-                    track, quality, source, "${provider.displayName} 当前地区不可播放",
+                PlaybackResolution.RegionRestricted -> fallbackOrThrow(
+                    track, quality, "${provider.displayName} 当前地区不可播放", membershipFailure = true,
                 )
-                PlaybackResolution.CopyrightRestricted -> thirdPartyFallbackOrThrow(
-                    track, quality, source, "${provider.displayName} 当前版权不可播放",
+                PlaybackResolution.CopyrightRestricted -> fallbackOrThrow(
+                    track, quality, "${provider.displayName} 当前版权不可播放", membershipFailure = true,
                 )
-                is PlaybackResolution.Unavailable -> thirdPartyFallbackOrThrow(
-                    track, quality, source,
+                is PlaybackResolution.Unavailable -> fallbackOrThrow(
+                    track, quality,
                     resolution.reason ?: "${provider.displayName} 暂时没有可播放音源",
+                    membershipFailure = false,
                 )
             }
             synchronized(cacheLock) { resolvedUris[key] = result }
@@ -201,46 +222,6 @@ class ProviderPlaybackResolver(
         }
     }
 
-    /**
-     * 第三方解析链（Meting → CHKSZ → UNM 解灰 → LX 脚本）。
-     * Meting 未配置（服务器地址为空）时直接跳过；CHKSZ 默认关闭。UNM 只处理网易云曲目。
-     */
-    private fun resolveThirdParty(
-        track: MusicTrack,
-        quality: AudioQualityTier,
-        source: MusicSource,
-    ): ResolvedRequest? {
-        val meting = runCatching { metingPlayback?.resolve(track, quality) }
-            .onFailure { Log.w(TAG, "Meting stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
-            .getOrNull()
-        if (meting != null) {
-            Log.i(TAG, "Resolve success source=${source.storageValue} stage=meting")
-            return ResolvedRequest(Uri.parse(meting.url), emptyMap())
-        }
-        val chksz = runCatching { chkszPlayback?.resolve(track, quality) }
-            .onFailure { Log.w(TAG, "CHKSZ stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
-            .getOrNull()
-        if (chksz != null) {
-            Log.i(TAG, "Resolve success source=${source.storageValue} stage=chksz")
-            return ResolvedRequest(Uri.parse(chksz.url), emptyMap())
-        }
-        val unm = runCatching { unmPlayback?.resolve(track) }
-            .onFailure { Log.w(TAG, "UNM stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
-            .getOrNull()
-        if (unm != null) {
-            Log.i(TAG, "Resolve success source=${source.storageValue} stage=unm")
-            return ResolvedRequest(Uri.parse(unm.url), emptyMap())
-        }
-        val lx = runCatching { lxUserPlayback?.resolve(track, quality) }
-            .onFailure { Log.w(TAG, "LX stage failed source=${source.storageValue} error=${it.javaClass.simpleName}") }
-            .getOrNull()
-        if (lx != null) {
-            Log.i(TAG, "Resolve success source=${source.storageValue} stage=lx script=${lx.sourceId}")
-            return ResolvedRequest(Uri.parse(lx.url), lx.requestHeaders)
-        }
-        return null
-    }
-
     private fun cached(key: ResolveKey): ResolvedRequest? = synchronized(cacheLock) {
         resolvedUris[key]?.also { cached ->
             if (cached.expiresAtEpochMs?.let { System.currentTimeMillis() >= it } == true) {
@@ -249,6 +230,9 @@ class ProviderPlaybackResolver(
             }
         }
     }
+
+    /** Settings that change the fallback chain must invalidate resolved URLs too. */
+    private fun fallbackIdentity(): String = fallbackChain.cacheIdentity()
 
     private fun currentQuality(uri: Uri): AudioQualityTier {
         // The quality selector updates this runtime before Media3 prepare(). That
@@ -276,7 +260,9 @@ class ProviderPlaybackResolver(
             mediaMid = uri.getQueryParameter(QQMediaMidQuery)?.takeIf(String::isNotBlank),
             numericSongId = uri.getQueryParameter(QQNumericIdQuery)?.toLongOrNull(),
         )
-        MusicSource.Kugou -> ProviderTrackMetadata.Kugou(
+        MusicSource.Kugou,
+        MusicSource.KugouLite,
+        -> ProviderTrackMetadata.Kugou(
             hash = id.value,
             albumAudioId = uri.getQueryParameter(KugouAlbumAudioIdQuery)?.toLongOrNull(),
             albumId = uri.getQueryParameter(KugouAlbumIdQuery)?.takeIf(String::isNotBlank),
@@ -300,6 +286,7 @@ class ProviderPlaybackResolver(
             uri.getQueryParameter(SpotifyIsrcQuery)?.takeIf(String::isNotBlank),
         )
         MusicSource.YouTubeMusic -> ProviderTrackMetadata.Empty
+        MusicSource.Qishui -> ProviderTrackMetadata.Empty
         MusicSource.Jellyfin -> ProviderTrackMetadata.Empty
         MusicSource.Local -> ProviderTrackMetadata.Local(
             contentUri = uri.getQueryParameter("localContentUri").orEmpty(),

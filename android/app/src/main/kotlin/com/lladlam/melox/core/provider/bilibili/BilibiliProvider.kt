@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.CancellationException
 
 class BilibiliProvider(
     private val sessionProvider: () -> BilibiliSession,
@@ -73,13 +74,18 @@ class BilibiliProvider(
             created.objects().forEach { array.put(it) }
             collected.forEach { array.put(it) }
         }
-        val all = list.objects().distinctBy { it.optLong("id") }.mapNotNull { item ->
+        val all = list.objects().mapNotNull { item ->
             val id = item.optLong("id").takeIf { it > 0 } ?: return@mapNotNull null
+            val season = item.optInt("type") == 21
+            val owner = item.optLong("mid", item.optJSONObject("upper")?.optLong("mid") ?: 0)
+            val value = if (season) "season:$owner:$id" else id.toString()
             MusicPlaylistSummary(
-                MusicResourceId(source, id.toString()), item.optString("title"), secure(item.optString("cover")),
+                MusicResourceId(source, value), item.optString("title"), secure(item.optString("cover")),
                 trackCount = item.optInt("media_count"),
+                creatorName = item.optJSONObject("upper")?.optString("name"),
+                isEditable = false,
             )
-        }
+        }.distinctBy { it.id }
         val start = ((page.coerceAtLeast(1) - 1) * pageSize).coerceAtMost(all.size)
         val selected = all.drop(start).take(pageSize).map { playlist ->
             runCatching { playlistSummaryWithCover(playlist) }.getOrDefault(playlist)
@@ -88,16 +94,15 @@ class BilibiliProvider(
     }
 
     override suspend fun playlistDetail(playlist: MusicPlaylistSummary, page: Int, pageSize: Int): MusicPlaylistDetail {
+        require(playlist.id.source == source)
+        if (playlist.id.value.startsWith("season:")) return seasonDetail(playlist, page, pageSize)
         val params = mapOf(
             "media_id" to playlist.id.value, "pn" to page.toString(), "ps" to pageSize.coerceIn(1, 20).toString(),
             "order" to "mtime", "tid" to "0", "type" to "0", "platform" to "web",
         )
         val data = cachedGet("folder-detail", "/x/v3/fav/resource/list", params, BilibiliApiCache.FolderDetail).data()
         val medias = data.optJSONArray("medias") ?: JSONArray()
-        val tracks = medias.objects().flatMap { media ->
-            val bvid = media.optString("bvid")
-            if (bvid.isBlank()) emptyList() else videoTracks(bvid, media)
-        }
+        val tracks = favoriteTracks(medias)
         val info = data.optJSONObject("info")
         val summary = playlist.copy(
             title = info?.optString("title").orEmpty().ifBlank { playlist.title },
@@ -112,11 +117,56 @@ class BilibiliProvider(
                 .ifBlank { null },
             trackCount = info?.optInt("media_count")?.takeIf { it >= 0 } ?: playlist.trackCount,
         )
-        return MusicPlaylistDetail(summary, tracks, info?.optLong("media_count"))
+        return MusicPlaylistDetail(summary, tracks, info?.optLong("media_count"), data.optBoolean("has_more", medias.length() >= pageSize.coerceIn(1, 20)))
+    }
+
+    private fun seasonDetail(playlist: MusicPlaylistSummary, page: Int, pageSize: Int): MusicPlaylistDetail {
+        val identity = playlist.id.value.split(':')
+        require(identity.size == 3 && identity[1].toLongOrNull()?.let { it > 0 } == true && identity[2].toLongOrNull()?.let { it > 0 } == true) { "Bilibili 合集身份不完整" }
+        val size = pageSize.coerceIn(1, 20)
+        val data = cachedGet("season-detail", "/x/polymer/web-space/seasons_archives_list", mapOf(
+            "mid" to identity[1], "season_id" to identity[2], "page_num" to page.coerceAtLeast(1).toString(),
+            "page_size" to size.toString(), "sort_reverse" to "false",
+        ), BilibiliApiCache.FolderDetail).data()
+        val archives = data.optJSONArray("archives") ?: JSONArray()
+        val meta = data.optJSONObject("meta")
+        val total = data.optJSONObject("page")?.optLong("total") ?: meta?.optLong("total") ?: playlist.trackCount?.toLong()
+        val summary = playlist.copy(
+            title = meta?.optString("name").orEmpty().ifBlank { playlist.title },
+            artworkUrl = secure(meta?.optString("cover").orEmpty()) ?: playlist.artworkUrl,
+            description = meta?.optString("description").orEmpty().ifBlank { playlist.description },
+            trackCount = total?.toInt(),
+        )
+        return MusicPlaylistDetail(summary, favoriteTracks(archives), total,
+            if (total != null) page.toLong() * size < total else archives.length() >= size)
+    }
+
+    private fun favoriteTracks(medias: JSONArray): List<MusicTrack> = medias.objects().flatMap { media ->
+        if (media.optInt("type", 2) != 2) return@flatMap emptyList()
+        val bvid = media.optString("bvid").ifBlank { media.optString("bv_id") }
+        if (bvid.isBlank()) return@flatMap emptyList()
+        val cid = media.optJSONObject("ugc")?.optLong("first_cid")?.takeIf { it > 0 }
+            ?: media.optLong("cid").takeIf { it > 0 }
+        val owner = media.optJSONObject("upper")?.optString("name")
+        if (cid != null && media.optInt("page", 1) <= 1) {
+            listOf(mapTrack(media, bvid, cid, media.optLong("id", media.optLong("aid")), 1,
+                durationMs = media.optLong("duration").takeIf { it > 0 }?.times(1_000), owner = owner))
+        } else {
+            try {
+                videoTracks(bvid, media)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IOException) {
+                // A deleted/private video must not discard every other item in the folder.
+                if (cid == null) emptyList() else listOf(mapTrack(media, bvid, cid, media.optLong("id"), 1,
+                    durationMs = media.optLong("duration").takeIf { it > 0 }?.times(1_000), owner = owner))
+            }
+        }
     }
 
     private fun playlistSummaryWithCover(playlist: MusicPlaylistSummary): MusicPlaylistSummary {
         if (!playlist.artworkUrl.isNullOrBlank()) return playlist
+        if (playlist.id.value.startsWith("season:")) return playlist
         val params = mapOf(
             "media_id" to playlist.id.value, "pn" to "1", "ps" to "20",
             "order" to "mtime", "tid" to "0", "type" to "0", "platform" to "web",

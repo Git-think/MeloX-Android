@@ -223,64 +223,119 @@ class NeteaseMusicOperationsClient(
     }
 
     suspend fun songWiki(songId: Long): List<MeloXWikiSection> = withContext(Dispatchers.IO) {
-        ensureLoggedIn()
-        val result = eapi(
-            "/api/song/play/about/block/page",
-            JSONObject().put("songId", songId),
-            true,
-        )
-        val blocks = result.optJSONObject("data")?.optJSONArray("blocks") ?: JSONArray()
-        buildList<MeloXWikiSection> {
-            for (i in 0 until blocks.length()) {
-                val block = blocks.optJSONObject(i) ?: continue
-                val title = block.optJSONObject("uiElement")?.optJSONObject("mainTitle")?.optString("title")
-                    ?.takeIf(String::isNotBlank) ?: when (block.optString("code")) {
-                        "SONG_PLAY_ABOUT_MUSIC_MEMORY" -> "音乐记忆"
-                        "SONG_PLAY_ABOUT_SIMILAR_SONG" -> "相似歌曲"
-                        "SONG_PLAY_ABOUT_RELATED_PLAYLIST" -> "相关歌单"
-                        else -> "歌曲百科"
-                    }
-                val lines = mutableListOf<String>()
-                val creatives = block.optJSONArray("creatives") ?: JSONArray()
-                for (j in 0 until creatives.length()) {
-                    val creative = creatives.optJSONObject(j) ?: continue
-                    val ui = creative.optJSONObject("uiElement")
-                    ui?.optJSONObject("mainTitle")?.optString("title")?.takeIf(String::isNotBlank)?.let(lines::add)
-                    val resources = creative.optJSONArray("resources") ?: JSONArray()
-                    for (k in 0 until resources.length()) {
-                        val rui = resources.optJSONObject(k)?.optJSONObject("uiElement") ?: continue
-                        rui.optJSONObject("mainTitle")?.optString("title")?.takeIf(String::isNotBlank)?.let(lines::add)
-                        val descriptions = rui.optJSONArray("descriptions") ?: JSONArray()
-                        for (x in 0 until descriptions.length()) {
-                            descriptions.optJSONObject(x)?.optString("description")?.takeIf(String::isNotBlank)?.let(lines::add)
-                        }
-                        val subtitles = rui.optJSONArray("subTitles") ?: JSONArray()
-                        for (x in 0 until subtitles.length()) {
-                            subtitles.optJSONObject(x)?.optString("title")?.takeIf(String::isNotBlank)?.let(lines::add)
-                        }
-                    }
-                }
-                val directResources = block.optJSONArray("resources") ?: JSONArray()
-                for (j in 0 until directResources.length()) {
-                    val r = directResources.optJSONObject(j) ?: continue
-                    r.optString("resourceType").takeIf(String::isNotBlank)?.let { type ->
-                        val ext = r.optJSONObject("extensionInfo")
-                        if (type.equals("FIRST_LISTEN", true)) {
-                            ext?.optJSONObject("musicFirstListen")?.optString("date")?.takeIf(String::isNotBlank)?.let { lines.add("第一次听：$it") }
-                        }
-                        if (type.equals("TOTAL_PLAY", true)) {
-                            ext?.optJSONObject("musicTotalPlay")?.let { total ->
-                                val count = total.optLong("playCount", 0L)
-                                if (count > 0) lines.add("累计播放：$count 次")
-                            }
-                        }
-                    }
-                }
-                val unique = lines.map(String::trim).filter(String::isNotBlank).distinct()
-                if (unique.isNotEmpty()) add(MeloXWikiSection(title, unique))
+        require(songId > 0L) { "歌曲 ID 无效" }
+        val payload = JSONObject().put("songId", songId)
+        val loggedIn = NeteaseSessionStore.containsMusicU(cookieProvider())
+        // The wiki endpoint also answers anonymous requests. Prefer the
+        // signed-in cookie, but never let an expired cookie make the page
+        // unopenable: fall back to the anonymous eapi request.
+        val result = if (loggedIn) {
+            try {
+                eapi("/api/song/play/about/block/page", payload, true)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                eapi("/api/song/play/about/block/page", payload, false)
             }
+        } else {
+            eapi("/api/song/play/about/block/page", payload, false)
+        }
+        parseSongWikiSections(result)
+    }
+
+internal fun parseSongWikiSections(result: JSONObject): List<MeloXWikiSection> {
+    val blocks = result.optJSONObject("data")?.optJSONArray("blocks")
+        ?: result.optJSONArray("blocks")
+        ?: JSONArray()
+    return buildList {
+        for (i in 0 until blocks.length()) {
+            val block = blocks.optJSONObject(i) ?: continue
+            val title = block.optJSONObject("uiElement")
+                ?.optJSONObject("mainTitle")
+                ?.optString("title")
+                ?.takeIf(String::isNotBlank)
+                ?: when (block.optString("code")) {
+                    "SONG_PLAY_ABOUT_MUSIC_MEMORY" -> "音乐记忆"
+                    "SONG_PLAY_ABOUT_SIMILAR_SONG" -> "相似歌曲"
+                    "SONG_PLAY_ABOUT_RELATED_PLAYLIST" -> "相关歌单"
+                    "SONG_PLAY_ABOUT_SONG_BASIC" -> "歌曲信息"
+                    else -> "歌曲百科"
+                }
+            val lines = mutableListOf<String>()
+            val creatives = block.optJSONArray("creatives") ?: JSONArray()
+            for (j in 0 until creatives.length()) {
+                val creative = creatives.optJSONObject(j) ?: continue
+                collectWikiUiText(creative.optJSONObject("uiElement"), lines)
+                val resources = creative.optJSONArray("resources") ?: JSONArray()
+                for (k in 0 until resources.length()) {
+                    collectWikiUiText(
+                        resources.optJSONObject(k)?.optJSONObject("uiElement"),
+                        lines,
+                    )
+                }
+            }
+            // Some blocks (notably similar songs / related playlists) put their
+            // resources directly on the block instead of inside a creative.
+            val directResources = block.optJSONArray("resources") ?: JSONArray()
+            for (j in 0 until directResources.length()) {
+                val resource = directResources.optJSONObject(j) ?: continue
+                collectWikiUiText(resource.optJSONObject("uiElement"), lines)
+                val type = resource.optString("resourceType")
+                if (type.isBlank()) continue
+                val ext = resource.optJSONObject("extensionInfo")
+                if (type.equals("FIRST_LISTEN", true)) {
+                    ext?.optJSONObject("musicFirstListen")
+                        ?.optString("date")
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { lines.add("第一次听：$it") }
+                }
+                if (type.equals("TOTAL_PLAY", true)) {
+                    ext?.optJSONObject("musicTotalPlay")?.let { total ->
+                        val count = total.optLong("playCount", 0L)
+                        if (count > 0L) lines.add("累计播放：$count 次")
+                    }
+                }
+            }
+            val unique = lines.map(String::trim).filter(String::isNotBlank).distinct()
+            if (unique.isNotEmpty()) add(MeloXWikiSection(title, unique))
         }
     }
+}
+
+private fun collectWikiUiText(ui: JSONObject?, lines: MutableList<String>) {
+    if (ui == null) return
+    ui.optJSONObject("mainTitle")
+        ?.optString("title")
+        ?.takeIf(String::isNotBlank)
+        ?.let(lines::add)
+    val descriptions = ui.optJSONArray("descriptions") ?: JSONArray()
+    for (i in 0 until descriptions.length()) {
+        val description = descriptions.optJSONObject(i) ?: continue
+        description.optString("description")
+            .takeIf(String::isNotBlank)
+            ?.let(lines::add)
+            ?: description.optString("text")
+                .takeIf(String::isNotBlank)
+                ?.let(lines::add)
+    }
+    val subtitles = ui.optJSONArray("subTitles") ?: JSONArray()
+    for (i in 0 until subtitles.length()) {
+        subtitles.optJSONObject(i)
+            ?.optString("title")
+            ?.takeIf(String::isNotBlank)
+            ?.let(lines::add)
+    }
+    val buttons = ui.optJSONArray("buttons") ?: JSONArray()
+    for (i in 0 until buttons.length()) {
+        val button = buttons.optJSONObject(i) ?: continue
+        button.optString("text")
+            .takeIf(String::isNotBlank)
+            ?.let(lines::add)
+            ?: button.optString("title")
+                .takeIf(String::isNotBlank)
+                ?.let(lines::add)
+    }
+}
 
     suspend fun createListenTogetherRoom(): MeloXListenTogetherRoom = withContext(Dispatchers.IO) {
         ensureLoggedIn()

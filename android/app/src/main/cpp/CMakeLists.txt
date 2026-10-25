@@ -66,6 +66,7 @@ add_library(melox_ja_g2p SHARED ja_g2p.cpp ja_g2p_jni.cpp ${MELOX_SOURCES})
 target_include_directories(melox_ja_g2p PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if(ANDROID)
+    add_library(melox_usb_audio SHARED usb_audio.cpp)
     target_link_libraries(melox_ja_g2p log)
     # Keep the library name stable so Kotlin's System.loadLibrary matches.
     set_target_properties(melox_ja_g2p PROPERTIES OUTPUT_NAME "melox_ja_g2p")

@@ -92,6 +92,16 @@ object MusicExperiences {
         ),
     )
 
+    val kugouLite = MusicExperience(
+        source = MusicSource.KugouLite,
+        homeSections = listOf(
+            HomeSectionKind.Recommendations,
+            HomeSectionKind.Playlists,
+            HomeSectionKind.Rankings,
+            HomeSectionKind.Radio,
+        ),
+    )
+
     val kuwo = MusicExperience(
         source = MusicSource.Kuwo,
         homeSections = emptyList(),
@@ -170,10 +180,18 @@ object MusicExperiences {
         ),
     )
 
+    val qishui = MusicExperience(
+        source = MusicSource.Qishui,
+        homeSections = listOf(HomeSectionKind.Recommendations, HomeSectionKind.Playlists),
+        providerNativeCapabilities = setOf(MusicCapability.Search, MusicCapability.Playback,
+            MusicCapability.Lyrics, MusicCapability.HomeRecommendations, MusicCapability.Library, MusicCapability.Playlists),
+    )
+
     fun forSource(source: MusicSource): MusicExperience = when (source) {
         MusicSource.Netease -> netease
         MusicSource.QQMusic -> qqMusic
         MusicSource.Kugou -> kugou
+        MusicSource.KugouLite -> kugouLite
         MusicSource.Kuwo -> kuwo
         MusicSource.AppleMusic -> appleMusic
         MusicSource.Bilibili -> bilibili
@@ -181,5 +199,6 @@ object MusicExperiences {
         MusicSource.YouTubeMusic -> youtubeMusic
         MusicSource.Jellyfin -> jellyfin
         MusicSource.Local -> local
+        MusicSource.Qishui -> qishui
     }
 }

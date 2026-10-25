@@ -29,15 +29,15 @@
 
 > 弥乐是非官方开源项目，与网易云音乐、小米、Apple 及其关联公司不存在隶属、合作或授权关系。
 
-## 当前版本：0.6.5
+## 当前版本：0.7.0
 
-`0.6.5`（`versionCode 24`，2026-10-18）新增可配置分屏与 Dock / 迷你播放器独立位置，补齐多音乐源公共功能接线和 YouTube Music 账号、音乐库与歌单能力，恢复应用语言设置，修复歌词翻译语言及返回交互，并保留签名热更新通道。
+`0.7.0`（`versionCode 25`，2026-10-25）新增汽水音乐音源、LAN 一起放 / DLNA / 小米妙播与实验性 USB 音频输出，并重做播放回退、酷狗概念版签到和歌词罗马音显示。
 
-- **设置 → 通用**新增默认开启的分屏开关；Dock 与迷你播放器可分别选择左下、右下、左上、右上、左侧竖向或右侧竖向。同位置保持竖屏间距并联动收缩，分开放置时不随滚动单独收缩。
-- 搜索、集合详情、歌曲菜单、下载及歌单编辑按音乐源实际能力接入公共 UI；YouTube Music 补齐频道切换、可写歌单过滤与后续页读取，并修复请求地区和浏览器会话认证。
-- 所有音乐源共用歌词获取链，统一匹配、绑定、缓存与翻译语言选择；切换语言后当前歌曲重新加载，纯歌词页底部点按唤出控制区而不误跳进度。
+- 汽水音乐支持抖音扫码登录、推荐、搜索、歌单、歌词与播放；LAN 一起放同步队列与跳转，DLNA、MiPlay 提供发现与播放会话，USB 输出以实验性 UAC1 方式接入。
+- 播放按“当前音源 → 其他内置音源严格完整音频匹配（网易云、QQ、酷狗概念版、汽水、酷我、Bilibili）→ 已配置的 CHKSZ/LX”顺序执行；Bilibili 他人收藏夹改用正确接口并按页加载。
+- 酷狗概念版每天自动签到并同时领取畅听与概念版 VIP；首次启动改为四步全屏引导，隐私政策与免责声明升级至 1.3，罗马音固定在每条视觉行下方并按发音单元横向对齐，更新弹窗限制在屏幕安全区内。
 
-- 下载与完整更新日志：[GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/v0.6.5)
+- 下载与完整更新日志：[GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.7.0)
 - 详细版本记录：[CHANGELOG.md](CHANGELOG.md)
 - 本次版本说明：[CHANGELOG.md](CHANGELOG.md)
 
@@ -81,7 +81,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - 排行榜、首页推荐、每日推荐、私人 FM 与心动模式；
 - 播客首页、分类、订阅与节目详情；
 - 网易云音乐云盘读取、搜索、上传、播放与删除；
-- 单曲/集合多选下载、逐次音质选择、离线歌词、自动缓存与存储修复；
+- 单曲/集合多选下载、逐次音质选择、离线歌词、自动缓存、存储修复与暂停 / 恢复；
 - 保留 app-private 离线副本，并可导出到 MediaStore；本地库可按歌曲、艺术家、专辑和文件夹浏览；
 - 从音乐库 / 搜索结果直接播放；
 - 音乐库全局搜索，覆盖歌曲、歌单、专辑、艺人与最近播放。
@@ -100,7 +100,10 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - AutoMix 双播放器预载、音频分析、过渡规划、节拍/速度匹配、淡化与 EQ 包络；
 - 31 Hz–16 kHz 十段均衡器、完整预设、系统/播放器音量模式与睡眠定时；
 - 播放器共享元素、展开 / 收回动画与横屏播放器；
-- 点击播放页曲名打开液态玻璃菜单，可前往艺人、专辑或当前播放队列。
+- 点击播放页曲名打开液态玻璃菜单，可前往艺人、专辑或当前播放队列；
+- 歌词画中画，支持上一首／播放暂停／下一首遥控按钮。
+- 播放器内置「播放设备」选择器，可切换手机扬声器、蓝牙、有线 / USB 音频输出。
+- 局域网「附近的弥乐」：控制、投放（弥乐 PCM）、传输、一起放；协议见 `docs/MELOX-LAN.md`。
 
 ### 音质
 
@@ -127,7 +130,8 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - Apple Music 拖尾滚动、回弹、模糊、高光、长音与刷新率参数；
 - EVA 动态构图、18 套具有独立构图/背景/排版/运动参数的 TextPV 模板；
 - Skyline 横屏歌词与完整环境文字参数；
-- 系统媒体歌词、独立歌词通知和可拖动悬浮歌词。
+- 系统媒体歌词、独立歌词通知和可拖动悬浮歌词；
+- ColorOS 锁屏歌词（`lyricInfo`）与 SuperLyricApi 发布，与应用内歌词共用同一时间线。
 
 ### HyperOS
 
@@ -140,7 +144,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - 一起听房间创建、加入、成员、进度和队列同步；
 - 联系人、会话、文字私信与站内分享；
 - 麦克风录音、网易云音频指纹、分段与持续听歌识曲；
-- 首次启动欢迎与账号页、应用内更新日志、赞助者致谢、剪贴板链接识别、页面/首页排序与内容功能开关；
+- 首次启动欢迎与账号页、应用内更新日志、应用内日志查看、赞助者致谢、剪贴板链接识别、页面/首页排序与内容功能开关；
 - GitHub 版本检查、更新提示、项目许可与设置重置。
 
 ### 第三方音乐源
@@ -152,11 +156,11 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - vivo 设备自动尝试接入 OriginOS 原子岛；不提供单独开关，不支持该能力的设备自动保留标准 Android 媒体通知。该适配使用阿里云文档所述的 `notification.superx.*` 本地通知扩展，不依赖 EMAS 远程推送。
 - 支持导入 LX Music 兼容的 JavaScript 音乐源，并在受限 QuickJS 运行时中解析播放地址。
 - 可配置 Meting API（兼容 metowolf/Meting）服务作为默认第三方解析源，优先解析网易云、QQ音乐和酷狗歌曲；旧版内置的 CHKSZ 解析源保留为可选开关。在「音乐服务」里填写 Meting 服务地址（服务端要求鉴权时再填 Auth 口令），或配置 CHKSZ 的 API Key。解析顺序：Meting → CHKSZ → UNM → LX 脚本。
-- 第三方解析失败时才回退到对应平台的原生播放；歌词仍由弥乐自己的歌词路线处理。
+- 播放顺序：当前音源 → 其他内置音源的严格完整音频匹配（仅在开启“不可用资源从其他平台获取”时）→ 已配置的第三方解析源（仅在第三方开关和协议确认开启时）。全部失败时按不可播放处理，不会用试听片段冒充完整歌曲；歌词仍由弥乐自己的歌词路线处理。
 
 ## 平台范围
 
-iOS Live Activity / Dynamic Island 已映射为 Android 媒体通知、歌词通知和可选 HyperOS 焦点通知；iOS 画中画歌词已映射为 Android 悬浮窗歌词。Apple Watch、watchOS 和 macOS 专属目标不属于 Android APK 的迁移范围。
+iOS Live Activity / Dynamic Island 已映射为 Android 媒体通知、歌词通知和可选 HyperOS 焦点通知；iOS 画中画歌词已映射为 Android 原生画中画窗口，并保留可拖动悬浮歌词作为替代。Apple Watch、watchOS 和 macOS 专属目标不属于 Android APK 的迁移范围。
 
 Liquid Glass 在 Android 上使用 Kyant0 `AndroidLiquidGlass` 的原生 Backdrop 实现；具体效果仍受 Android 版本、GPU 与 OEM 合成器能力影响。
 
@@ -281,7 +285,10 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 - `librespot-java` — Spotify 账号会话、播放和离线缓存；Apache License 2.0。
 - [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — YouTube Music 匿名搜索和流地址解析；GPL-3.0。
 - [Metrolist InnerTube](https://github.com/mostafaalagamy/Metrolist) — YouTube Music 登录态目录、账号库和歌单操作；GPL-3.0，模块已随本项目 vendored 于 `android/innertube/`。
-- [Miuix](https://github.com/compose-miuix-ui/miuix) — 当前 Android Backdrop / Blur 实验实现使用 `miuix-blur`；Apache License 2.0。
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) — AutoSync 本地逐字歌词对齐推理；MIT。
+- [QuickJS Android](https://github.com/HarlonWang/quickjs-wrapper) — LX Music 兼容音源脚本的隔离运行时；分别遵循 wrapper 与 QuickJS 的许可证。
+- [ZXing](https://github.com/zxing/zxing) — 二维码生成；Apache License 2.0。
+- [Shizuku](https://github.com/RikkaApps/Shizuku) — 可选的免 Root HyperOS 兼容接入；Apache License 2.0。
 
 ### Liquid Glass / Backdrop 实现来源
 
@@ -293,9 +300,17 @@ SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；
 
 ### API 与 UI 参考项目
 
+- [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — 汽水音乐原生接口、扫码登录、目录、歌词与播放字段参考；MIT，接入范围与验证记录见 [QISHUI.md](docs/QISHUI.md)。
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — 一个基于 Mei 的仿 Apple Music 网易云音乐客户端，为弥乐 Android 版提供 UI 参考。
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API Python 客户端，为 Spotify API 接入提供参考。
 - [bromothymolb/bilibili-api-zoku](https://github.com/bromothymolb/bilibili-api-zoku) — Bilibili API 调用与常用功能整合项目，为 Bilibili API 接入提供参考。
+- [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) — 酷狗概念版协议、请求签名、每日 VIP 领取及升级参数参考；MIT，详见 [KUGOU-LITE.md](docs/KUGOU-LITE.md)。
+- [MoeKoeMusic/MoeKoeMusic](https://github.com/MoeKoeMusic/MoeKoeMusic) — 酷狗概念版桌面账号与签到领会员流程参考；GPL-2.0。
+- [MoeKoeMusic/MoeKoeMusic-mobile](https://github.com/MoeKoeMusic/MoeKoeMusic-mobile) — 移动端签到交互与活动结果处理参考；GPL-2.0。MoeKoe 两个项目仅用于行为核对，未复制其代码或界面资源。
+- [lladlam/Square](https://github.com/lladlam/Square) — Spotify / YouTube Music 双后端架构参考。
+- [lladlam/MeloX-AutoSync](https://github.com/lladlam/MeloX-AutoSync) — 本地逐字歌词对齐与发音映射参考；各组件许可证见随附声明。
+- [neteasecloudmusicapienhanced/api-enhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced) — 听歌识曲与音频指纹运行时参考。
+- [mjhydri/BeatNet](https://github.com/mjhydri/BeatNet) — AutoMix 节拍、重拍与速度分析；CC BY 4.0。
 
 ### 上游弥乐的参考来源
 
@@ -359,6 +374,7 @@ Text PV / PV Tool、BeatNet 及其他弥乐功能继续按照上游项目要求�
 | 爱发电用户\_26d40 | 50 元 |
 | 爱发电用户\_aec4c | 6 元（包月） |
 | Bai | 5 元 |
+| 中末 | 8.88 元 |
 
 ## 友情链接
 

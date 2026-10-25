@@ -43,6 +43,9 @@ jobs:
           chmod +x android/gradlew
           cd android
           ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2 --stacktrace
+          if [ -f app/build/outputs/apk/debug/app-universal-debug.apk ]; then
+            cp app/build/outputs/apk/debug/app-universal-debug.apk app/build/outputs/apk/debug/app-debug.apk
+          fi
 
       # A release asset downloads without a GitHub login, unlike an Actions artifact.
       # The fixed tag and fixed file name mean every build replaces the same file, so

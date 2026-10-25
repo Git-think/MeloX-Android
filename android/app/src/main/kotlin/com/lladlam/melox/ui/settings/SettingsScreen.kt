@@ -36,6 +36,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.animation.fadeIn
@@ -74,6 +75,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -170,6 +172,8 @@ import com.lladlam.melox.ui.legal.MeloXLegalDocument
 import com.lladlam.melox.ui.legal.MeloXLegalDocumentDialog
 import com.lladlam.melox.ui.legal.MeloXLegalLinks
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime
+import com.lladlam.melox.lan.MeloXLanPermissions
+import com.lladlam.melox.lan.MeloXLanRuntime
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigSource
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigConsent
 import com.lladlam.melox.ui.legal.MeloXCloudControlConsentDialog
@@ -197,6 +201,7 @@ enum class SettingsRoute(private val fallbackTitle: String, private val titleRes
     Recognition("听歌识曲", R.string.settings_route_recognition),
     Messages("私信与站内分享", R.string.settings_route_messages),
     ListenTogether("一起听", R.string.settings_route_listen_together),
+    KugouLiteVip("签到领会员"),
     Content("内容", R.string.settings_route_content),
     Storage("存储管理", R.string.settings_route_storage),
     TabLayout("页面与标签栏", R.string.settings_route_tabs),
@@ -235,6 +240,7 @@ private val SettingsSections = listOf(
         SettingsItem(SettingsRoute.Recognition, "麦克风音频指纹与持续识别", "⌁", "听歌识曲 麦克风 指纹 Shazam 持续识别"),
         SettingsItem(SettingsRoute.Messages, "联系人、会话历史与文字私信", "✉", "私信 联系人 会话 分享 网易云"),
         SettingsItem(SettingsRoute.ListenTogether, "创建、加入和管理网易云一起听房间", "◎", "一起听 房间 邀请 同步"),
+        SettingsItem(SettingsRoute.KugouLiteVip, "酷狗概念版每日签到与会员领取", "✦", "酷狗 概念版 签到 领取 会员 VIP 畅听"),
         SettingsItem(SettingsRoute.TabLayout, "首页、标签栏与音乐库页面", "▥", "首页 标签栏 排序 推荐 歌单 历史"),
         SettingsItem(SettingsRoute.SystemPlayback, "通知、锁屏和系统媒体信息", "▣", "控制中心 通知 锁屏 Media3"),
         SettingsItem(SettingsRoute.FloatingLyrics, "Android 悬浮歌词能力与权限", "▤", "画中画 悬浮窗 其他应用"),
@@ -289,8 +295,13 @@ fun SettingsScreen(
     val normalized = search.trim().lowercase()
     val visibleSections = SettingsSections.mapNotNull { section ->
         val filtered = section.items.filter { item ->
-            normalized.isBlank() || listOf(item.route.title, item.subtitle, item.keywords)
-                .joinToString(" ").lowercase().contains(normalized)
+            val supported = when (item.route) {
+                SettingsRoute.Messages, SettingsRoute.ListenTogether -> source == MusicSource.Netease
+                SettingsRoute.KugouLiteVip -> source == MusicSource.KugouLite
+                else -> true
+            }
+            supported && (normalized.isBlank() || listOf(item.route.title, item.subtitle, item.keywords)
+                .joinToString(" ").lowercase().contains(normalized))
         }
         filtered.takeIf { it.isNotEmpty() }?.let { SettingsSection(section.title, it) }
     }
@@ -484,6 +495,7 @@ internal fun SettingsDetailScreen(route: SettingsRoute, source: MusicSource, ses
                     SettingsRoute.Recognition -> MeloXRecognitionPanel(context)
                     SettingsRoute.Messages -> MessagesSettings(context)
                     SettingsRoute.ListenTogether -> ListenTogetherSettings(context)
+                    SettingsRoute.KugouLiteVip -> if (source == MusicSource.KugouLite) KugouLiteVipSettings()
                     SettingsRoute.Content -> ContentSettings(context)
                     SettingsRoute.Storage -> StorageSettings(context)
                     SettingsRoute.TabLayout -> TabLayoutSettings(context)
@@ -781,6 +793,51 @@ private fun SystemPlaybackSettings(context: android.content.Context) {
     }
     Spacer(Modifier.height(10.dp))
     SettingsGlassGroup {
+        val notificationActions = listOf(
+            com.lladlam.melox.playback.MeloXNotificationAction.PlayMode to stringResource(R.string.notification_mode_shuffle),
+            com.lladlam.melox.playback.MeloXNotificationAction.Favorite to stringResource(R.string.notification_action_favorite),
+            com.lladlam.melox.playback.MeloXNotificationAction.FloatingLyrics to stringResource(R.string.notification_action_floating_lyrics),
+            com.lladlam.melox.playback.MeloXNotificationAction.None to stringResource(R.string.settings_notification_none),
+        )
+        var leftAction by remember {
+            mutableStateOf(
+                com.lladlam.melox.playback.MeloXNotificationAction.fromPreference(
+                    MeloXSettingsPreferences.string(context, "notification_left_action", "").takeIf { it.isNotBlank() },
+                    com.lladlam.melox.playback.MeloXNotificationAction.PlayMode,
+                ),
+            )
+        }
+        var rightAction by remember {
+            mutableStateOf(
+                com.lladlam.melox.playback.MeloXNotificationAction.fromPreference(
+                    MeloXSettingsPreferences.string(context, "notification_right_action", "").takeIf { it.isNotBlank() },
+                    com.lladlam.melox.playback.MeloXNotificationAction.Favorite,
+                ),
+            )
+        }
+        MeloXSettingsDropdown(
+            title = stringResource(R.string.settings_notification_left_action),
+            selected = leftAction,
+            items = notificationActions,
+            onSelected = {
+                leftAction = it
+                MeloXSettingsPreferences.setString(context, "notification_left_action", it.name)
+            },
+            grouped = true,
+        )
+        MeloXSettingsDropdown(
+            title = stringResource(R.string.settings_notification_right_action),
+            selected = rightAction,
+            items = notificationActions,
+            onSelected = {
+                rightAction = it
+                MeloXSettingsPreferences.setString(context, "notification_right_action", it.name)
+            },
+            grouped = true,
+        )
+    }
+    Spacer(Modifier.height(10.dp))
+    SettingsGlassGroup {
         SettingsToggleRow(context, stringResource(R.string.settings_notify_next_line), "lyrics_notification_next_line", false, grouped = true)
         SettingsToggleRow(context, stringResource(R.string.settings_notify_progress), "lyrics_notification_progress", true, grouped = true)
         SettingsToggleRow(context, stringResource(R.string.settings_notify_artwork), "lyrics_notification_artwork", true, grouped = true)
@@ -812,13 +869,182 @@ private fun SystemPlaybackSettings(context: android.content.Context) {
                 .build(),
         )
     }
+    Spacer(Modifier.height(10.dp))
+    LanSettings(context)
+}
+
+@Composable
+private fun LanSettings(context: android.content.Context) {
+    var enabled by remember { mutableStateOf(MeloXLanRuntime.isEnabled(context)) }
+    var port by remember { mutableStateOf(MeloXLanRuntime.port(context)) }
+    val lanPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            enabled = true
+            MeloXLanRuntime.setEnabled(context, true)
+            port = MeloXLanRuntime.port(context)
+        }
+    }
+    var pin by remember { mutableStateOf(MeloXLanRuntime.pin(context)) }
+    var trusted by remember { mutableStateOf(MeloXLanRuntime.trustedDevices(context)) }
+    var recent by remember { mutableStateOf(MeloXLanRuntime.recentPeers(context)) }
+    var showPortDialog by remember { mutableStateOf(false) }
+    var portText by remember { mutableStateOf(port.toString()) }
+    SettingsGlassGroup {
+        SettingsExternalToggleRow(
+            title = stringResource(R.string.settings_lan),
+            value = enabled,
+            note = stringResource(R.string.settings_lan_note),
+            grouped = true,
+        ) { value ->
+            if (value && !MeloXLanPermissions.has(context)) {
+                enabled = false
+                MeloXLanRuntime.setEnabled(context, false)
+                lanPermissionLauncher.launch(MeloXLanPermissions.permission())
+            } else {
+                enabled = value
+                MeloXLanRuntime.setEnabled(context, value)
+                port = MeloXLanRuntime.port(context)
+            }
+        }
+        MeloXIosListRow(
+            title = stringResource(R.string.settings_lan_port),
+            subtitle = port.toString(),
+            onClick = {
+                portText = port.toString()
+                showPortDialog = true
+            },
+            showTopSeparator = true,
+        )
+        MeloXIosListRow(
+            title = stringResource(R.string.settings_lan_pin),
+            subtitle = pin,
+            trailing = {
+                Text(
+                    stringResource(R.string.settings_lan_pin_refresh),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable {
+                        pin = MeloXLanRuntime.regeneratePin(context)
+                    },
+                )
+            },
+            showTopSeparator = true,
+        )
+        if (trusted.isEmpty()) {
+            MeloXIosListRow(
+                title = stringResource(R.string.settings_lan_trusted),
+                subtitle = stringResource(R.string.settings_lan_no_trusted),
+                showTopSeparator = true,
+            )
+        } else {
+            trusted.forEach { device ->
+                val id = device.optString("deviceId")
+                val name = device.optString("name").ifBlank { device.optString("platform") }
+                MeloXIosListRow(
+                    title = name.ifBlank { stringResource(R.string.settings_lan_trusted) },
+                    subtitle = device.optString("platform"),
+                    trailing = {
+                        Text(
+                            stringResource(R.string.settings_lan_remove_trusted),
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            modifier = Modifier.clickable {
+                                MeloXLanRuntime.removeTrusted(context, id)
+                                trusted = MeloXLanRuntime.trustedDevices(context)
+                            },
+                        )
+                    },
+                    showTopSeparator = true,
+                )
+            }
+        }
+        val recentToAdd = recent.filter { peer ->
+            trusted.none { it.optString("deviceId") == peer.optString("deviceId") }
+        }
+        if (recentToAdd.isNotEmpty()) {
+            MeloXIosListRow(
+                title = stringResource(R.string.settings_lan_recent),
+                subtitle = null,
+                showTopSeparator = true,
+            )
+            recentToAdd.forEach { peer ->
+                val id = peer.optString("deviceId")
+                val name = peer.optString("name").ifBlank { peer.optString("platform") }
+                val platform = peer.optString("platform")
+                MeloXIosListRow(
+                    title = name.ifBlank { stringResource(R.string.settings_lan_recent) },
+                    subtitle = platform,
+                    trailing = {
+                        Text(
+                            stringResource(R.string.settings_lan_add_trusted),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.clickable {
+                                MeloXLanRuntime.trustPeer(context, id, name, platform)
+                                trusted = MeloXLanRuntime.trustedDevices(context)
+                                recent = MeloXLanRuntime.recentPeers(context)
+                            },
+                        )
+                    },
+                    showTopSeparator = true,
+                )
+            }
+        }
+    }
+    if (showPortDialog) {
+        MeloXGlassDialog(visible = true, onDismiss = { showPortDialog = false }) {
+            Text(stringResource(R.string.settings_lan_port), style = MaterialTheme.typography.titleLarge)
+            Text(
+                stringResource(R.string.settings_lan_port_note),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .56f),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            MeloXGlassTextField(
+                value = portText,
+                onValueChange = { value -> portText = value.filter(Char::isDigit).take(5) },
+                placeholder = { Text("47831") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SettingsActionButton(stringResource(R.string.action_cancel), Modifier.weight(1f)) {
+                    showPortDialog = false
+                }
+                SettingsActionButton(stringResource(R.string.action_done), Modifier.weight(1f)) {
+                    val requested = portText.toIntOrNull()
+                    if (requested != null && requested in 1024..65535) {
+                        port = MeloXLanRuntime.setPort(context, requested)
+                    }
+                    showPortDialog = false
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun ExperimentalSettings(context: android.content.Context, source: MusicSource, session: NeteaseSessionStore) {
+    var cliEnabled by remember { mutableStateOf(MeloXSettingsPreferences.boolean(context, "experimental_cli_enabled", false)) }
+    SettingsGlassGroup {
+        SettingsExternalToggleRow(
+            title = "CLI 模式",
+            value = cliEnabled,
+            note = "通过电脑 ADB 命令查询状态、控制播放和搜索歌曲。默认关闭，仅允许 ADB shell 调用。",
+            grouped = true,
+        ) { enabled ->
+            cliEnabled = enabled
+            MeloXSettingsPreferences.setBoolean(context, "experimental_cli_enabled", enabled)
+        }
+    }
+    if (cliEnabled) {
+        SettingsInfoCard("电脑运行：python3 tools/melox_cli.py status\n支持 play / pause / next / previous / seek / queue / search / search-play；完整说明见 docs/CLI.md。")
+    }
+    Spacer(Modifier.height(10.dp))
     var playbackEnabled by remember { mutableStateOf(PlaybackAccountStore.isEnabled(context)) }
     var showQQLogin by remember { mutableStateOf(false) }
-    var showKugouLogin by remember { mutableStateOf(false) }
     var showClearPlaybackConfirmation by remember { mutableStateOf(false) }
     var showClearLyricBindingsConfirmation by remember { mutableStateOf(false) }
     var showClearBilibiliAssociationsConfirmation by remember { mutableStateOf(false) }
@@ -893,18 +1119,6 @@ private fun ExperimentalSettings(context: android.content.Context, source: Music
             )
         }
     }
-    if (showKugouLogin) {
-        Dialog(
-            onDismissRequest = { showKugouLogin = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            KugouLoginScreen(
-                onDismiss = { showKugouLogin = false },
-                onLoggedIn = { showKugouLogin = false; refreshRevision++ },
-                targetSlot = PlaybackAccountSlot.Playback,
-            )
-        }
-    }
 
     SettingsGlassGroup {
         SettingsExternalToggleRow(
@@ -926,7 +1140,6 @@ private fun ExperimentalSettings(context: android.content.Context, source: Music
 
         val neteaseCookie = remember(refreshRevision) { NeteaseSessionStore.readPlaybackCookie(context) }
         val qqLoggedIn = remember(refreshRevision) { QQMusicSessionStore.read(context, playback = true).isLoggedIn }
-        val kugouLoggedIn = remember(refreshRevision) { KugouSessionStore.read(context, playback = true).isLoggedIn }
 
         SettingsGlassGroup {
             MeloXIosListRow(
@@ -941,12 +1154,6 @@ private fun ExperimentalSettings(context: android.content.Context, source: Music
                 subtitle = if (qqLoggedIn) stringResource(R.string.provider_logged_in) else stringResource(R.string.provider_not_signed_in),
                 leading = { MeloXSymbolIcon(MeloXSymbol.MusicNote, Modifier.size(24.dp), MaterialTheme.colorScheme.primary) },
                 onClick = { showQQLogin = true },
-            )
-            MeloXIosListRow(
-                title = stringResource(R.string.settings_kugou),
-                subtitle = if (kugouLoggedIn) stringResource(R.string.provider_logged_in) else stringResource(R.string.provider_not_signed_in),
-                leading = { MeloXSymbolIcon(MeloXSymbol.MusicNote, Modifier.size(24.dp), MaterialTheme.colorScheme.primary) },
-                onClick = { showKugouLogin = true },
             )
             MeloXIosListRow(
                 title = stringResource(R.string.settings_apple_music),
@@ -1168,6 +1375,22 @@ private fun PlaybackSettings(context: android.content.Context) {
         )
         SettingsToggleRow(context, stringResource(R.string.settings_heart_mode_on_launch), "playback_heart_mode_on_launch", false, grouped = true)
         SettingsToggleRow(context, stringResource(R.string.settings_previous_restarts), "playback_previous_restarts", true, grouped = true)
+        SettingsToggleRow(
+            context,
+            stringResource(R.string.settings_cloud_shuffle),
+            "playback_cloud_shuffle",
+            true,
+            stringResource(R.string.settings_cloud_shuffle_note),
+            grouped = true,
+        )
+        SettingsToggleRow(
+            context,
+            stringResource(R.string.settings_skip_unavailable),
+            "playback_skip_unavailable",
+            true,
+            stringResource(R.string.settings_skip_unavailable_note),
+            grouped = true,
+        )
         SettingsToggleRow(
             context,
             stringResource(R.string.settings_show_quality_tip),
@@ -1459,16 +1682,34 @@ private fun AnalysisCacheSettings(context: android.content.Context) {
 @Composable
 private fun PlayerAppearanceSettings(context: android.content.Context) {
     val scope = rememberCoroutineScope()
+    // Selecting "custom image" must not persist until an image actually
+    // imports; otherwise cancelling the picker leaves an image-less mode.
+    val restoreArtworkModeIfCustomImageEmpty: () -> Unit = {
+        if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage &&
+            MeloXSettingsRuntime.customBackgroundPath == null
+        ) {
+            MeloXSettingsPreferences.setString(
+                context,
+                "player_background_mode",
+                MeloXPlayerBackgroundMode.BlurredArtwork.name,
+            )
+            MeloXSettingsRuntime.flowingBackdropEnabled = false
+        }
+    }
     val pickCustomBackground = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+        if (uri == null) {
+            restoreArtworkModeIfCustomImageEmpty()
+            return@rememberLauncherForActivityResult
+        }
         scope.launch {
             val imported = withContext(Dispatchers.IO) {
-                MeloXCustomBackgroundStore.import(context, uri, MeloXSettingsRuntime.customBackgroundPath)
+                MeloXCustomBackgroundStore.import(context, uri)
             }
             if (imported == null) {
                 Toast.makeText(context, R.string.settings_custom_background_failed, Toast.LENGTH_SHORT).show()
+                restoreArtworkModeIfCustomImageEmpty()
             } else {
                 MeloXSettingsPreferences.setString(context, "player_custom_background_path", imported)
                 MeloXSettingsPreferences.setString(
@@ -1476,6 +1717,7 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
                     "player_background_mode",
                     MeloXPlayerBackgroundMode.CustomImage.name,
                 )
+                MeloXSettingsRuntime.flowingBackdropEnabled = false
             }
         }
     }
@@ -1515,13 +1757,16 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
                 MeloXPlayerBackgroundMode.BlurredArtwork to stringResource(R.string.settings_bg_blurred_artwork),
                 MeloXPlayerBackgroundMode.CustomImage to stringResource(R.string.settings_bg_custom_image),
             ),
-            onSelected = {
-                MeloXSettingsPreferences.setString(context, "player_background_mode", it.name)
-                MeloXSettingsRuntime.flowingBackdropEnabled = it != MeloXPlayerBackgroundMode.BlurredArtwork
-                if (it == MeloXPlayerBackgroundMode.CustomImage &&
+            onSelected = { mode ->
+                if (mode == MeloXPlayerBackgroundMode.CustomImage &&
                     MeloXSettingsRuntime.customBackgroundPath == null
                 ) {
+                    // Persist the mode only after import succeeds (in the
+                    // picker callback); cancelling keeps the old background.
                     pickCustomBackgroundImage()
+                } else {
+                    MeloXSettingsPreferences.setString(context, "player_background_mode", mode.name)
+                    MeloXSettingsRuntime.flowingBackdropEnabled = mode.usesFlowingBackdrop
                 }
             },
             grouped = true,
@@ -1567,13 +1812,14 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
                 MeloXIosListRow(
                     title = stringResource(R.string.settings_custom_background_remove),
                     onClick = {
-                        MeloXCustomBackgroundStore.delete(customBackgroundPath)
+                        MeloXCustomBackgroundStore.delete(context, customBackgroundPath)
                         MeloXSettingsPreferences.setString(context, "player_custom_background_path", "")
                         MeloXSettingsPreferences.setString(
                             context,
                             "player_background_mode",
                             MeloXPlayerBackgroundMode.BlurredArtwork.name,
                         )
+                        MeloXSettingsRuntime.flowingBackdropEnabled = false
                     },
                 )
             }
@@ -1680,6 +1926,15 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
 @Composable
 private fun LyricsSettings(context: android.content.Context) {
     var lyricsStyle by remember { mutableStateOf(MeloXSettingsRuntime.lyricsStyle) }
+    // Only the Apple Music style is offered for now. Other renderers stay in the
+    // codebase; if one was selected before, move the stored preference back so
+    // the visible selector matches what is actually rendered.
+    LaunchedEffect(Unit) {
+        if (lyricsStyle != MeloXLyricsStyle.AppleMusic) {
+            lyricsStyle = MeloXLyricsStyle.AppleMusic
+            MeloXSettingsPreferences.setString(context, "lyrics_style", MeloXLyricsStyle.AppleMusic.name)
+        }
+    }
     // Group 1: 歌词样式-歌词渲染质量-逐字歌词-普通LRC-点击跳转-长按分享-间奏倒计时-自动跟随-手动滚动恢复-减弱动画
     SettingsGlassGroup {
         MeloXSettingsDropdown(
@@ -1687,8 +1942,6 @@ private fun LyricsSettings(context: android.content.Context) {
             selected = lyricsStyle,
             items = listOf(
                 MeloXLyricsStyle.AppleMusic to stringResource(R.string.settings_apple_music),
-                MeloXLyricsStyle.Eva to stringResource(R.string.settings_lyrics_style_eva),
-                MeloXLyricsStyle.TextPV to stringResource(R.string.settings_lyrics_style_text_pv),
             ),
             onSelected = { lyricsStyle = it; MeloXSettingsPreferences.setString(context, "lyrics_style", it.name) },
             grouped = true,
@@ -2478,7 +2731,7 @@ private fun StorageSettings(context: android.content.Context) {
     }
     Spacer(Modifier.height(10.dp))
 
-    if (downloads.activeDownloads.isNotEmpty()) {
+    if (downloads.activeDownloads.isNotEmpty() || downloads.pausedDownloads.isNotEmpty()) {
         Text(stringResource(R.string.settings_storage_downloading), modifier = Modifier.padding(top=10.dp,bottom=8.dp), fontWeight=FontWeight.SemiBold)
         SettingsGlassGroup {
             downloads.activeDownloads.values.forEach { active ->
@@ -2487,7 +2740,18 @@ private fun StorageSettings(context: android.content.Context) {
                         Text(active.song.name, maxLines=1, overflow=TextOverflow.Ellipsis)
                         Text(active.fractionCompleted?.let { "${(it*100).toInt()}% · ${active.quality.title}" } ?: active.quality.title, color=MaterialTheme.colorScheme.onSurface.copy(alpha=.5f), fontSize=11.sp)
                     }
+                    Text(stringResource(R.string.action_pause), color=MaterialTheme.colorScheme.primary, modifier=Modifier.clickable { downloads.pause(active.song.id) }.padding(8.dp))
                     Text(stringResource(R.string.action_cancel), color=MaterialTheme.colorScheme.error, modifier=Modifier.clickable { downloads.cancel(active.song.id) }.padding(8.dp))
+                }
+            }
+            downloads.pausedDownloads.values.forEach { paused ->
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(paused.song.name, maxLines=1, overflow=TextOverflow.Ellipsis)
+                        Text("${paused.fractionCompleted?.let { "${(it*100).toInt()}%" } ?: ""} · ${paused.quality.title}".trim(), color=MaterialTheme.colorScheme.onSurface.copy(alpha=.5f), fontSize=11.sp)
+                    }
+                    Text(stringResource(R.string.action_resume), color=MaterialTheme.colorScheme.primary, modifier=Modifier.clickable { downloads.resume(paused.song.id) }.padding(8.dp))
+                    Text(stringResource(R.string.action_cancel), color=MaterialTheme.colorScheme.error, modifier=Modifier.clickable { downloads.cancel(paused.song.id) }.padding(8.dp))
                 }
             }
         }
@@ -3041,6 +3305,9 @@ private fun AboutSettings(context: android.content.Context) {
     var lastVersionTapAt by remember { mutableStateOf(0L) }
     var showCatEgg by remember { mutableStateOf(false) }
     var showReleaseNotes by remember { mutableStateOf(false) }
+    var showLogViewer by remember { mutableStateOf(false) }
+    var logViewerLoading by remember { mutableStateOf(false) }
+    var logViewerText by remember { mutableStateOf<String?>(null) }
     var downloadSource by remember { mutableStateOf(githubRouting.selectedSource()) }
     val exportLogsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -3110,6 +3377,7 @@ private fun AboutSettings(context: android.content.Context) {
                 stringResource(R.string.settings_about_sponsor_26d40) to stringResource(R.string.settings_about_sponsor_amount_50),
                 stringResource(R.string.settings_about_sponsor_aec4c) to stringResource(R.string.settings_about_sponsor_amount_6_monthly),
                 stringResource(R.string.settings_about_sponsor_bai) to stringResource(R.string.settings_about_sponsor_amount_5),
+                stringResource(R.string.settings_about_sponsor_zhongmo) to stringResource(R.string.settings_about_sponsor_amount_8_88),
             ).forEach { (name, amount) ->
                 Row(
                     Modifier.fillMaxWidth().padding(top = 9.dp),
@@ -3315,6 +3583,17 @@ private fun AboutSettings(context: android.content.Context) {
                      "lladlam/Square：Spotify 与 YouTube Music 双后端架构参考\n" +
                      "YouTube Music：基于 Square 架构，使用 vendored Metrolist InnerTube（GPL-3.0）与 NewPipeExtractor\n" +
                      "Spotify：参考 Square Spotify backend，使用 librespot-java（Apache-2.0）\n" +
+                     "MakcRe/KuGouMusicApi：酷狗概念版协议、签名与每日 VIP 领取／升级接口参考（MIT）\n" +
+                     "guowenye/qishui-api：汽水音乐接口、扫码登录、目录、歌词与播放字段参考（MIT）\n" +
+                     "MoeKoeMusic/MoeKoeMusic：概念版桌面账号与签到流程参考（GPL-2.0）\n" +
+                     "MoeKoeMusic/MoeKoeMusic-mobile：移动端签到流程与结果处理参考（GPL-2.0）；MoeKoe 项目仅作行为参考，未复制代码或界面资源\n" +
+                     "lladlam/MeloX-AutoSync：本地逐字歌词对齐与发音映射参考\n" +
+                     "Microsoft ONNX Runtime：本地歌词对齐推理（MIT）\n" +
+                     "AndroidX / Jetpack Compose / Media3：界面、生命周期与播放基础（Apache-2.0）\n" +
+                     "Coil / OkHttp / kotlinx.coroutines：封面加载、网络与协程（Apache-2.0）\n" +
+                     "HarlonWang/quickjs-wrapper：LX Music 兼容音源脚本隔离运行时（各组件保留原许可证）\n" +
+                     "ZXing：二维码生成（Apache-2.0）\n" +
+                     "Shizuku：可选的免 Root HyperOS 兼容接入（Apache-2.0）\n" +
                      "vivo OriginOS：自动尝试原子岛通知适配，不提供单独开关\n" +
                      "thlucas1/SpotifyWebApiPython：Spotify Web API 客户端，提供 Spotify API 参考\n" +
                     "bromothymolb/bilibili-api-zoku：Bilibili API 调用整合项目，提供 Bilibili API 参考\n" +
@@ -3349,6 +3628,21 @@ private fun AboutSettings(context: android.content.Context) {
     Spacer(Modifier.height(10.dp))
     SettingsActionButton(stringResource(R.string.settings_about_sponsor)) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://ifdian.net/a/lladlam"))) }
+    }
+    Spacer(Modifier.height(10.dp))
+    SettingsActionButton(stringResource(R.string.settings_about_view_logs)) {
+        if (!logViewerLoading && !showLogViewer) {
+            showLogViewer = true
+            logViewerLoading = true
+            logViewerText = null
+            scope.launch {
+                logViewerText = withContext(Dispatchers.IO) {
+                    runCatching { MeloXLogExporter.previewRecentLogs(context) }
+                        .getOrElse { error -> context.getString(R.string.settings_about_export_failed) + "：${error.message}" }
+                }
+                logViewerLoading = false
+            }
+        }
     }
     Spacer(Modifier.height(10.dp))
     SettingsActionButton(if (exportingLogs) stringResource(R.string.settings_about_exporting) else stringResource(R.string.settings_about_export)) {
@@ -3427,6 +3721,35 @@ private fun AboutSettings(context: android.content.Context) {
             }
             SettingsActionButton(stringResource(R.string.action_done), Modifier.fillMaxWidth().padding(top = 12.dp)) {
                 showReleaseNotes = false
+            }
+        }
+    }
+    if (showLogViewer) {
+        MeloXGlassDialog(visible = true, onDismiss = { showLogViewer = false }) {
+            Text(stringResource(R.string.settings_about_logs_title), style = MaterialTheme.typography.titleLarge)
+            if (logViewerLoading) {
+                Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text(stringResource(R.string.settings_about_exporting), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f))
+                }
+            } else {
+                Column(
+                    Modifier
+                        .padding(top = 12.dp)
+                        .height(360.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        logViewerText.orEmpty(),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                }
+            }
+            SettingsActionButton(stringResource(R.string.action_done), Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                showLogViewer = false
             }
         }
     }

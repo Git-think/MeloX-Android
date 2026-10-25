@@ -62,11 +62,13 @@ object SpotifyTrackMatcher {
         MusicSource.AppleMusic -> 4
         MusicSource.Netease -> 3
         MusicSource.Kugou -> 2
+        MusicSource.KugouLite -> 2
         MusicSource.Kuwo -> 2
         MusicSource.Bilibili -> 1
         MusicSource.Spotify -> 0
         MusicSource.YouTubeMusic -> 0
         MusicSource.Jellyfin -> 0
         MusicSource.Local -> 0
+        MusicSource.Qishui -> 0
     }
 }

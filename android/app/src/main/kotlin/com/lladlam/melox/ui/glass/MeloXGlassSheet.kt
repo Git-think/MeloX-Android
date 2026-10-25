@@ -11,13 +11,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -137,6 +140,12 @@ fun MeloXGlassDialog(
     visible: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * When set, the glass panel is capped to this fraction of the safe drawing
+     * height. Content can then use `weight` + `verticalScroll` for tall bodies
+     * such as release notes, while the panel always stays on screen.
+     */
+    maxHeightFraction: Float? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val visibility = remember { MutableTransitionState(visible) }
@@ -189,33 +198,51 @@ fun MeloXGlassDialog(
                             indication = null,
                             onClick = requestDismiss,
                         ),
-                    contentAlignment = Alignment.Center,
                 ) {
-                    Column(
-                        modifier = modifier
-                            .padding(horizontal = 28.dp)
-                            .fillMaxWidth()
-                            .widthIn(max = 360.dp)
-                            .meloXGlassSurface(
-                                shape = RoundedCornerShape(28.dp),
-                                material = MeloXGlassMaterial.Regular,
-                                tint = dialogTint,
-                                surfaceColor = dialogSurface,
-                            )
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {},
-                            )
-                            .padding(horizontal = 18.dp, vertical = 18.dp),
-                        content = {
-                            // ⚠ 只包住 content，不能包住 Column：面板的实色 surface 挂在
-                            //   Column 的 modifier 上，那份取样必须保留；这里只切断内容子树。
-                            CompositionLocalProvider(LocalMeloXBackdrop provides dialogBackdrop) {
-                                content()
-                            }
-                        },
-                    )
+                    // Keep every dialog inside the status/navigation safe area and
+                    // leave a small visual margin on short screens.
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .safeDrawingPadding()
+                            .padding(horizontal = 28.dp, vertical = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            modifier = modifier
+                                .fillMaxWidth()
+                                .widthIn(max = 360.dp)
+                                .then(
+                                    if (maxHeightFraction != null) {
+                                        Modifier.heightIn(
+                                            max = maxHeight *
+                                                maxHeightFraction.coerceIn(0.1f, 1f),
+                                        )
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .meloXGlassSurface(
+                                    shape = RoundedCornerShape(28.dp),
+                                    material = MeloXGlassMaterial.Regular,
+                                    tint = dialogTint,
+                                    surfaceColor = dialogSurface,
+                                )
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {},
+                                )
+                                .padding(horizontal = 18.dp, vertical = 18.dp),
+                            content = {
+                                // ⚠ 只包住 content，不能包住 Column：面板的实色 surface 挂在
+                                //   Column 的 modifier 上，那份取样必须保留；这里只切断内容子树。
+                                CompositionLocalProvider(LocalMeloXBackdrop provides dialogBackdrop) {
+                                    content()
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
