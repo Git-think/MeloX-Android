@@ -224,10 +224,21 @@ Some RuntimeShader and Backdrop effects need a newer Android version. Older vers
 5. Output:
 
    ```text
-   android/app/build/outputs/apk/debug/app-debug.apk
+    android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+    android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
    ```
 
 GitHub Actions builds a debug APK when `main` changes. Development APKs published to users are signed with the project release key and attached to the matching GitHub Release.
+
+## Experimental CLI
+
+Enable **Settings → Experimental features → CLI mode** to control playback over ADB:
+
+```bash
+python3 tools/melox_cli.py --package com.lladlam.melox.android.dev status
+```
+
+Supports playback controls, queue/status queries, seeking, volume, shuffle/repeat, and provider search/play. See [CLI documentation](docs/CLI.md) for setup and commands.
 
 ## Release signature
 

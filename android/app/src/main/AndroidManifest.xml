@@ -67,6 +67,11 @@
                 tools:node="remove" />
         </provider>
 
+        <receiver
+            android:name=".platform.cli.MeloXCliReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

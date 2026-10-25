@@ -1027,6 +1027,22 @@ private fun LanSettings(context: android.content.Context) {
 
 @Composable
 private fun ExperimentalSettings(context: android.content.Context, source: MusicSource, session: NeteaseSessionStore) {
+    var cliEnabled by remember { mutableStateOf(MeloXSettingsPreferences.boolean(context, "experimental_cli_enabled", false)) }
+    SettingsGlassGroup {
+        SettingsExternalToggleRow(
+            title = "CLI 模式",
+            value = cliEnabled,
+            note = "通过电脑 ADB 命令查询状态、控制播放和搜索歌曲。默认关闭，仅允许 ADB shell 调用。",
+            grouped = true,
+        ) { enabled ->
+            cliEnabled = enabled
+            MeloXSettingsPreferences.setBoolean(context, "experimental_cli_enabled", enabled)
+        }
+    }
+    if (cliEnabled) {
+        SettingsInfoCard("电脑运行：python3 tools/melox_cli.py status\n支持 play / pause / next / previous / seek / queue / search / search-play；完整说明见 docs/CLI.md。")
+    }
+    Spacer(Modifier.height(10.dp))
     var playbackEnabled by remember { mutableStateOf(PlaybackAccountStore.isEnabled(context)) }
     var showQQLogin by remember { mutableStateOf(false) }
     var showClearPlaybackConfirmation by remember { mutableStateOf(false) }
