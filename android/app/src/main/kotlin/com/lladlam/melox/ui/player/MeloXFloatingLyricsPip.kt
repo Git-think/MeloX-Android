@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import android.os.Build
 import android.util.Rational
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +68,9 @@ internal object MeloXFloatingLyricsPip {
         }
         return PictureInPictureParams.Builder()
             .setAspectRatio(Rational(16, 9))
-            .setSeamlessResizeEnabled(true)
+            .apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setSeamlessResizeEnabled(true)
+            }
             .setActions(
                 listOf(
                     action(701, MeloXPlaybackService.ACTION_PREVIOUS, android.R.drawable.ic_media_previous, "上一首"),

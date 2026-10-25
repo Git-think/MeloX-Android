@@ -770,7 +770,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         if (playlistAnalysisJob?.isActive == true) return
         if (player?.isPlaying != true) {
             val notification = buildPlaylistAnalysisNotification()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
                     ANALYSIS_NOTIFICATION_ID,
                     notification,

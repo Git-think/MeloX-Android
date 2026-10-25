@@ -17,6 +17,12 @@
 -keep class com.lladlam.melox.core.provider.qqmusic.QQMusicApiClientKt { *; }
 -keep class com.lladlam.melox.core.network.NeteaseSearchClientKt { *; }
 
+# Android 10/EMUI crash fix: the always-composed audio-output entry must stay
+# free of API-30/34 MediaRouter2 types. R8 may merge small Kotlin file facades,
+# which would pull those references back into the cold-start class.
+-keep class com.lladlam.melox.ui.player.MeloXAudioOutputDialogKt { *; }
+-keep class com.lladlam.melox.ui.player.MeloXModernAudioOutputDialogKt { *; }
+
 # Shizuku and optional vendor bridges are discovered through Android framework metadata.
 -keep class rikka.shizuku.** { *; }
 -dontwarn rikka.shizuku.**

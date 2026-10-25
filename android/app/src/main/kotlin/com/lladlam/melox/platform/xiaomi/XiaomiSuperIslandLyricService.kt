@@ -51,7 +51,7 @@ class XiaomiSuperIslandLyricService : Service() {
     }
 
     private fun startWithFocus(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
