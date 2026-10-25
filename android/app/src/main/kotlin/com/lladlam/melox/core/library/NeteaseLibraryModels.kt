@@ -18,6 +18,8 @@ data class NeteasePlaylistSummary(
      * the single renderer for NetEase, QQ Music and Kugou.
      */
     val providerPlaylist: MusicPlaylistSummary? = null,
+    /** App-owned collection (currently the unified favorites playlist), not a NetEase playlist. */
+    val isMeloXLocal: Boolean = false,
 )
 
 data class NeteasePlaylistDetail(

@@ -72,9 +72,11 @@ import com.lladlam.melox.core.music.model.MusicResourceId
 import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.model.TrackAvailability
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigPolicy
 import com.lladlam.melox.core.music.provider.FavoriteCapability
 import com.lladlam.melox.core.music.provider.MeloXMusicProviders
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.music.provider.PlaylistCapability
 import com.lladlam.melox.core.music.provider.UserLibraryCapability
 import com.lladlam.melox.core.music.provider.ThirdPartyMusicSourceConsentStore
@@ -2738,6 +2740,28 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     private suspend fun handleSystemFavoriteToggle(outcome: (String) -> Unit = {}) {
         val active = player ?: return outcome("no player")
         val item = active.currentMediaItem ?: return outcome("no current item")
+        if (MeloXUnifiedFavorites.enabled(this)) {
+            val identity = PlaybackTrackIdentity.fromMediaItem(item)
+                ?: item.mediaId.toLongOrNull()?.takeIf { it > 0L }
+                    ?.let { MusicResourceId(MusicSource.Netease, it.toString()) }
+                ?: return outcome("unresolvable identity")
+            val track = buildMusicTrackFromMediaItem(item, identity)
+            val targetFavorite = MeloXUnifiedFavorites.toggle(this, track)
+            runCatching {
+                val extras = Bundle(item.mediaMetadata.extras).apply {
+                    putBoolean(PlaybackTrackIdentity.IsFavoriteExtra, targetFavorite)
+                }
+                active.replaceMediaItem(
+                    active.currentMediaItemIndex,
+                    item.buildUpon()
+                        .setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build())
+                        .build(),
+                )
+            }
+            Log.i(TAG, "System favorite toggled in MeloX favorites -> $targetFavorite")
+            outcome("favorited=$targetFavorite")
+            return
+        }
         val identity = PlaybackTrackIdentity.fromMediaItem(item)
         if (identity == null) {
             // NetEase legacy MediaItems use the numeric song id as mediaId and
@@ -2818,12 +2842,31 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             artists = listOf(MusicArtistRef(name = artist.ifBlank { "未知歌手" })),
             artworkUrl = artwork,
             durationMs = durationMs,
+            availability = TrackAvailability.Playable,
             providerMetadata = when (identity.source) {
+                MusicSource.Netease -> ProviderTrackMetadata.Netease(
+                    numericId = identity.value.toLongOrNull() ?: 0L,
+                )
+                MusicSource.QQMusic -> ProviderTrackMetadata.QQMusic(songMid = identity.value)
                 MusicSource.Kugou -> ProviderTrackMetadata.Kugou(hash = identity.value)
                 MusicSource.Kuwo -> ProviderTrackMetadata.Kuwo(mid = identity.value.toLongOrNull() ?: 0L)
+                MusicSource.AppleMusic -> ProviderTrackMetadata.AppleMusic(
+                    catalogId = identity.value,
+                    storefront = "us",
+                )
+                MusicSource.Bilibili -> com.lladlam.melox.core.provider.bilibili.BilibiliProvider
+                    .parseIdentity(identity.value)
+                    ?.let { (bvid, cid) -> ProviderTrackMetadata.Bilibili(bvid, cid) }
+                    ?: ProviderTrackMetadata.Empty
                 MusicSource.Spotify -> ProviderTrackMetadata.Spotify(trackId = identity.value)
+                MusicSource.YouTubeMusic -> ProviderTrackMetadata.YouTube(videoId = identity.value)
+                MusicSource.Local -> ProviderTrackMetadata.Local(
+                    contentUri = item.localConfiguration?.uri?.getQueryParameter("localContentUri").orEmpty(),
+                    fileKey = identity.value,
+                )
                 MusicSource.Jellyfin -> ProviderTrackMetadata.Empty
-                else -> ProviderTrackMetadata.Empty
+                MusicSource.Qishui -> ProviderTrackMetadata.Empty
+                MusicSource.KugouLite -> ProviderTrackMetadata.Kugou(hash = identity.value)
             },
         )
     }

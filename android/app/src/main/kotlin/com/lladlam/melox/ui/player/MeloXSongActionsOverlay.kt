@@ -66,6 +66,7 @@ import com.lladlam.melox.core.library.NeteaseLibraryClient
 import com.lladlam.melox.core.library.NeteasePlaylistSummary
 import com.lladlam.melox.core.model.SearchSong
 import com.lladlam.melox.core.music.model.MusicSource
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.network.MeloXCommentRepliesPage
 import com.lladlam.melox.core.network.MeloXListenTogetherRoom
 import com.lladlam.melox.core.network.MeloXMusicComment
@@ -169,8 +170,14 @@ fun MeloXSongActionsOverlay(
     val listenRoom = togetherState.room
     var invitationText by remember(visible) { mutableStateOf("") }
 
-    LaunchedEffect(visible, song.id) {
+    val unifiedFavoritesEnabled = MeloXUnifiedFavorites.enabled(app)
+    val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
+    LaunchedEffect(visible, song.id, unifiedFavoritesEnabled, unifiedFavoritesRevision) {
         if (!visible) return@LaunchedEffect
+        if (unifiedFavoritesEnabled) {
+            liked = MeloXUnifiedFavorites.contains(app, MeloXUnifiedFavorites.fromNetease(song))
+            return@LaunchedEffect
+        }
         runCatching {
             val profile = account.accountProfile()
             val ids = withContext(Dispatchers.IO) { library.likedSongIdsBlocking(profile.userId) }
@@ -334,6 +341,10 @@ fun MeloXSongActionsOverlay(
                                         scope.launch { loadOwnedPlaylists() }
                                     },
                                     MeloXMoreAction(if (liked == true) stringResource(R.string.player_unlike) else stringResource(R.string.player_like), MeloXSymbol.Heart) {
+                                        if (unifiedFavoritesEnabled) {
+                                            liked = MeloXUnifiedFavorites.toggle(app, MeloXUnifiedFavorites.fromNetease(song))
+                                            return@MeloXMoreAction
+                                        }
                                         val desired = liked != true
                                         busy = true
                                         scope.launch {

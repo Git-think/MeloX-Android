@@ -10,6 +10,7 @@ import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.PlaybackResolution
 import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.music.provider.MusicCapability
 import com.lladlam.melox.core.music.provider.MusicProvider
 import com.lladlam.melox.core.music.provider.LocalAggregationCapability
@@ -29,6 +30,10 @@ import java.util.UUID
 class LocalProvider(context: Context) : MusicProvider, SearchCapability, PlaybackCapability,
     LocalAggregationCapability, FavoriteCapability, PlaylistCapability, PlaylistWriteCapability, PlaylistSyncCapability, LyricsCapability {
     private val repository = LocalMusicRepository(context)
+    private val appContext = context.applicationContext
+    private val isUnifiedFavorites: (MusicPlaylistSummary) -> Boolean = { playlist ->
+        playlist.id.source == MusicSource.Local && playlist.id.value == MeloXUnifiedFavorites.PlaylistId
+    }
 
     override val source: MusicSource = MusicSource.Local
     override val displayName: String = source.displayName
@@ -107,6 +112,14 @@ class LocalProvider(context: Context) : MusicProvider, SearchCapability, Playbac
         page: Int,
         pageSize: Int,
     ): MusicPlaylistDetail {
+        if (isUnifiedFavorites(playlist)) {
+            val tracks = MeloXUnifiedFavorites.tracks(appContext)
+            return MusicPlaylistDetail(
+                playlist.copy(trackCount = tracks.size),
+                tracks,
+                tracks.size.toLong(),
+            )
+        }
         val local = repository.playlists().firstOrNull { it.id == playlist.id.value }
         val tracks = local?.trackKeys.orEmpty()
             .mapNotNull(repository::track)
@@ -115,6 +128,10 @@ class LocalProvider(context: Context) : MusicProvider, SearchCapability, Playbac
     }
 
     override suspend fun addTrackToPlaylist(track: MusicTrack, playlist: MusicPlaylistSummary) {
+        if (isUnifiedFavorites(playlist)) {
+            MeloXUnifiedFavorites.set(appContext, track, true)
+            return
+        }
         val current = repository.playlists().firstOrNull { it.id == playlist.id.value }
             ?: LocalPlaylist(playlist.id.value, playlist.title)
         repository.savePlaylist(current.copy(trackKeys = (current.trackKeys + track.id.value).distinct()))
@@ -129,22 +146,32 @@ class LocalProvider(context: Context) : MusicProvider, SearchCapability, Playbac
     override val canDeletePlaylists = true
 
     override suspend fun deletePlaylist(playlist: MusicPlaylistSummary) {
+        if (isUnifiedFavorites(playlist)) return
         repository.removePlaylist(playlist.id.value)
     }
 
     override suspend fun renamePlaylist(playlist: MusicPlaylistSummary, name: String) {
+        if (isUnifiedFavorites(playlist)) return
         repository.playlists().firstOrNull { it.id == playlist.id.value }?.let {
             repository.savePlaylist(it.copy(name = name.ifBlank { it.name }))
         }
     }
 
     override suspend fun removeTrackFromPlaylist(track: MusicTrack, playlist: MusicPlaylistSummary) {
+        if (isUnifiedFavorites(playlist)) {
+            MeloXUnifiedFavorites.set(appContext, track, false)
+            return
+        }
         repository.playlists().firstOrNull { it.id == playlist.id.value }?.let {
             repository.savePlaylist(it.copy(trackKeys = it.trackKeys.filterNot { key -> key == track.id.value }))
         }
     }
 
     override suspend fun reorderPlaylistTrack(playlist: MusicPlaylistSummary, track: MusicTrack, newIndex: Int) {
+        if (isUnifiedFavorites(playlist)) {
+            MeloXUnifiedFavorites.reorder(appContext, track, newIndex)
+            return
+        }
         repository.playlists().firstOrNull { it.id == playlist.id.value }?.let {
             val keys = it.trackKeys.filterNot { key -> key == track.id.value }.toMutableList()
             keys.add(newIndex.coerceIn(0, keys.size), track.id.value)

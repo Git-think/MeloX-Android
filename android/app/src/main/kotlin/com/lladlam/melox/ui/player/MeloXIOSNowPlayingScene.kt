@@ -101,8 +101,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.library.NeteaseLibraryClient
+import com.lladlam.melox.core.music.model.MusicAlbumRef
+import com.lladlam.melox.core.music.model.MusicArtistRef
+import com.lladlam.melox.core.music.model.MusicResourceId
+import com.lladlam.melox.core.music.model.MusicSource
+import com.lladlam.melox.core.music.model.MusicTrack
+import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.model.TrackAvailability
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.network.NeteaseMusicOperationsClient
 import com.lladlam.melox.core.network.NeteaseSearchClient
+import com.lladlam.melox.core.provider.local.LocalMusicRepository
+import com.lladlam.melox.playback.PlaybackTrackIdentity
 
 /**
  * The portrait Now Playing scene mirrors the upstream iOS page architecture:
@@ -150,7 +160,7 @@ internal fun MeloXIOSNowPlayingScene(
     columnCenterProgress: () -> Float = { 0f },
     sharedTransitionScope: SharedTransitionScope,
 ) {
-    val favorite = rememberTrackFavorite(state.mediaId)
+    val favorite = rememberTrackFavorite(state)
     // ★ 统一主时间线：竖/横两套布局都作为**共享 orientTransition** 的 AnimatedVisibility，
     //   淡入淡出与封面滑移跑在同一条 spring 上（不再是两个独立 tween 时钟）。
     //   转屏时旧布局淡出、新布局淡入与封面移动严格同步 = 一镜到底。
@@ -1323,9 +1333,52 @@ private data class MeloXTrackFavorite(
 )
 
 @Composable
-private fun rememberTrackFavorite(mediaId: String?): MeloXTrackFavorite {
+private fun rememberTrackFavorite(state: MeloXPlaybackUiState): MeloXTrackFavorite {
     val context = LocalContext.current
     val app = context.applicationContext
+    val mediaId = state.mediaId
+    val identity = remember(mediaId) { mediaId?.let(PlaybackTrackIdentity::decode) }
+    val unifiedFavoritesEnabled = MeloXUnifiedFavorites.enabled(app)
+    val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
+    val track = remember(identity, state.title, state.artist, state.album, state.artworkUrl, state.durationMs) {
+        identity?.let { id ->
+            MusicTrack(
+                id = id,
+                title = state.title.ifBlank { "未知歌曲" },
+                artists = listOf(MusicArtistRef(name = state.artist.ifBlank { "未知歌手" })),
+                album = state.album.takeIf(String::isNotBlank)?.let { MusicAlbumRef(name = it) },
+                artworkUrl = state.artworkUrl,
+                durationMs = state.durationMs.takeIf { it > 0L },
+                availability = TrackAvailability.Playable,
+                providerMetadata = when (id.source) {
+                    MusicSource.Netease -> ProviderTrackMetadata.Netease(
+                        numericId = id.value.toLongOrNull() ?: 0L,
+                    )
+                    MusicSource.QQMusic -> ProviderTrackMetadata.QQMusic(songMid = id.value)
+                    MusicSource.Kugou, MusicSource.KugouLite ->
+                        ProviderTrackMetadata.Kugou(hash = id.value)
+                    MusicSource.Kuwo -> ProviderTrackMetadata.Kuwo(
+                        mid = id.value.toLongOrNull() ?: 0L,
+                    )
+                    MusicSource.AppleMusic -> ProviderTrackMetadata.AppleMusic(
+                        catalogId = id.value,
+                        storefront = "us",
+                    )
+                    MusicSource.Bilibili -> com.lladlam.melox.core.provider.bilibili.BilibiliProvider
+                        .parseIdentity(id.value)
+                        ?.let { (bvid, cid) -> ProviderTrackMetadata.Bilibili(bvid, cid) }
+                        ?: ProviderTrackMetadata.Empty
+                    MusicSource.Spotify -> ProviderTrackMetadata.Spotify(trackId = id.value)
+                    MusicSource.YouTubeMusic -> ProviderTrackMetadata.YouTube(videoId = id.value)
+                    MusicSource.Local -> ProviderTrackMetadata.Local(
+                        contentUri = LocalMusicRepository(app).track(id.value)?.contentUri.orEmpty(),
+                        fileKey = id.value,
+                    )
+                    MusicSource.Jellyfin, MusicSource.Qishui -> ProviderTrackMetadata.Empty
+                },
+            )
+        }
+    }
     val cookieProvider = remember(app) { { NeteaseSessionStore.readCookie(app) } }
     val library = remember(app) { NeteaseLibraryClient(cookieProvider = cookieProvider) }
     val ops = remember(app) { NeteaseMusicOperationsClient(cookieProvider = cookieProvider) }
@@ -1351,9 +1404,14 @@ private fun rememberTrackFavorite(mediaId: String?): MeloXTrackFavorite {
     val syncJobState = remember(mediaId) { mutableStateOf<Job?>(null) }
 
     // ★ 首屏查询（切歌后拉取当前收藏集合）。seq 判据避免覆盖刚发生的乐观 tap。
-    LaunchedEffect(mediaId) {
-        val id = mediaId?.toLongOrNull() ?: return@LaunchedEffect
+    LaunchedEffect(mediaId, track, unifiedFavoritesEnabled, unifiedFavoritesRevision) {
         likedState.value = null
+        if (unifiedFavoritesEnabled) {
+            likedState.value = track?.let { MeloXUnifiedFavorites.contains(app, it) }
+            return@LaunchedEffect
+        }
+        val id = identity?.takeIf { it.source == MusicSource.Netease }
+            ?.value?.toLongOrNull() ?: return@LaunchedEffect
         val querySeqAtStart = seqState.value
         runCatching {
             val profile = account.accountProfile()
@@ -1367,9 +1425,14 @@ private fun rememberTrackFavorite(mediaId: String?): MeloXTrackFavorite {
         }
     }
 
-    val toggle = remember(mediaId, scope) {
+    val toggle = remember(mediaId, track, unifiedFavoritesEnabled, scope) {
         {
-            val id = mediaId?.toLongOrNull() ?: return@remember
+            if (unifiedFavoritesEnabled) {
+                track?.let { likedState.value = MeloXUnifiedFavorites.toggle(app, it) }
+                return@remember
+            }
+            val id = identity?.takeIf { it.source == MusicSource.Netease }
+                ?.value?.toLongOrNull() ?: return@remember
             // ★ UI 立即翻转：无论网络成败，用户看到的状态永远等于「自己点的那一下的意图」，
             //   这是「点多几次按钮没反应」彻底消失的根本——点击一定有可见反馈。
             val desired = likedState.value != true

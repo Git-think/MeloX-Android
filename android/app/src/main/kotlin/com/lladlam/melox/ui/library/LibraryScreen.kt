@@ -2,6 +2,7 @@ package com.lladlam.melox.ui.library
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -132,6 +133,7 @@ import com.lladlam.melox.core.music.model.MusicArtistSummary
 import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.provider.MeloXLegacyUiBridge
 import com.lladlam.melox.core.music.provider.MeloXMusicProviders
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.music.provider.loadAllPlaylistTracks
 import com.lladlam.melox.core.music.provider.AlbumCapability
 import com.lladlam.melox.core.music.provider.ArtistCapability
@@ -252,7 +254,7 @@ private fun librarySearchMatches(query: String, vararg fields: String?): Boolean
  */
 private fun MeloXLibraryPage.isEnabled(source: MusicSource, provider: MusicProvider?): Boolean = when {
     source == MusicSource.Bilibili -> this == MeloXLibraryPage.Playlists || this == MeloXLibraryPage.Downloads
-    source == MusicSource.Local -> this == MeloXLibraryPage.Songs
+    source == MusicSource.Local -> this == MeloXLibraryPage.Songs || this == MeloXLibraryPage.Playlists
     source != MusicSource.Netease -> when (this) {
         MeloXLibraryPage.Playlists -> true
         MeloXLibraryPage.Albums, MeloXLibraryPage.Artists -> provider is LibraryCollectionCapability
@@ -303,8 +305,18 @@ fun LibraryScreen(
         "library_last_page_${source.storageValue}"
     }
 
-    val initialLibraryPage = remember(source, forcedPageName) {
-        val fallback = if (source == MusicSource.Netease || source == MusicSource.Local) MeloXLibraryPage.Songs else MeloXLibraryPage.Playlists
+    val unifiedFavoritesAvailable = MeloXUnifiedFavorites.enabled(appContext)
+    val initialLibraryPage = remember(source, forcedPageName, session.isLoggedIn, unifiedFavoritesAvailable) {
+        val fallback = if (source == MusicSource.Netease &&
+            !session.isLoggedIn &&
+            unifiedFavoritesAvailable
+        ) {
+            MeloXLibraryPage.Playlists
+        } else if (source == MusicSource.Netease || source == MusicSource.Local) {
+            MeloXLibraryPage.Songs
+        } else {
+            MeloXLibraryPage.Playlists
+        }
         val name = forcedPageName ?: if (MeloXSettingsRuntime.rememberLibraryPage) {
             MeloXSettingsPreferences.string(appContext, libraryPagePreferenceKey, fallback.name)
         } else fallback.name
@@ -341,6 +353,8 @@ fun LibraryScreen(
         errorMessage = null
         if (source == MusicSource.Netease) {
             if (!session.isLoggedIn) {
+                snapshot = NeteaseLibrarySnapshot(emptyList(), emptyList(), emptyList())
+                    .withUnifiedFavorites(appContext)
                 loading = false
                 return
             }
@@ -352,7 +366,7 @@ fun LibraryScreen(
             }
             runCatching { client.snapshot(userId) }
                 .onSuccess { fresh ->
-                    snapshot = fresh
+                    snapshot = fresh.withUnifiedFavorites(appContext)
                     session.profile?.userId?.let { uid ->
                         // 防御：网易云会话（MUSIC_U）过期后，/api/song/like/get 会返回
                         // HTTP 200 但空 ids 数组，导致本次刷新把已收藏歌曲「静默清空」。
@@ -390,7 +404,7 @@ fun LibraryScreen(
                             playlists = emptyList(),
                             recentSongs = emptyList(),
                             likedPlaylistId = null,
-                        )
+                        ).withUnifiedFavorites(appContext)
                     }
                 }.onFailure {
                     providerAccount = null
@@ -420,7 +434,9 @@ fun LibraryScreen(
                 }
             }.onSuccess { (account, playlists) ->
                 providerAccount = account
-                snapshot = if (account == null) null else MeloXLegacyUiBridge.library(playlists)
+                snapshot = if (account == null) null else {
+                    MeloXLegacyUiBridge.library(playlists).withUnifiedFavorites(appContext)
+                }
                 val collections = provider as? LibraryCollectionCapability
                 if (account != null && collections != null) {
                     runCatching {
@@ -448,14 +464,34 @@ fun LibraryScreen(
     val youtubeSessionRevision by YouTubeSessionStore.revision.collectAsState()
     LaunchedEffect(source, session.cookie, session.profile?.userId, youtubeSessionRevision.takeIf { source == MusicSource.YouTubeMusic }) {
         if (source == MusicSource.Netease) {
-            val userId = session.profile?.userId ?: return@LaunchedEffect
-            cache.loadSnapshot(userId)?.let { snapshot = it }
+            val userId = session.profile?.userId
+            if (userId == null) {
+                if (MeloXUnifiedFavorites.enabled(appContext)) {
+                    snapshot = NeteaseLibrarySnapshot(emptyList(), emptyList(), emptyList())
+                        .withUnifiedFavorites(appContext)
+                }
+                loading = false
+                return@LaunchedEffect
+            }
+            cache.loadSnapshot(userId)?.let { snapshot = it.withUnifiedFavorites(appContext) }
             if (NeteaseLibraryCache.beginLibraryColdStartRefresh(userId, cache.cacheDir)) {
                 refreshLibrary()
             }
         } else {
             refreshLibrary()
         }
+    }
+
+    // The app-owned playlist can change from any source's song menu. Refresh
+    // the injected Library row and its count without a network round trip.
+    val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
+    LaunchedEffect(unifiedFavoritesRevision, source) {
+        val base = snapshot ?: if (source == MusicSource.Netease && !session.isLoggedIn) {
+            NeteaseLibrarySnapshot(emptyList(), emptyList(), emptyList())
+        } else {
+            null
+        }
+        snapshot = base?.withUnifiedFavorites(appContext)
     }
 
     LaunchedEffect(source, selectedPage) {
@@ -482,7 +518,7 @@ fun LibraryScreen(
     BackHandler(enabled = selectedAlbum != null) { selectedAlbum = null }
     BackHandler(enabled = selectedArtist != null) { selectedArtist = null }
 
-    if (source == MusicSource.Netease && !session.isLoggedIn) {
+    if (source == MusicSource.Netease && !session.isLoggedIn && !MeloXUnifiedFavorites.enabled(appContext)) {
         MeloXLibraryLoginUnavailable(onLogin, source)
         return
     }
@@ -708,6 +744,10 @@ fun LibraryScreen(
                                 //   歌单），对上面两类都是无效操作 ⇒ 点了没反应。
                                 onRemovePlaylist = { target ->
                                     scope.launch {
+                                        if (target.isMeloXLocal) {
+                                            errorMessage = "弥乐「我喜欢」不能在这里删除"
+                                            return@launch
+                                        }
                                         if (target.id == snapshot?.likedPlaylistId) {
                                             errorMessage = "「我喜欢的音乐」是系统歌单，无法删除"
                                             return@launch
@@ -1878,7 +1918,7 @@ private fun MeloXLibraryPlaylistsPage(
             //   收藏列表原本没有任何删除入口，这是「收藏的歌单无法删除」的根因。
             //   系统歌单「我喜欢的音乐」不给入口 —— 网易云不允许删除/取关它，
             //   给了也是点了没反应（2026-10-07）。
-            val removable = playlist.id != likedPlaylistId
+            val removable = !playlist.isMeloXLocal && playlist.id != likedPlaylistId
             MeloXSwipeActionRow(
                 startActions = emptyList(),
                 endActions = if (removable) {
@@ -2297,6 +2337,11 @@ private fun MeloXPlaylistDetailScreen(
 
     suspend fun refreshSavedState() {
         if (isAlbum) return
+        if (initialPlaylist.isMeloXLocal) {
+            isSaved = null
+            isOwnedPlaylist = false
+            return
+        }
         if (isProviderCollection) {
             isSaved = null
             return
@@ -3130,6 +3175,27 @@ private fun MeloXPlaylistDetailScreen(
             }
         }
     }
+}
+
+/**
+ * Injects the app-owned favorites playlist at the top of Library → Playlists.
+ * It is backed by [MeloXUnifiedFavorites] and is shown even when no provider is
+ * logged in, so the local-only playlist never disappears with an account.
+ */
+private fun NeteaseLibrarySnapshot.withUnifiedFavorites(context: Context): NeteaseLibrarySnapshot {
+    val summary = MeloXUnifiedFavorites.playlistSummary(context)
+        ?: return copy(playlists = playlists.filterNot { it.isMeloXLocal })
+    val local = NeteasePlaylistSummary(
+        id = MeloXUnifiedFavorites.LegacyPlaylistId,
+        name = summary.title,
+        coverUrl = summary.artworkUrl,
+        trackCount = summary.trackCount ?: 0,
+        creatorName = summary.creatorName.orEmpty(),
+        description = summary.description,
+        providerPlaylist = summary,
+        isMeloXLocal = true,
+    )
+    return copy(playlists = listOf(local) + playlists.filterNot { it.isMeloXLocal })
 }
 
 private fun NeteaseLibrarySnapshot.withSongLiked(song: SearchSong, liked: Boolean): NeteaseLibrarySnapshot =

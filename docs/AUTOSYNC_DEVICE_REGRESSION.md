@@ -31,7 +31,7 @@
 
 ```sh
 gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell am instrument --user 0 -w \
   -e audio cache/automix_analysis/EXISTING_FILE.media \
