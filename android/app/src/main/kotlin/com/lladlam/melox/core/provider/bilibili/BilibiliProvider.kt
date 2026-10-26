@@ -272,6 +272,8 @@ class BilibiliProvider(
             artworkUrl = secure(pic.orEmpty().ifBlank { item.optString("pic").ifBlank { item.optString("cover") } }),
             durationMs = durationMs ?: parseDuration(item.optString("duration")), availability = TrackAvailability.Playable,
             providerMetadata = ProviderTrackMetadata.Bilibili(bvid, cid, aid.takeIf { it > 0 }, page),
+            bestQuality = AudioQualityTier.High,
+            bestBitrate = 192_000,
         )
     }
 

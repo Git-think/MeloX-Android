@@ -882,6 +882,7 @@ internal object KugouLiteParsing {
             .filter(String::isNotBlank)
             .ifEmpty { listOf("未知歌手") }
             .map { MusicArtistRef(name = it) }
+        val quality = kugouSearchQuality(item)
         return MusicTrack(
             id = MusicResourceId(MusicSource.KugouLite, hash),
             title = title,
@@ -895,11 +896,14 @@ internal object KugouLiteParsing {
             },
             artworkUrl = artwork,
             durationMs = duration,
+            availability = TrackAvailability.Playable,
             providerMetadata = ProviderTrackMetadata.Kugou(
                 hash = hash,
                 albumAudioId = albumAudioId,
                 albumId = albumId,
             ),
+            bestQuality = quality?.tier,
+            bestBitrate = quality?.bitrate,
         )
     }
 

@@ -38,6 +38,7 @@ import com.lladlam.melox.R
 import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.library.NeteaseLibraryClient
 import com.lladlam.melox.core.model.SearchSong
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.network.NeteaseMusicOperationsClient
 import com.lladlam.melox.playback.PlaybackCommands
 import com.lladlam.melox.ui.MeloXBottomContentClearance
@@ -127,8 +128,14 @@ internal fun MeloXSongDetailScreen(song: SearchSong, onBack: () -> Unit) {
     var liked by remember(song.id) { mutableStateOf<Boolean?>(null) }
     var busy by remember(song.id) { mutableStateOf(false) }
     var error by remember(song.id) { mutableStateOf<String?>(null) }
+    val unifiedFavoritesEnabled = MeloXUnifiedFavorites.enabled(app)
+    val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
 
-    LaunchedEffect(song.id) {
+    LaunchedEffect(song.id, unifiedFavoritesEnabled, unifiedFavoritesRevision) {
+        if (unifiedFavoritesEnabled) {
+            liked = MeloXUnifiedFavorites.contains(app, MeloXUnifiedFavorites.fromNetease(song))
+            return@LaunchedEffect
+        }
         runCatching {
             withContext(Dispatchers.IO) {
                 val session = NeteaseSessionStore(app)
@@ -202,6 +209,11 @@ internal fun MeloXSongDetailScreen(song: SearchSong, onBack: () -> Unit) {
                     onClick = {
                         if (busy) return@MeloXGlassButton
                         busy = true
+                        if (unifiedFavoritesEnabled) {
+                            liked = MeloXUnifiedFavorites.toggle(app, MeloXUnifiedFavorites.fromNetease(song))
+                            busy = false
+                            return@MeloXGlassButton
+                        }
                         scope.launch {
                             val target = liked != true
                             runCatching { operations.setSongLiked(song.id, target) }

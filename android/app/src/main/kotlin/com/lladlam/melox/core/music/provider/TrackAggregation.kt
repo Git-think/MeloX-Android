@@ -1,8 +1,12 @@
 package com.lladlam.melox.core.music.provider
 
+import com.lladlam.melox.core.music.model.AudioQualityTier
+import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
+import com.lladlam.melox.core.music.model.TrackAvailability
+import com.lladlam.melox.core.music.model.audioQualityForBitrate
+import com.lladlam.melox.core.music.model.rank
 import kotlin.math.abs
-import kotlin.math.max
 
 enum class TrackVersionKind { Studio, Live, Remix, Dj, Instrumental, Cover, Acoustic, Unknown }
 
@@ -27,12 +31,39 @@ data class AggregatedTrack(
     val key: UnifiedTrackKey,
     val candidates: List<AggregatedTrackCandidate>,
 ) {
-    val recommendation: AggregatedTrackCandidate? get() = candidates.maxByOrNull { it.totalScore }
+    /**
+     * Prefer a verified playable item first; only then compare quality. Without
+     * this gate, a subscription-only lossless card would hide a playable 320k
+     * result that the user can actually start immediately.
+     */
+    val recommendation: AggregatedTrackCandidate?
+        get() = candidates.maxWithOrNull(
+            compareBy<AggregatedTrackCandidate> { availabilityPriority(it.track.availability) }
+                .thenBy { it.totalScore },
+        )
+}
+
+private fun availabilityPriority(availability: TrackAvailability): Int = when (availability) {
+    TrackAvailability.Playable -> 5
+    TrackAvailability.Unknown -> 4
+    TrackAvailability.PreviewOnly -> 3
+    TrackAvailability.LoginRequired,
+    TrackAvailability.SubscriptionRequired -> 2
+    TrackAvailability.RegionRestricted,
+    TrackAvailability.CopyrightRestricted,
+    TrackAvailability.Unavailable -> 1
 }
 
 object TrackAggregation {
     private val punctuation = Regex("[\\p{Punct}\\s]+")
     private val artistSeparators = Regex("[/,、，&｜\\s]+")
+    /**
+     * Providers disagree by a second or two on the same recording, but a
+     * 30-second interlude and a 4-minute song with the same title must stay
+     * separate rows. Ten seconds is wide enough for metadata drift and far
+     * below a real alternate recording.
+     */
+    private const val DurationToleranceMs = 10_000L
     private val versionTokens = listOf(
         TrackVersionKind.Live to listOf("live", "现场", "演唱会", "巡演"),
         TrackVersionKind.Remix to listOf("remix", "混音", "重混"),
@@ -45,8 +76,12 @@ object TrackAggregation {
     fun normalize(value: String): String = value.lowercase().replace(punctuation, "")
 
     fun normalizeArtist(value: String): String = value.lowercase()
-        .replace(artistSeparators, "")
-        .replace(punctuation, "")
+        .split(artistSeparators)
+        .map { it.replace(punctuation, "") }
+        .filter { it.isNotBlank() && it !in setOf("feat", "ft", "featuring", "with") }
+        .distinct()
+        .sorted()
+        .joinToString("")
 
     fun versionOf(track: MusicTrack): TrackVersionKind {
         val value = normalize(listOf(track.title, track.album?.name.orEmpty()).joinToString(" "))
@@ -63,40 +98,100 @@ object TrackAggregation {
 
     fun aggregate(tracks: List<MusicTrack>): List<AggregatedTrack> = tracks
         .groupBy(::keyOf)
-        .map { (key, grouped) ->
-            AggregatedTrack(
-                key = key,
-                candidates = grouped.map { score(it, key) }.sortedByDescending { it.totalScore },
-            )
+        .flatMap { (baseKey, grouped) ->
+            clusterByDuration(grouped).map { cluster ->
+                val duration = cluster.mapNotNull { it.durationMs?.takeIf { ms -> ms > 0L } }
+                    .takeIf { it.isNotEmpty() }
+                    ?.average()
+                    ?.toLong()
+                val key = baseKey.copy(durationBucket = duration)
+                AggregatedTrack(
+                    key = key,
+                    candidates = cluster.map { score(it, key) }.sortedByDescending { it.totalScore },
+                )
+            }
         }
         .sortedByDescending { it.recommendation?.totalScore ?: 0 }
+
+    private fun clusterByDuration(tracks: List<MusicTrack>): List<List<MusicTrack>> {
+        val clusters = mutableListOf<MutableList<MusicTrack>>()
+        tracks.filter { (it.durationMs ?: 0L) > 0L }
+            .sortedBy { it.durationMs ?: 0L }
+            .forEach { track ->
+                val duration = track.durationMs ?: return@forEach
+                val cluster = clusters.firstOrNull { group ->
+                    val known = group.mapNotNull { it.durationMs?.takeIf { ms -> ms > 0L } }
+                    known.isNotEmpty() && abs(known.average() - duration) <= DurationToleranceMs
+                }
+                if (cluster == null) clusters.add(mutableListOf(track)) else cluster.add(track)
+            }
+        val withoutDuration = tracks.filter { (it.durationMs ?: 0L) <= 0L }
+        if (withoutDuration.isNotEmpty()) {
+            if (clusters.isEmpty()) clusters.add(mutableListOf())
+            clusters.first().addAll(withoutDuration)
+        }
+        return clusters
+    }
 
     private fun score(track: MusicTrack, key: UnifiedTrackKey): AggregatedTrackCandidate {
         val identity = 30
         val version = if (versionOf(track) == key.version) 25 else 0
-        val quality = when (track.availability) {
-            com.lladlam.melox.core.music.model.TrackAvailability.Playable -> 20
-            com.lladlam.melox.core.music.model.TrackAvailability.PreviewOnly -> 6
-            com.lladlam.melox.core.music.model.TrackAvailability.LoginRequired -> 2
-            else -> 0
+        val qualityTier = track.bestQuality ?: audioQualityForBitrate(track.bestBitrate)
+        val qualityScore = qualityScore(track, qualityTier)
+        val availability = when (track.availability) {
+            TrackAvailability.Playable -> 20
+            TrackAvailability.Unknown -> 10
+            TrackAvailability.PreviewOnly -> 6
+            TrackAvailability.LoginRequired,
+            TrackAvailability.SubscriptionRequired -> 2
+            TrackAvailability.RegionRestricted,
+            TrackAvailability.CopyrightRestricted,
+            TrackAvailability.Unavailable -> 0
         }
-        val sourceBonus = when (track.id.source) {
-            com.lladlam.melox.core.music.model.MusicSource.QQMusic -> 5
-            com.lladlam.melox.core.music.model.MusicSource.Netease -> 3
-            com.lladlam.melox.core.music.model.MusicSource.Kugou -> 2
-            com.lladlam.melox.core.music.model.MusicSource.KugouLite -> 2
-            com.lladlam.melox.core.music.model.MusicSource.Kuwo -> 2
-            com.lladlam.melox.core.music.model.MusicSource.AppleMusic -> 4
-            com.lladlam.melox.core.music.model.MusicSource.Bilibili -> 1
-            // Spotify is playable only after a strict cross-provider match. A
-            // native playable result must remain the aggregation recommendation.
-            com.lladlam.melox.core.music.model.MusicSource.Spotify -> -1
-            com.lladlam.melox.core.music.model.MusicSource.YouTubeMusic -> 0
-            com.lladlam.melox.core.music.model.MusicSource.Jellyfin -> 0
-            com.lladlam.melox.core.music.model.MusicSource.Local -> 0
-            com.lladlam.melox.core.music.model.MusicSource.Qishui -> 0
-        }
-        return AggregatedTrackCandidate(track, identity, version, quality, sourceBonus, identity + version + quality + sourceBonus, "版本 ${key.version} · ${track.id.source.displayName}")
+        val sourceBonus = sourceBonus(track.id.source)
+        return AggregatedTrackCandidate(
+            track = track,
+            identityScore = identity,
+            versionScore = version,
+            qualityScore = qualityScore,
+            availabilityScore = availability,
+            totalScore = identity + version + qualityScore + availability + sourceBonus,
+            reason = "版本 ${key.version} · ${track.id.source.displayName} · ${qualityLabel(qualityTier)}",
+        )
+    }
+
+    private fun qualityScore(track: MusicTrack, tier: AudioQualityTier?): Int {
+        if (tier == null) return 0
+        val bitrate = track.bestBitrate?.takeIf { it > 0 } ?: representativeBitrate(tier)
+        // Tier is authoritative; bitrate only breaks ties inside the same tier.
+        return tier.rank() * 10_000 + (bitrate / 1_000).coerceIn(0, 2_000)
+    }
+
+    private fun representativeBitrate(tier: AudioQualityTier): Int = when (tier) {
+        AudioQualityTier.Standard -> 128_000
+        AudioQualityTier.High -> 320_000
+        AudioQualityTier.Lossless -> 1_000_000
+        AudioQualityTier.HiResolution,
+        AudioQualityTier.Immersive,
+        AudioQualityTier.Master -> 1_411_200
+    }
+
+    private fun sourceBonus(source: MusicSource): Int = when (source) {
+        MusicSource.AppleMusic -> 3
+        MusicSource.QQMusic -> 2
+        MusicSource.Netease -> 1
+        MusicSource.Kugou, MusicSource.KugouLite, MusicSource.Kuwo -> 1
+        else -> 0
+    }
+
+    private fun qualityLabel(tier: AudioQualityTier?): String = when (tier) {
+        AudioQualityTier.Master -> "母带"
+        AudioQualityTier.HiResolution -> "Hi-Res"
+        AudioQualityTier.Immersive -> "沉浸声"
+        AudioQualityTier.Lossless -> "无损"
+        AudioQualityTier.High -> "高品质"
+        AudioQualityTier.Standard -> "标准"
+        null -> "音质未知"
     }
 
     fun similarity(left: MusicTrack, right: MusicTrack): Float {

@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -100,6 +101,8 @@ import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicPlaylistSummary
 import com.lladlam.melox.core.music.model.MusicResourceId
 import com.lladlam.melox.core.music.provider.MeloXMusicProviders
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
+import com.lladlam.melox.core.music.provider.ProviderAccountManager
 import com.lladlam.melox.core.music.provider.UserLibraryCapability
 import com.lladlam.melox.core.library.NeteaseLibraryClient
 import com.lladlam.melox.core.provider.qqmusic.QQMusicSessionStore
@@ -789,6 +792,9 @@ private fun SystemPlaybackSettings(context: android.content.Context) {
         ) { enabled ->
             hyperIsland.value = enabled
             MeloXSettingsPreferences.setBoolean(context, "hyperos_super_island_enabled", enabled)
+            if (!enabled) {
+                runCatching { HyperOsFocusBridge.clearSuperIsland(context) }
+            }
         }
     }
     Spacer(Modifier.height(10.dp))
@@ -2459,6 +2465,30 @@ private fun ContentSettings(context: android.content.Context) {
         mutableStateOf(CrossProviderPlaybackPreferences.enabled(context))
     }
     var showCrossProviderFallbackNotice by remember { mutableStateOf(false) }
+    val app = context.applicationContext
+    val scope = rememberCoroutineScope()
+    val accountManager = remember(app) { ProviderAccountManager(app) }
+    val providers = remember(app) { MeloXMusicProviders.create(app) }
+    val migrationCandidates = remember(app) {
+        accountManager.allStates().filter { state ->
+            state.loggedIn &&
+                state.source != MusicSource.Bilibili &&
+                state.source != MusicSource.Jellyfin && (
+                state.source == MusicSource.Netease ||
+                    state.source == MusicSource.Local ||
+                    providers[state.source] is UserLibraryCapability
+                )
+        }
+    }
+    var unifiedFavoritesEnabled by remember { mutableStateOf(MeloXUnifiedFavorites.enabled(app)) }
+    var showUnifiedFavoritesSetup by remember { mutableStateOf(false) }
+    var unifiedFavoritesBusy by remember { mutableStateOf(false) }
+    var unifiedFavoritesNotice by remember { mutableStateOf<String?>(null) }
+    var selectedMigrationSources by remember { mutableStateOf<Set<MusicSource>>(emptySet()) }
+    val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
+    val unifiedFavoritesCount = remember(unifiedFavoritesEnabled, unifiedFavoritesRevision) {
+        if (unifiedFavoritesEnabled) MeloXUnifiedFavorites.tracks(app).size else 0
+    }
     SettingsGlassGroup {
         MeloXSettingsDropdown(
             title = stringResource(R.string.settings_content_area),
@@ -2481,6 +2511,36 @@ private fun ContentSettings(context: android.content.Context) {
                 CrossProviderPlaybackPreferences.setEnabled(context, false)
             }
         }
+        SettingsExternalToggleRow(
+            title = "弥乐「我喜欢」",
+            value = unifiedFavoritesEnabled,
+            note = "只在弥乐内保存；可从任意音源收藏，不写入音源账号。",
+            grouped = true,
+        ) { enabled ->
+            when {
+                !enabled -> {
+                    unifiedFavoritesEnabled = false
+                    MeloXUnifiedFavorites.setEnabled(app, false)
+                }
+                MeloXUnifiedFavorites.initialized(app) -> {
+                    unifiedFavoritesEnabled = true
+                    MeloXUnifiedFavorites.setEnabled(app, true)
+                }
+                else -> {
+                    selectedMigrationSources = migrationCandidates.map { it.source }.toSet()
+                    unifiedFavoritesNotice = null
+                    showUnifiedFavoritesSetup = true
+                }
+            }
+        }
+    }
+    if (unifiedFavoritesEnabled) {
+        Spacer(Modifier.height(10.dp))
+        SettingsInfoCard("弥乐「我喜欢」已启用 · $unifiedFavoritesCount 首。所有音源的爱心操作都会写入这个本地歌单。")
+    }
+    unifiedFavoritesNotice?.let {
+        Spacer(Modifier.height(10.dp))
+        SettingsInfoCard(it)
     }
     if (crossProviderFallback) {
         Spacer(Modifier.height(10.dp))
@@ -2529,6 +2589,97 @@ private fun ContentSettings(context: android.content.Context) {
                     crossProviderFallback = true
                     CrossProviderPlaybackPreferences.setEnabled(context, true)
                     showCrossProviderFallbackNotice = false
+                }
+            }
+        }
+    }
+    if (showUnifiedFavoritesSetup) {
+        MeloXGlassDialog(
+            visible = true,
+            onDismiss = { if (!unifiedFavoritesBusy) showUnifiedFavoritesSetup = false },
+        ) {
+            Text("创建弥乐「我喜欢」", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "选择要迁移收藏的音乐源。创建后会得到一个只存在于弥乐内的「我喜欢」歌单；之后任意音源的歌曲都可以在本地收藏到这里。",
+                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 300.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 6.dp),
+            ) {
+                if (migrationCandidates.isEmpty()) {
+                    Text(
+                        "当前没有已登录且可读取收藏的音乐源；也可以先创建空歌单，之后手动收藏。",
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f),
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+                migrationCandidates.forEach { state ->
+                    SettingsChoiceRow(
+                        title = state.source.displayName,
+                        selected = state.source in selectedMigrationSources,
+                        onClick = {
+                            selectedMigrationSources = if (state.source in selectedMigrationSources) {
+                                selectedMigrationSources - state.source
+                            } else {
+                                selectedMigrationSources + state.source
+                            }
+                        },
+                    )
+                }
+            }
+            if (unifiedFavoritesBusy) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("正在读取并整理收藏…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SettingsActionButton(stringResource(R.string.action_cancel), Modifier.weight(1f)) {
+                    if (!unifiedFavoritesBusy) showUnifiedFavoritesSetup = false
+                }
+                SettingsActionButton(
+                    if (unifiedFavoritesBusy) "迁移中…" else "创建并迁移",
+                    Modifier.weight(1f),
+                ) {
+                    if (unifiedFavoritesBusy) return@SettingsActionButton
+                    unifiedFavoritesBusy = true
+                    scope.launch {
+                        runCatching {
+                            MeloXUnifiedFavorites.initialize(app, selectedMigrationSources)
+                        }.onSuccess { report ->
+                            unifiedFavoritesEnabled = true
+                            showUnifiedFavoritesSetup = false
+                            unifiedFavoritesNotice = buildString {
+                                append("已创建「我喜欢」，共 ${report.total} 首")
+                                if (report.failures.isNotEmpty()) {
+                                    append("。未迁移：")
+                                    append(report.failures.joinToString("；") { failure ->
+                                        "${failure.source.displayName}：${failure.message}"
+                                    })
+                                }
+                            }
+                        }.onFailure { failure ->
+                            showUnifiedFavoritesSetup = false
+                            unifiedFavoritesNotice = failure.message ?: "创建「我喜欢」失败"
+                        }
+                        unifiedFavoritesBusy = false
+                    }
                 }
             }
         }

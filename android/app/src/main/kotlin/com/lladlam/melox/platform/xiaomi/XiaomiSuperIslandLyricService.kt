@@ -51,7 +51,7 @@ class XiaomiSuperIslandLyricService : Service() {
     }
 
     private fun startWithFocus(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
@@ -102,15 +102,13 @@ class XiaomiSuperIslandLyricService : Service() {
             pendingNotification = null
             running = false
             val appContext = context.applicationContext
-            val intent = Intent(appContext, XiaomiSuperIslandLyricService::class.java)
-                .setAction(ACTION_STOP)
-            runCatching { appContext.startService(intent) }
-                .onFailure {
-                    runCatching {
-                        appContext.getSystemService(android.app.NotificationManager::class.java)
-                            .cancel(NOTIFICATION_ID)
-                    }
-                }
+            // Do not create a service merely to stop it (including from the background).
+            runCatching { appContext.stopService(Intent(appContext, XiaomiSuperIslandLyricService::class.java)) }
+                .onFailure { Log.w(TAG, "Unable to stop Super Island lyric service", it) }
+            runCatching {
+                appContext.getSystemService(android.app.NotificationManager::class.java)
+                    .cancel(NOTIFICATION_ID)
+            }
         }
     }
 

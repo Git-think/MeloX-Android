@@ -12,6 +12,7 @@ import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.MusicAlbumRef
 import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.model.TrackAvailability
 import java.io.IOException
 import kotlin.random.Random
 import okhttp3.MediaType.Companion.toMediaType
@@ -91,7 +92,7 @@ class QQMusicCatalogClient(
         val list = songBlock.optJSONArray("list") ?: JSONArray()
         val tracks = buildList {
             for (index in 0 until list.length()) {
-                parseTrack(list.optJSONObject(index) ?: continue)?.let(::add)
+                parseTrack(list.optJSONObject(index) ?: continue, assumePlayable = true)?.let(::add)
             }
         }
         return MusicPage(
@@ -300,7 +301,7 @@ class QQMusicCatalogClient(
         )
     }
 
-    private fun parseTrack(item: JSONObject): MusicTrack? {
+    private fun parseTrack(item: JSONObject, assumePlayable: Boolean = false): MusicTrack? {
         val songMid = firstString(item, "mid", "songmid", "songMid")
             .ifBlank { item.optJSONObject("mid")?.optString("song").orEmpty() }
         if (songMid.isBlank()) return null
@@ -321,6 +322,7 @@ class QQMusicCatalogClient(
         val mediaMid = item.optJSONObject("file")?.optString("media_mid").orEmpty()
             .ifBlank { firstString(item, "media_mid", "mediaMid") }
             .takeIf(String::isNotBlank)
+        val quality = qqMusicQualityHint(item)
         return MusicTrack(
             id = MusicResourceId(MusicSource.QQMusic, songMid),
             title = title,
@@ -334,11 +336,14 @@ class QQMusicCatalogClient(
             },
             artworkUrl = artwork,
             durationMs = firstLong(item, "interval", "duration").takeIf { it > 0 }?.times(1_000L),
+            availability = if (assumePlayable) TrackAvailability.Playable else TrackAvailability.Unknown,
             providerMetadata = ProviderTrackMetadata.QQMusic(
                 songMid = songMid,
                 mediaMid = mediaMid,
                 numericSongId = firstLong(item, "id", "songid", "songId").takeIf { it > 0 },
             ),
+            bestQuality = quality?.tier,
+            bestBitrate = quality?.bitrate,
         )
     }
 

@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +64,7 @@ import com.lladlam.melox.core.music.model.ProviderTrackMetadata
 import com.lladlam.melox.core.music.provider.FavoriteCapability
 import com.lladlam.melox.core.music.provider.DownloadCapability
 import com.lladlam.melox.core.music.provider.MeloXMusicProviders
+import com.lladlam.melox.core.music.provider.MeloXUnifiedFavorites
 import com.lladlam.melox.core.music.provider.PlaylistSyncCapability
 import com.lladlam.melox.core.music.provider.PlaylistWriteCapability
 import com.lladlam.melox.core.music.provider.ProviderAccountManager
@@ -142,6 +144,8 @@ internal fun MeloXProviderSongActionsOverlay(
         )
     }
 
+    val unifiedFavoritesEnabled = MeloXUnifiedFavorites.enabled(context)
+    val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
     var page by remember(identity, visible) { mutableStateOf(ProviderSongActionPage.Main) }
     var favoriteKnownState by remember(identity) { mutableStateOf<Boolean?>(null) }
     var favoriteWorking by remember(identity) { mutableStateOf(false) }
@@ -158,6 +162,12 @@ internal fun MeloXProviderSongActionsOverlay(
     val bilibiliOffsetState = if (identity.source == MusicSource.Bilibili) {
         BilibiliLyricOffsetStore.state(context, identity.value)
     } else null
+
+    LaunchedEffect(identity, visible, unifiedFavoritesEnabled, unifiedFavoritesRevision) {
+        if (visible && unifiedFavoritesEnabled) {
+            favoriteKnownState = MeloXUnifiedFavorites.contains(context, actionTrack)
+        }
+    }
 
     BackHandler(enabled = visible) {
         if (page == ProviderSongActionPage.Main) onDismiss() else page = ProviderSongActionPage.Main
@@ -239,24 +249,35 @@ internal fun MeloXProviderSongActionsOverlay(
                                         }
                                     }
                                 }
-                                if (favoriteCapability != null) {
+                                if (favoriteCapability != null || unifiedFavoritesEnabled) {
                                     ProviderActionItem(
                                         title = when {
-                                            !providerLoggedIn -> stringResource(R.string.player_login_for_favorites, identity.source.displayName)
+                                            !unifiedFavoritesEnabled && !providerLoggedIn ->
+                                                stringResource(R.string.player_login_for_favorites, identity.source.displayName)
                                             favoriteWorking -> stringResource(R.string.player_updating_favorites)
                                             favoriteKnownState == true -> stringResource(R.string.player_remove_favorite)
                                             else -> stringResource(R.string.player_add_favorite)
                                         },
                                         symbol = if (favoriteKnownState == true) "♥" else "♡",
-                                        enabled = providerLoggedIn && !favoriteWorking,
+                                        enabled = (unifiedFavoritesEnabled || providerLoggedIn) && !favoriteWorking,
                                     ) {
                                         val targetFavorite = favoriteKnownState != true
+                                        if (unifiedFavoritesEnabled) {
+                                            favoriteKnownState = MeloXUnifiedFavorites.toggle(context, actionTrack)
+                                            actionStatus = if (favoriteKnownState == true) {
+                                                context.getString(R.string.player_added_favorite, "弥乐「我喜欢」")
+                                            } else {
+                                                context.getString(R.string.player_removed_favorite, "弥乐「我喜欢」")
+                                            }
+                                            return@ProviderActionItem
+                                        }
+                                        val capability = favoriteCapability ?: return@ProviderActionItem
                                         favoriteWorking = true
                                         actionStatus = null
                                         actionError = null
                                         scope.launch {
                                             runCatching {
-                                                favoriteCapability.setFavorite(actionTrack, targetFavorite)
+                                                capability.setFavorite(actionTrack, targetFavorite)
                                             }.onSuccess {
                                                 favoriteKnownState = targetFavorite
                                                 actionStatus = if (targetFavorite) {

@@ -166,7 +166,8 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
         lifecycleScope.launch {
             firstDraw.await()
             delay(500L)
-            MeloXLyriconBridge.start(applicationContext)
+            runCatching { MeloXLyriconBridge.start(applicationContext) }
+                .onFailure { android.util.Log.w("MeloXStartup", "Skipping optional Lyricon initialization", it) }
         }
     }
 
@@ -231,13 +232,16 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
                 }
             }
         }
-        // Shizuku is optional. On HyperOS 3, request permission only when its
-        // service is actually running; permission itself acts as the user's opt-in
-        // to the short XMSF compatibility pulse used by some restricted ROM builds.
+        // Optional compatibility must not prevent startup, including when the ROM
+        // cannot link a vendor SDK class. The bridge also checks the feature switch.
         lifecycleScope.launch {
             firstDraw.await()
             delay(500L)
-            HyperOsFocusBridge.prepareShizukuCompatibility(this@MainActivity)
+            if (!com.lladlam.melox.ui.settings.MeloXSettingsPreferences.boolean(
+                    applicationContext, "hyperos_super_island_enabled", false,
+                )) return@launch
+            runCatching { HyperOsFocusBridge.prepareShizukuCompatibility(this@MainActivity) }
+                .onFailure { android.util.Log.w("MeloXStartup", "Skipping optional Super Island initialization", it) }
         }
 
         clipboardScanJob?.cancel()

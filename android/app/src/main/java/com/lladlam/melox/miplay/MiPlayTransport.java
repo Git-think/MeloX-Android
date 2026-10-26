@@ -115,7 +115,7 @@ public final class MiPlayTransport implements AutoCloseable {
         @Override public void onBindingDied(ComponentName name) { death.binderDied(); }
     };
     private interface Task { void run() throws Exception; }
-    private void submit(Task task) {
+    private synchronized void submit(Task task) {
         if (closed) return;
         worker.execute(() -> {
             if (closed) return;
@@ -136,7 +136,7 @@ public final class MiPlayTransport implements AutoCloseable {
             return result;
         } finally { reply.recycle(); data.recycle(); }
     }
-    public void bind() {
+    public synchronized void bind() {
         if (bound || closed) return;
         Intent intent = new Intent("com.xiaomi.miplay.action.MIPLAY_AUDIO_CLIENT_SERVICE")
             .setComponent(new ComponentName(PACKAGE, "com.xiaomi.miplay.mylibrary.MiPlayAudioService"));
@@ -151,7 +151,7 @@ public final class MiPlayTransport implements AutoCloseable {
     public void stop(String id) { submit(() -> call(7, data -> data.writeStringArray(new String[]{id}))); }
     public void volume(String id, double volume) { submit(() -> call(17, data -> { data.writeStringArray(new String[]{id}); data.writeInt((int) Math.max(0, Math.min(100, volume))); })); }
     public void queryVolume(String id) { submit(() -> call(18, data -> data.writeStringArray(new String[]{id}))); }
-    @Override public void close() {
+    @Override public synchronized void close() {
         if (closed) return;
         closed = true;
         worker.execute(() -> {
@@ -163,6 +163,10 @@ public final class MiPlayTransport implements AutoCloseable {
             remote = null;
         });
         worker.shutdown();
-        if (bound) { context.unbindService(connection); bound = false; }
+        if (bound) {
+            try { context.unbindService(connection); }
+            catch (RuntimeException ignored) { /* The ROM may already have removed the binding. */ }
+            bound = false;
+        }
     }
 }

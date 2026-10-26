@@ -1443,9 +1443,12 @@ private fun SearchSwipeSongRow(
                 Text(song.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                 Text(
                     buildList {
+                        // Source first, then the artist: aggregation picks one
+                        // source per identical song, so the choice must be
+                        // visible before the artist rather than after it.
+                        sourceLabel?.let(::add)
                         add(song.artists)
                         song.album.takeIf(String::isNotBlank)?.let(::add)
-                        sourceLabel?.let(::add)
                     }.joinToString(" · "),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

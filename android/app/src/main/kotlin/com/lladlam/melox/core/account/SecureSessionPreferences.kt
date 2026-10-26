@@ -25,39 +25,23 @@ import java.security.KeyStore
 internal object SecureSessionPreferences {
     private const val Tag = "MeloXSecurePrefs"
     private val instances = mutableMapOf<String, SharedPreferences>()
+    private val migratedStores = mutableSetOf<String>()
 
     @Synchronized
     fun open(context: Context, legacyName: String): SharedPreferences {
         val app = context.applicationContext
         val fileName = "${legacyName}_encrypted_v1"
-        instances[fileName]?.let { return it }
         val encrypted = openEncrypted(app, fileName)
-        val legacy = app.getSharedPreferences(legacyName, Context.MODE_PRIVATE)
-        // A committed marker prevents stale plaintext from replacing newer credentials
-        // if the process exits between the encrypted commit and legacy cleanup.
-        if (!encrypted.getBoolean("_migration_complete", false)) {
-            val editor = encrypted.edit()
-            legacy.all.forEach { (key, value) ->
-                if (!encrypted.contains(key)) when (value) {
-                    is String -> editor.putString(key, value)
-                    is Boolean -> editor.putBoolean(key, value)
-                    is Int -> editor.putInt(key, value)
-                    is Long -> editor.putLong(key, value)
-                    is Float -> editor.putFloat(key, value)
-                    is Set<*> -> {
-                        require(value.all { it is String })
-                        editor.putStringSet(key, value.filterIsInstance<String>().toSet())
-                    }
-                    null -> Unit
-                    else -> error("Unsupported session preference type")
-                }
-            }
-            check(editor.putBoolean("_migration_complete", true).commit()) {
-                "Unable to persist encrypted session migration"
-            }
-        }
-        check(legacy.edit().clear().commit()) { "Unable to clear migrated session data" }
-        instances[fileName] = encrypted
+        if (fileName in migratedStores) return encrypted
+        val migrated = runCatching {
+            migrateSessionPreferences(
+                legacy = app.getSharedPreferences(legacyName, Context.MODE_PRIVATE),
+                encrypted = encrypted,
+                durableDestination = encrypted !is InMemorySharedPreferences,
+            )
+        }.onFailure { Log.w(Tag, "Session migration for '$legacyName' deferred; preserving existing data", it) }
+            .getOrDefault(false)
+        if (migrated) migratedStores += fileName
         return encrypted
     }
 
@@ -111,7 +95,7 @@ internal object SecureSessionPreferences {
  * Process-local [SharedPreferences] used only when the encrypted store cannot be
  * created at all. Sessions live until the process ends instead of crashing.
  */
-private class InMemorySharedPreferences : SharedPreferences {
+internal class InMemorySharedPreferences : SharedPreferences {
     private val values = mutableMapOf<String, Any?>()
 
     override fun getAll(): MutableMap<String, *> = synchronized(values) { LinkedHashMap(values) }

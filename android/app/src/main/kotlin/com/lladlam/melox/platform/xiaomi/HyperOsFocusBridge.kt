@@ -7,6 +7,8 @@ import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
+import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
 import com.xzakota.hyper.notification.focus.FocusNotification
 import com.xzakota.hyper.notification.island.model.BigIslandArea
 import com.xzakota.hyper.notification.island.model.TextInfo
@@ -26,6 +28,9 @@ object HyperOsFocusBridge {
 
     @Volatile
     private var lastPublishedKey: String? = null
+
+    @Volatile
+    private var unavailableForSession = false
 
     enum class Protocol(val version: Int) {
         Unsupported(0), HyperOs1(1), HyperOs2(2), HyperOs3(3),
@@ -48,8 +53,26 @@ object HyperOsFocusBridge {
      * the already-working direct Focus path untouched.
      */
     fun prepareShizukuCompatibility(context: Context) {
-        if (!supportsSuperIsland(context)) return
-        ShizukuXmsfNetworkHelper.prepare(context.applicationContext)
+        if (!isEnabled(context)) return
+        optionalIntegration { ShizukuXmsfNetworkHelper.prepare(context.applicationContext) }
+    }
+
+    private fun isEnabled(context: Context): Boolean =
+        !unavailableForSession &&
+            MeloXSettingsPreferences.boolean(context, "hyperos_super_island_enabled", false) &&
+            supportsSuperIsland(context)
+
+    // Vendor SDK linkage and ROM service failures must not escape into startup/playback.
+    private inline fun optionalIntegration(block: () -> Unit) {
+        try {
+            block()
+        } catch (error: RuntimeException) {
+            unavailableForSession = true
+            Log.w("MeloXSuperIsland", "Disabling optional Super Island integration for this session", error)
+        } catch (error: LinkageError) {
+            unavailableForSession = true
+            Log.w("MeloXSuperIsland", "Super Island SDK is unavailable on this device", error)
+        }
     }
 
     /**
@@ -69,12 +92,28 @@ object HyperOsFocusBridge {
         durationMs: Long,
         isPlaying: Boolean,
     ): Bundle? {
-        if (!supportsSuperIsland(context)) return null
+        if (!isEnabled(context)) return null
+        optionalIntegration {
+            publishPayload(context, lyric, nextLyric, songTitle, artist, positionMs, durationMs, isPlaying)
+        }
+        return null
+    }
+
+    private fun publishPayload(
+        context: Context,
+        lyric: String,
+        nextLyric: String,
+        songTitle: String,
+        artist: String,
+        positionMs: Long,
+        durationMs: Long,
+        isPlaying: Boolean,
+    ) {
 
         val text = lyric.trim()
         if (text.isBlank()) {
             clearSuperIsland(context)
-            return null
+            return
         }
 
         val progress = if (durationMs > 0L) {
@@ -85,7 +124,7 @@ object HyperOsFocusBridge {
             0
         }
         val key = listOf(songTitle, artist, text, nextLyric.trim(), progress / 2, isPlaying).joinToString("|")
-        if (key == lastPublishedKey) return null
+        if (key == lastPublishedKey) return
         lastPublishedKey = key
 
         val appContext = context.applicationContext
@@ -150,7 +189,6 @@ object HyperOsFocusBridge {
             context = appContext,
             notification = notification,
         )
-        return null
     }
 
     /** Kept for source compatibility with the previous bridge contract. */
@@ -159,13 +197,13 @@ object HyperOsFocusBridge {
 
     fun clearSuperIsland(context: Context) {
         lastPublishedKey = null
-        ShizukuXmsfNetworkHelper.clearFocusNotification(context.applicationContext)
+        optionalIntegration { ShizukuXmsfNetworkHelper.clearFocusNotification(context.applicationContext) }
     }
 
     /** Settings-only authorization. Playback never calls this. */
     fun requestShizukuPermission(context: Context) {
         if (!supportsSuperIsland(context)) return
-        ShizukuXmsfNetworkHelper.requestPermission(context.applicationContext)
+        optionalIntegration { ShizukuXmsfNetworkHelper.requestPermission(context.applicationContext) }
     }
 
     private fun ensureSuperIslandChannel(context: Context) {

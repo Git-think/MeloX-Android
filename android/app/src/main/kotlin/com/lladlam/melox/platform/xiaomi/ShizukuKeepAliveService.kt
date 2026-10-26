@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.annotation.Keep
+import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
 import rikka.shizuku.Shizuku
 
 /**
@@ -50,6 +51,10 @@ class ShizukuKeepAliveService(@Suppress("UNUSED_PARAMETER") context: Context) : 
 
         fun ensureBound(context: Context?) {
             val appContext = context?.applicationContext ?: return
+            if (!MeloXSettingsPreferences.boolean(appContext, "hyperos_super_island_enabled", false)) {
+                handler.removeCallbacks(retry)
+                return
+            }
             boundContext = appContext
             handler.removeCallbacks(retry)
             if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
@@ -64,15 +69,17 @@ class ShizukuKeepAliveService(@Suppress("UNUSED_PARAMETER") context: Context) : 
                 return
             }
             if (bound) return
-            val args = Shizuku.UserServiceArgs(
-                ComponentName(appContext.packageName, ShizukuKeepAliveService::class.java.name),
-            )
-                .tag("melox_keepalive")
-                .daemon(true)
-                .processNameSuffix("shizuku")
-                .debuggable(false)
-                .version(1)
-            runCatching { Shizuku.bindUserService(args, connection) }
+            runCatching {
+                val args = Shizuku.UserServiceArgs(
+                    ComponentName(appContext.packageName, ShizukuKeepAliveService::class.java.name),
+                )
+                    .tag("melox_keepalive")
+                    .daemon(true)
+                    .processNameSuffix("shizuku")
+                    .debuggable(false)
+                    .version(1)
+                Shizuku.bindUserService(args, connection)
+            }
                 .onFailure {
                     bound = false
                     Log.w(TAG, "Unable to bind Shizuku keepalive", it)

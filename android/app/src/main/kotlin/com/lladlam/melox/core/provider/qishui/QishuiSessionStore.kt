@@ -1,8 +1,7 @@
 package com.lladlam.melox.core.provider.qishui
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import com.lladlam.melox.core.account.SecureSessionPreferences
 import java.security.SecureRandom
 
 data class QishuiSession(
@@ -19,11 +18,13 @@ data class QishuiSession(
 
 /** Qishui credentials never share another provider's cookie jar or preferences. */
 object QishuiSessionStore {
-    private fun preferences(context: Context) = EncryptedSharedPreferences.create(
-        context.applicationContext, "melox_qishui_session",
-        MasterKey.Builder(context.applicationContext).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    // Reuse the app-wide recovery path: some OEM keystores (notably older
+    // EMUI builds) can reject an otherwise valid master key after an update.
+    // A direct EncryptedSharedPreferences.create() then threw during startup
+    // instead of degrading to a signed-out provider.
+    private fun preferences(context: Context) = SecureSessionPreferences.openEncrypted(
+        context.applicationContext,
+        "melox_qishui_session",
     )
 
     @Synchronized

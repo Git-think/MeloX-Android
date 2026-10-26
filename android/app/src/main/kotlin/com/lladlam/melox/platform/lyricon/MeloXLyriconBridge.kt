@@ -22,6 +22,7 @@ import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -38,10 +39,13 @@ import kotlinx.coroutines.launch
  * without MeloX broadcasting a new line every frame.
  */
 object MeloXLyriconBridge {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val exceptionHandler = CoroutineExceptionHandler { _, error -> disableForSession(error) }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + exceptionHandler)
 
     @Volatile
     private var started = false
+    private var unavailableForSession = false
+    private var controller: MediaController? = null
     private var provider: LyriconProvider? = null
     private var playbackState: MeloXPlaybackUiState? = null
     private var syncJob: Job? = null
@@ -49,7 +53,7 @@ object MeloXLyriconBridge {
 
     @Synchronized
     fun start(context: Context) {
-        if (started) return
+        if (started || unavailableForSession) return
         // Lyricon is an optional external lyrics provider. On ROMs where its
         // service/binding is unavailable, provider creation can throw during
         // startup (issue #90). Never let optional external integration crash
@@ -57,9 +61,20 @@ object MeloXLyriconBridge {
         runCatching {
             startInternal(context)
             started = true
-        }.onFailure { error ->
-            android.util.Log.w("MeloXLyricon", "Lyricon unavailable; skipping bridge", error)
-        }
+        }.onFailure(::disableForSession)
+    }
+
+    private fun disableForSession(error: Throwable) {
+        unavailableForSession = true
+        started = false
+        syncJob?.cancel()
+        lyricLoadJob?.cancel()
+        runCatching { playbackState?.unbind(releaseController = false) }
+        runCatching { controller?.release() }
+        controller = null
+        playbackState = null
+        provider = null
+        android.util.Log.w("MeloXLyricon", "Lyricon unavailable; disabling bridge for this session", error)
     }
 
     private fun startInternal(context: Context) {
@@ -80,11 +95,18 @@ object MeloXLyriconBridge {
         val handler = Handler(Looper.getMainLooper())
         future.addListener(
             {
-                runCatching { future.get() }
-                    .onSuccess { controller ->
-                        state.bind(controller)
+                // onSuccess runs outside runCatching's protected block. Include
+                // binding and sync startup so delayed service failures stay optional.
+                runCatching {
+                    val connected = future.get()
+                    if (unavailableForSession) {
+                        connected.release()
+                    } else {
+                        controller = connected
+                        state.bind(connected)
                         startSyncLoop(appContext, state, lyriconProvider)
                     }
+                }.onFailure(::disableForSession)
             },
             { command -> handler.post(command) },
         )

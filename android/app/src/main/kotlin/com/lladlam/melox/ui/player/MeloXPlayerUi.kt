@@ -284,12 +284,16 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         refresh(rebuildQueue = true)
     }
 
-    internal fun unbind() {
+    internal fun unbind(releaseController: Boolean = true) {
         cancelPendingMediaClear()
         cancelPendingQueueRebuild()
-        controller?.removeListener(listener)
-        controller?.release()
+        val previous = controller
         controller = null
+        try {
+            previous?.removeListener(listener)
+        } finally {
+            if (releaseController) previous?.release()
+        }
     }
 
     internal fun refresh(rebuildQueue: Boolean = false) {
@@ -793,9 +797,17 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         if (MiPlaySession.active || DlnaSession.active || MeloXUsbAudioSession.active) return false
         if (MeloXSettingsRuntime.volumeControlMode != MeloXVolumeControlMode.System) return false
         if (volumeDragging) return false
-        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val maxVolume = maxVolumeCached(audioManager)
-        val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val maxVolume: Int
+        val current: Int
+        try {
+            val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            maxVolume = maxVolumeCached(audioManager)
+            current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        } catch (error: RuntimeException) {
+            // This is also called from startup and the polling coroutine. A
+            // temporarily unavailable OEM audio service must not kill that scope.
+            return false
+        }
         // 外部（音量键）改了音量时同步本地缓存，避免下次拖动误判成"跨格"。
         cachedStep = current
         val fresh = current.toFloat() / maxVolume.toFloat()
@@ -820,33 +832,26 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
                 syncSystemVolume()
             }
         }
-        systemVolumeReceiver = receiver
-        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION").apply {
-            // 另加系统标准的 content:// 音量变化通知，部分 ROM 走这条而非 action 广播。
-            // ⚠ `IntentFilter` **没有** `addDataContentUri(...)` 这个 API（编译不过），
-            //   等价写法是 scheme + authority 两步（content://media）。
-            addDataScheme("content")
-            addDataAuthority("media", null)
-        }
+        // Volume broadcasts normally have no data URI. Requiring content://media
+        // here prevents those broadcasts from matching the filter.
+        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
         // VOLUME_CHANGED_ACTION 是系统有序广播，动态注册即可收到（无需 manifest）。
         // RECEIVER_NOT_EXPORTED：本 receiver 不对外暴露，仅接收本应用注册的意图。
-        runCatching {
-            appContext.registerReceiver(receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        }.onFailure {
-            // 部分 ROM 对带 data URI 的 filter 组合会抛异常 ⇒ 退回纯 action filter。
-            appContext.registerReceiver(
-                receiver,
-                IntentFilter("android.media.VOLUME_CHANGED_ACTION"),
-                ContextCompat.RECEIVER_NOT_EXPORTED,
-            )
-        }
+        val registered = runCatching {
+            ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        }.onFailure { android.util.Log.w("MeloXPlayerUi", "System volume receiver unavailable; using polling", it) }
+            .isSuccess
+        if (registered) systemVolumeReceiver = receiver
         // 注册瞬间首读一次，确保进入播放页时滑块已对齐当前系统音量。
         syncSystemVolume()
     }
 
     /** 反注册系统音量监听。 */
     internal fun unregisterSystemVolumeSync() {
-        systemVolumeReceiver?.let { appContext.unregisterReceiver(it) }
+        systemVolumeReceiver?.let { receiver ->
+            runCatching { appContext.unregisterReceiver(receiver) }
+                .onFailure { android.util.Log.w("MeloXPlayerUi", "Unable to unregister system volume receiver", it) }
+        }
         systemVolumeReceiver = null
     }
 
@@ -918,19 +923,33 @@ fun rememberMeloXPlaybackUiState(
 
     DisposableEffect(context, connectionEnabled) {
         if (!connectionEnabled) return@DisposableEffect onDispose {}
-        val token = SessionToken(
-            context,
-            ComponentName(context, MeloXPlaybackService::class.java),
-        )
-        val future = MediaController.Builder(context, token).buildAsync()
+        val future = runCatching {
+            val token = SessionToken(context, ComponentName(context, MeloXPlaybackService::class.java))
+            MediaController.Builder(context, token).buildAsync()
+        }.getOrElse {
+            android.util.Log.w("MeloXPlayerUi", "Unable to connect to playback service", it)
+            return@DisposableEffect onDispose {}
+        }
         val handler = Handler(Looper.getMainLooper())
         var disposed = false
+        var released = false
+        fun releaseConnection() {
+            if (!released) {
+                released = true
+                runCatching { MediaController.releaseFuture(future) }
+                    .onFailure { android.util.Log.w("MeloXPlayerUi", "Unable to release playback connection", it) }
+            }
+        }
 
         future.addListener(
             {
                 if (!disposed) {
-                    runCatching { future.get() }
-                        .onSuccess(state::bind)
+                    runCatching { state.bind(future.get()) }
+                        .onFailure {
+                            runCatching { state.unbind(releaseController = false) }
+                            releaseConnection()
+                            android.util.Log.w("MeloXPlayerUi", "Unable to initialize playback controller", it)
+                        }
                 }
             },
             { command -> handler.post(command) },
@@ -938,8 +957,11 @@ fun rememberMeloXPlaybackUiState(
 
         onDispose {
             disposed = true
-            if (!future.isDone) future.cancel(true)
-            state.unbind()
+            runCatching { state.unbind(releaseController = false) }
+                .onFailure { android.util.Log.w("MeloXPlayerUi", "Unable to unbind playback controller", it) }
+            // releaseFuture also handles a controller that connects after
+            // disposal; canceling/ignoring the future can leak that binding.
+            releaseConnection()
         }
     }
 
