@@ -69,7 +69,7 @@ object MeloXLyriconBridge {
         started = false
         syncJob?.cancel()
         lyricLoadJob?.cancel()
-        runCatching { playbackState?.unbind() }
+        runCatching { playbackState?.unbind(releaseController = false) }
         runCatching { controller?.release() }
         controller = null
         playbackState = null
