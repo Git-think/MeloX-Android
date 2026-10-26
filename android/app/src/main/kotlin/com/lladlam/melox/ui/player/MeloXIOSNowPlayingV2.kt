@@ -113,7 +113,14 @@ fun MeloXIOSNowPlayingV2(
                     isPlaying = state.isPlaying,
                 )
             } else if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.FlowingLight) {
-                MeloXFlowingLightBackdrop(artworkUrl = state.artworkUrl, isPlaying = state.isPlaying)
+                MeloXFlowingLightBackdrop(
+                    artworkUrl = state.artworkUrl,
+                    isPlaying = state.isPlaying,
+                    mixOutgoingArtworkUrl = state.outgoingArtworkUrl
+                        .takeIf { state.isInTransition && !state.transitionHandedOff },
+                    mixIncomingArtworkUrl = state.incomingArtworkUrl
+                        .takeIf { state.isInTransition && !state.transitionHandedOff },
+                )
             } else if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage) {
                 MeloXCustomImageBackdrop(
                     path = MeloXSettingsRuntime.customBackgroundPath,

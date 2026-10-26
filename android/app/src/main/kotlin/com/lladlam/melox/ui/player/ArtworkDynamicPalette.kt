@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import java.net.URI
 import java.util.LinkedHashMap
@@ -19,6 +20,19 @@ internal data class ArtworkDynamicPalette(
     val cells: List<Color>,
     val average: Color,
 ) {
+    /** Equal-area sampling of both covers, retaining the existing 3x3 mesh. */
+    fun combinedWith(other: ArtworkDynamicPalette): ArtworkDynamicPalette {
+        // A missing/failed cover should not tint the real cover with fallback colors.
+        if (this === Fallback) return other
+        if (other === Fallback || this == other) return this
+        return ArtworkDynamicPalette(
+            cells = List(9) { index ->
+                lerp(cells.getOrElse(index) { average }, other.cells.getOrElse(index) { other.average }, .5f)
+            },
+            average = lerp(average, other.average, .5f),
+        )
+    }
+
     companion object {
         val Fallback = ArtworkDynamicPalette(
             cells = listOf(

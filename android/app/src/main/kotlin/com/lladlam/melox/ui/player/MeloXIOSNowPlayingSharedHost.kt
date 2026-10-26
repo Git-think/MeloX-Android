@@ -750,6 +750,10 @@ fun MeloXIOSNowPlayingSharedHost(
                             mediaId = state.mediaId,
                             artworkUrl = state.artworkUrl,
                             isPlaying = expansionProgress > 0.72f,
+                            mixOutgoingArtworkUrl = state.outgoingArtworkUrl
+                                .takeIf { state.isInTransition && !state.transitionHandedOff },
+                            mixIncomingArtworkUrl = state.incomingArtworkUrl
+                                .takeIf { state.isInTransition && !state.transitionHandedOff },
                         )
                     } else if (MeloXSettingsRuntime.playerBackgroundMode == MeloXPlayerBackgroundMode.CustomImage) {
                         MeloXCustomImageBackdrop(
