@@ -166,7 +166,8 @@ class MainActivity : ComponentActivity(), MeloXDetailPageOwner {
         lifecycleScope.launch {
             firstDraw.await()
             delay(500L)
-            MeloXLyriconBridge.start(applicationContext)
+            runCatching { MeloXLyriconBridge.start(applicationContext) }
+                .onFailure { android.util.Log.w("MeloXStartup", "Skipping optional Lyricon initialization", it) }
         }
     }
 
