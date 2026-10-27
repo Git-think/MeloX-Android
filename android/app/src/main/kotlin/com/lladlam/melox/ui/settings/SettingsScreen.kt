@@ -3526,9 +3526,11 @@ private fun AboutSettings(context: android.content.Context) {
             )
             listOf(
                 stringResource(R.string.settings_about_sponsor_26d40) to stringResource(R.string.settings_about_sponsor_amount_50),
-                stringResource(R.string.settings_about_sponsor_aec4c) to stringResource(R.string.settings_about_sponsor_amount_6_monthly),
+                stringResource(R.string.settings_about_sponsor_aec4c) to stringResource(R.string.settings_about_sponsor_amount_6),
                 stringResource(R.string.settings_about_sponsor_bai) to stringResource(R.string.settings_about_sponsor_amount_5),
                 stringResource(R.string.settings_about_sponsor_zhongmo) to stringResource(R.string.settings_about_sponsor_amount_8_88),
+                stringResource(R.string.settings_about_sponsor_361ef) to stringResource(R.string.settings_about_sponsor_amount_20),
+                stringResource(R.string.settings_about_sponsor_f8b67) to stringResource(R.string.settings_about_sponsor_amount_12_24),
             ).forEach { (name, amount) ->
                 Row(
                     Modifier.fillMaxWidth().padding(top = 9.dp),

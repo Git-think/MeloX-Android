@@ -342,9 +342,11 @@ Thank you to the following sponsors for supporting MeloX Android!
 | Sponsor | Contribution |
 | --- | --- |
 | Afdian user\_26d40 | CNY 50 |
-| Afdian user\_aec4c | CNY 6 (monthly) |
+| Afdian user\_aec4c | CNY 6 |
 | Bai | CNY 5 |
 | 中末 | CNY 8.88 |
+| Afdian user\_361ef | CNY 20 |
+| Afdian user\_f8b67 | CNY 12.24 |
 
 ## Links
 

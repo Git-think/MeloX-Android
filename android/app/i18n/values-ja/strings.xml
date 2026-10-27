@@ -1158,9 +1158,9 @@
     <string name="settings_about_sponsor_26d40">Afdian user_26d40</string>
     <string name="settings_about_sponsor_aec4c">Afdian user_aec4c</string>
     <string name="settings_about_sponsor_bai">Bai</string>
-    <string name="settings_about_sponsor_amount_50">50 元</string>
-    <string name="settings_about_sponsor_amount_6_monthly">6 元（月額）</string>
-    <string name="settings_about_sponsor_amount_5">5 元</string>
+    <string name="settings_about_sponsor_amount_50">CNY 50</string>
+    <string name="settings_about_sponsor_amount_6">CNY 6</string>
+    <string name="settings_about_sponsor_amount_5">CNY 5</string>
     <string name="settings_about_sponsors_note">MeloX Android を支援してくださる皆様に感謝します。</string>
     <string name="settings_about_exporting">ログを書き出し中…</string>
     <string name="settings_about_export">MeloX のログをすべて書き出す</string>
