@@ -34,7 +34,10 @@ import com.lladlam.melox.MeloXAppVisibility
 import com.lladlam.melox.ui.settings.MeloXLyricsRenderingQuality
 import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.cos
@@ -192,6 +195,8 @@ internal fun MeloXFlowingLightBackdrop(
     isPlaying: Boolean,
     mediaId: String? = null,
     modifier: Modifier = Modifier,
+    mixOutgoingArtworkUrl: String? = null,
+    mixIncomingArtworkUrl: String? = null,
 ) {
     val context = LocalContext.current
     val appInForeground = MeloXAppVisibility.isForeground
@@ -223,8 +228,16 @@ internal fun MeloXFlowingLightBackdrop(
     // that write and crashed with "Can't call setPixels() on a recycled
     // bitmap". The two bitmaps are tiny (<= 48x110), so the GC reclaims them.
 
-    LaunchedEffect(artworkUrl) {
-        targetPalette = ArtworkDynamicPaletteProvider.paletteFor(context, artworkUrl)
+    LaunchedEffect(context, artworkUrl, mixOutgoingArtworkUrl, mixIncomingArtworkUrl) {
+        // Only cover identities key extraction: AutoMix progress updates must not
+        // decode artwork on every frame. Keep both decks stable until handoff.
+        val sources = listOf(mixOutgoingArtworkUrl ?: artworkUrl, mixIncomingArtworkUrl)
+            .filterNotNull().filter(String::isNotBlank).distinct()
+        val palettes = coroutineScope {
+            sources.map { source -> async { ArtworkDynamicPaletteProvider.paletteFor(context, source) } }.awaitAll()
+        }
+        targetPalette = palettes.reduceOrNull { outgoing, incoming -> outgoing.combinedWith(incoming) }
+            ?: ArtworkDynamicPalette.Fallback
     }
 
     LaunchedEffect(isPlaying, artworkUrl, mediaId, renderingQuality, backgroundFrameRate, meshBitmaps, targetPalette, appInForeground) {
