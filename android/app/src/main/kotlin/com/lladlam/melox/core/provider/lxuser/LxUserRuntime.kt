@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
@@ -54,7 +55,8 @@ data class LxUserScript(
 class LxUserRuntime(
     private val httpClient: OkHttpClient = com.lladlam.melox.core.network.MeloXHttpClient.shared,
 ) : Closeable {
-    private val context = createContext()
+    private val runtimeThread = LxRuntimeThread()
+    private lateinit var context: QuickJSContext
     private val requestHandlers = mutableListOf<JSFunction>()
     private val sourceQualities = mutableMapOf<String, List<String>>()
     private val sourceActions = mutableMapOf<String, Set<String>>()
@@ -75,12 +77,22 @@ class LxUserRuntime(
     private val drainSignal = Object()
 
     init {
-        installGlobals()
+        try {
+            runtimeThread.call {
+                context = createContext()
+                installGlobals()
+            }
+        } catch (error: Throwable) {
+            runtimeThread.close { if (::context.isInitialized) context.close() }
+            throw error
+        }
     }
 
     private var loaded = false
 
-    fun load(script: LxUserScript): LxUserScriptMetadata {
+    fun load(script: LxUserScript): LxUserScriptMetadata = runtimeThread.call { loadOnRuntimeThread(script) }
+
+    private fun loadOnRuntimeThread(script: LxUserScript): LxUserScriptMetadata {
         if (loaded) return script.metadata
         val info = script.metadata
         Log.d(TAG, "load start name=${info.name.orEmpty()} bytes=${script.source.toByteArray().size}")
@@ -105,7 +117,19 @@ class LxUserRuntime(
     }
 
     /** Invokes a V5 action (musicUrl, lyric, or pic) and returns its raw result. */
-    fun callAction(action: String, args: Map<String, Any?>): Any? {
+    fun callAction(action: String, args: Map<String, Any?>): Any? = try {
+        runtimeThread.call { callActionOnRuntimeThread(action, args) }
+    } catch (error: TimeoutException) {
+        // Invalidate the context so late HTTP/timer callbacks cannot settle the
+        // next song's request. A future session starts from a clean script.
+        close()
+        throw error
+    } catch (error: InterruptedException) {
+        close()
+        throw error
+    }
+
+    private fun callActionOnRuntimeThread(action: String, args: Map<String, Any?>): Any? {
         require(action == "musicUrl" || action == "lyric" || action == "pic") {
             "Unsupported LX action: $action"
         }
@@ -163,11 +187,11 @@ class LxUserRuntime(
     }
 
     /** Returns the best quality this source declared through lx.send(inited, ...). */
-    fun qualityFor(source: String, requested: String): String {
+    fun qualityFor(source: String, requested: String): String = runtimeThread.call {
         val supported = sourceQualities[source].orEmpty()
-        if (supported.isEmpty() || requested in supported) return requested
+        if (supported.isEmpty() || requested in supported) return@call requested
         val requestedIndex = QUALITY_ORDER.indexOf(requested).takeIf { it >= 0 } ?: QUALITY_ORDER.lastIndex
-        return QUALITY_ORDER.asReversed()
+        QUALITY_ORDER.asReversed()
             .firstOrNull { it in supported && QUALITY_ORDER.indexOf(it) <= requestedIndex }
             ?: supported.firstOrNull()
             ?: requested
@@ -179,15 +203,17 @@ class LxUserRuntime(
      * explicitly lists its sources no longer gets probed on sources it does not
      * serve, which previously wasted a request per unsupported source.
      */
-    fun supportsSource(source: String): Boolean =
+    fun supportsSource(source: String): Boolean = runtimeThread.call {
         sourceQualities.isEmpty() || sourceQualities.containsKey(source)
+    }
 
     /**
      * Scripts that never declared actions stay permissive. Once a script lists
      * its actions, callers skip lyric and artwork probes the script cannot serve.
      */
-    fun supportsAction(source: String, action: String): Boolean =
+    fun supportsAction(source: String, action: String): Boolean = runtimeThread.call {
         sourceActions.isEmpty() || action in sourceActions[source].orEmpty()
+    }
 
     fun sentEvents(): List<Pair<String, Any?>> = emptyList()
 
@@ -405,6 +431,7 @@ class LxUserRuntime(
         httpPool.execute {
             var call: Call? = null
             try {
+                if (closed.get()) return@execute
                 val requestBuilder = Request.Builder().url(url)
                 headers.forEach { (key, value) ->
                     if (key != null && value != null) requestBuilder.addHeader(key.toString(), value.toString())
@@ -449,6 +476,10 @@ class LxUserRuntime(
                 call = httpClient.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
                     .newCall(requestBuilder.build())
                 activeCalls[callId] = call
+                if (closed.get()) {
+                    call.cancel()
+                    return@execute
+                }
                 call.execute().use { response ->
                     if (call.isCanceled()) return@execute
                     val rawBytes = response.body.bytes()
@@ -481,6 +512,7 @@ class LxUserRuntime(
     }
 
     private fun enqueueHttpResponse(response: HttpResponse) {
+        if (closed.get()) return
         pendingHttpResponses.add(response)
         synchronized(drainSignal) { drainSignal.notifyAll() }
     }
@@ -575,7 +607,9 @@ class LxUserRuntime(
     }
 
     private fun drainUntil(done: CountDownLatch) {
-        repeat(400) {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ACTION_TIMEOUT_MS)
+        while (System.nanoTime() < deadline) {
+            check(!closed.get()) { "LX runtime is closed" }
             if (done.count == 0L) return
             dispatchTimers()
             processPendingHttpResponses()
@@ -586,10 +620,12 @@ class LxUserRuntime(
                 drainSignal.wait(5)
             }
         }
+        if (done.count != 0L) throw TimeoutException("LX script action timed out")
     }
 
     private fun drainScriptInitialization() {
         repeat(600) { iteration ->
+            check(!closed.get()) { "LX runtime is closed" }
             dispatchTimers()
             processPendingHttpResponses()
             runCatching { context.evaluate("void 0") }
@@ -705,7 +741,12 @@ class LxUserRuntime(
         if (closed.compareAndSet(false, true)) {
             activeCalls.values.forEach { it.cancel() }
             activeCalls.clear()
-            context.close()
+            synchronized(drainSignal) { drainSignal.notifyAll() }
+            runtimeThread.close {
+                pendingHttpResponses.clear()
+                timers.clear()
+                context.close()
+            }
         }
     }
 
@@ -716,6 +757,7 @@ class LxUserRuntime(
             Thread(runnable, "melox-lx-http").apply { isDaemon = true }
         }
         private val QUALITY_ORDER = listOf("128k", "320k", "flac", "flac24bit")
+        private const val ACTION_TIMEOUT_MS = HTTP_TIMEOUT_MS + 2_000L
         private const val LX_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36"
 
@@ -726,13 +768,19 @@ class LxUserRuntime(
          */
         fun session(id: String, source: String): LxUserRuntime = synchronized(sessionLock) {
             sessions[id]?.takeUnless { it.closed.get() } ?: LxUserRuntime().also { runtime ->
-                runtime.load(LxUserScript(source))
-                sessions[id] = runtime
+                try {
+                    runtime.load(LxUserScript(source))
+                    sessions[id] = runtime
+                } catch (error: Throwable) {
+                    runtime.close()
+                    throw error
+                }
             }
         }
 
         fun evict(id: String) {
-            sessions.remove(id)?.close()
+            val runtime = synchronized(sessionLock) { sessions.remove(id) }
+            runtime?.close()
         }
 
         fun evictAll() {
