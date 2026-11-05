@@ -246,7 +246,7 @@ class NeteasePlaybackResolver(
         songId = songId,
         quality = quality,
         cookieHeader = cookieHeader,
-        fallbackIdentity = crossProviderFallback?.cacheIdentity().orEmpty(),
+        fallbackIdentity = fallbackChain.cacheIdentity(),
         metadataIdentity = fallbackRequest?.let {
             "${it.title}\u001f${it.artist}\u001f${it.durationMs.orZero()}"
         }.orEmpty(),

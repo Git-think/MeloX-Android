@@ -32,4 +32,31 @@ class BuiltInPlaybackResultTest {
             assertSame(error, result.exceptionOrNull())
         }
     }
+
+    @Test fun disablingThirdPartyConsentPreservesUpstreamExceptionBehaviour() {
+        val error = NeteasePlaybackUnavailableException("official unavailable")
+        val result = runCatching { runBlocking { builtInPlaybackResult(false) { throw error } } }
+        assertSame(error, result.exceptionOrNull())
+    }
+
+    @Test fun terminalOfficialFailureReachesConfiguredFallbackWhenEnabled() = runBlocking {
+        var calls = 0
+        val track = com.lladlam.melox.core.music.model.MusicTrack(
+            com.lladlam.melox.core.music.model.MusicResourceId(
+                com.lladlam.melox.core.music.model.MusicSource.Netease, "123",
+            ), "", emptyList(),
+        )
+        val chain = PlaybackFallbackChain(null, ThirdPartyPlaybackResolver({ true }, { true }, listOf(
+            ThirdPartySource { _, _ ->
+                calls++
+                ThirdPartyTrack("https://configured.test/audio.mp3", sourceLabel = "fixture")
+            },
+        )))
+        val result = builtInPlaybackResult(true) { throw NeteasePlaybackUnavailableException("official unavailable") }
+        assertEquals(PlaybackResolution.SubscriptionRequired, result)
+        val resolved = chain.resolve(track, com.lladlam.melox.core.music.model.AudioQualityTier.High,
+            membershipFailure = result == PlaybackResolution.SubscriptionRequired)
+        assertEquals("https://configured.test/audio.mp3", resolved?.url)
+        assertEquals(1, calls)
+    }
 }

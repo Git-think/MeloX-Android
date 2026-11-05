@@ -10,11 +10,16 @@ import com.lladlam.melox.core.music.model.PlaybackResolution
  * existing fallback stage is never reached (notably for provider NetEase URIs).
  * Authentication, network and cancellation exceptions still propagate unchanged.
  */
-internal suspend fun builtInPlaybackResult(resolve: suspend () -> PlaybackResolution): PlaybackResolution = try {
+internal suspend fun builtInPlaybackResult(
+    fallbackEnabled: Boolean = true,
+    resolve: suspend () -> PlaybackResolution,
+): PlaybackResolution = try {
     resolve()
-} catch (_: NeteasePlaybackUnavailableException) {
+} catch (error: NeteasePlaybackUnavailableException) {
+    if (!fallbackEnabled) throw error
     // Same membership/rights classification as upstream's legacy NetEase resolver.
     PlaybackResolution.SubscriptionRequired
 } catch (error: MeloXPlaybackUnavailableException) {
+    if (!fallbackEnabled) throw error
     PlaybackResolution.Unavailable(error.message)
 }

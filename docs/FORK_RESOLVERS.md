@@ -45,8 +45,10 @@ proof that a track has no source.
 
 Two small adapters fix missing paths into that existing stage:
 
-- Built-in providers that throw a documented terminal no-source exception are
-  normalized to the existing playback result types. Other exceptions propagate.
+- With third-party consent enabled, built-in providers that throw a documented
+  terminal no-source exception are normalized to the existing playback result
+  types. With consent disabled, the upstream exception behaviour is preserved.
+  Other exceptions always propagate.
 - A legacy NetEase URI without title metadata can still use its numeric song ID
   for a configured API; matching stages remain free to reject missing metadata.
 
