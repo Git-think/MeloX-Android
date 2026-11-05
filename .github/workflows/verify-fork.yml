@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: verify-fork-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -39,7 +39,14 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
-      - name: Test and build signed Release
+      - name: Run Debug unit tests
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:testDebugUnitTest --no-daemon --max-workers=1 \
+            '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8' --stacktrace
+
+      - name: Build signed Release
         env:
           MELOX_RELEASE_KEYSTORE_B64: ${{ secrets.MELOX_RELEASE_KEYSTORE_B64 }}
           ORG_GRADLE_PROJECT_meloxReleaseStorePassword: ${{ secrets.MELOX_RELEASE_STORE_PASSWORD }}
@@ -57,7 +64,8 @@ jobs:
           export ORG_GRADLE_PROJECT_meloxReleaseStoreFile="$keystore"
           chmod +x android/gradlew
           cd android
-          ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=1 \
+            '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8' --stacktrace
 
       - name: Verify certificate and APK metadata
         run: |
