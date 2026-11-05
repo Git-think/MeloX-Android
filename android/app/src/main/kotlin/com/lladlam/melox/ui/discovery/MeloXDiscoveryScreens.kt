@@ -7,6 +7,9 @@ import com.lladlam.melox.core.music.provider.loadAllMusicPages
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +34,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
@@ -61,19 +66,24 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.zIndex
+import org.json.JSONObject
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.graphics.Color
@@ -181,6 +191,13 @@ private val EXPLORE_COLLAPSE_SCROLL = 120.dp
 // overlay 层真正收干净，再解锁并放开卡片。给少了会在切换瞬间看到 overlay 残影。
 private const val DiscoveryOverlaySettleMillis = 60L
 
+/** Home cards animate/press via navigation and haptics; disable the rectangular ripple. */
+private object HomeNoIndication : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode = object : Modifier.Node() {}
+    override fun hashCode(): Int = 0
+    override fun equals(other: Any?): Boolean = other === this
+}
+
 private sealed interface DiscoveryTrack {
     val key: String
     val title: String
@@ -238,6 +255,72 @@ private sealed interface DiscoveryCollection {
     }
 }
 
+
+/** Serializes only NetEase cards; provider collections are not persisted. */
+private fun encodeDiscoveryCollection(collection: DiscoveryCollection?): String? =
+    (collection as? DiscoveryCollection.Netease)?.playlist?.let { playlist ->
+        JSONObject()
+            .put("id", playlist.id)
+            .put("name", playlist.name)
+            .put("cover", playlist.coverUrl.orEmpty())
+            .put("count", playlist.trackCount)
+            .put("creator", playlist.creatorName)
+            .put("playCount", playlist.playCount)
+            .put("description", playlist.description.orEmpty())
+            .toString()
+    }
+
+private fun decodeDiscoveryCollection(raw: String?): DiscoveryCollection? {
+    if (raw.isNullOrBlank()) return null
+    return runCatching {
+        val value = JSONObject(raw)
+        DiscoveryCollection.Netease(
+            NeteasePlaylistSummary(
+                id = value.getLong("id"),
+                name = value.optString("name", "歌单"),
+                coverUrl = value.optString("cover").takeIf(String::isNotBlank),
+                trackCount = value.optInt("count"),
+                creatorName = value.optString("creator"),
+                playCount = value.optLong("playCount"),
+                description = value.optString("description").takeIf(String::isNotBlank),
+            ),
+        )
+    }.getOrNull()
+}
+
+/** Restores a NetEase playlist card after activity/process recreation. */
+private val DiscoveryCollectionSaver: Saver<DiscoveryCollection?, String> = Saver(
+    save = { encodeDiscoveryCollection(it) },
+    restore = { decodeDiscoveryCollection(it) },
+)
+
+private const val LastCollectionKey = "home_last_collection"
+private const val LastCollectionAtKey = "home_last_collection_at"
+private const val LastCollectionTtlMs = 30L * 60L * 1000L
+
+private fun rememberLastCollection(context: android.content.Context, collection: DiscoveryCollection?) {
+    val prefs = context.applicationContext.getSharedPreferences("melox_app_settings", android.content.Context.MODE_PRIVATE)
+    val encoded = encodeDiscoveryCollection(collection)
+    if (encoded == null) {
+        prefs.edit().remove(LastCollectionKey).remove(LastCollectionAtKey).apply()
+    } else {
+        prefs.edit()
+            .putString(LastCollectionKey, encoded)
+            .putLong(LastCollectionAtKey, System.currentTimeMillis())
+            .apply()
+    }
+}
+
+private fun restoreLastCollection(context: android.content.Context): DiscoveryCollection? {
+    val prefs = context.applicationContext.getSharedPreferences("melox_app_settings", android.content.Context.MODE_PRIVATE)
+    val savedAt = prefs.getLong(LastCollectionAtKey, 0L)
+    if (savedAt <= 0L || System.currentTimeMillis() - savedAt > LastCollectionTtlMs) {
+        prefs.edit().remove(LastCollectionKey).remove(LastCollectionAtKey).apply()
+        return null
+    }
+    return decodeDiscoveryCollection(prefs.getString(LastCollectionKey, null))
+}
+
 private data class HomeAccountUi(
     val name: String,
     val avatarUrl: String?,
@@ -286,10 +369,29 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
     var content by remember { mutableStateOf<NeteaseHomeContent?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var selectedCollection by remember { mutableStateOf<DiscoveryCollection?>(null) }
+    var selectedCollection by rememberSaveable(stateSaver = DiscoveryCollectionSaver) { mutableStateOf<DiscoveryCollection?>(null) }
     // 内容与可见性分开持有：返回时只把 selectedCollection 置空（让列表卡片重新进入过渡），
     // overlayCollection 保留，退出过渡期间详情仍被组合 → 封面才能一镜到底地 morph 回卡片。
     var overlayCollection by remember { mutableStateOf<DiscoveryCollection?>(null) }
+    // Activity/process recreation restores selectedCollection; the transient
+    // overlay content must be repopulated or the detail would render nothing.
+    LaunchedEffect(selectedCollection) {
+        if (selectedCollection != null && overlayCollection == null) {
+            overlayCollection = selectedCollection
+        }
+        rememberLastCollection(context, selectedCollection)
+    }
+    // A process killed while the playlist was open has no saved instance state
+    // when relaunched from the launcher. Reopen the last NetEase playlist for a
+    // short window; an explicit back clears it immediately.
+    LaunchedEffect(Unit) {
+        if (selectedCollection == null) {
+            restoreLastCollection(context)?.let {
+                selectedCollection = it
+                overlayCollection = it
+            }
+        }
+    }
     var songList by remember { mutableStateOf<HomeSongList?>(null) }
     // 「每日推荐 / 热歌榜 / 私人雷达」歌单页的内容持有物。与 selectedCollection 同理：
     // 可见性看 songList（返回时置空，让底下首页复位），内容另存 overlaySongList、返回时不清。
@@ -416,6 +518,7 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
             homeRecede.animateTo(target, meloXPageRedirectSpec())
         }
         Box(Modifier.fillMaxSize().meloXPageRecede { homeRecede.value }) {
+        CompositionLocalProvider(LocalIndication provides HomeNoIndication) {
         MeloXHomeLayout(
             source = MusicSource.Netease,
             account = account,
@@ -502,6 +605,7 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
             selectedCollectionKey = selectedCollection?.key,
             sharedTransitionScope = sharedScope,
         )
+        }
         } // Box: 被 hero 推入页盖住的旧页（退让 1/3 屏宽）
 
         // 首页留在底下。歌单页只是叠上去，打开时从右侧滑入，预见式返回滑开时露出首页。
@@ -914,69 +1018,97 @@ private fun HomeAccountButton(account: HomeAccountUi) {
     }
 }
 
+private data class HomeQuickAction(
+    val title: String,
+    val eyebrow: String,
+    val subtitle: String,
+    val symbol: MeloXSymbol,
+    val colors: List<Color>,
+)
+
 @Composable
 private fun HomeQuickActions(source: MusicSource, active: String?, perform: (String) -> Unit) {
-    data class Action(
-        val title: String,
-        val eyebrow: String,
-        val subtitle: String,
-        val symbol: MeloXSymbol,
-        val colors: List<Color>,
-    )
     val actions = buildList {
         if (source == MusicSource.Netease) {
-            add(Action("每日推荐", stringResource(R.string.home_eyebrow_daily), stringResource(R.string.home_subtitle_daily), MeloXSymbol.Calendar, listOf(Color(0xFFFF5B8A), Color(0xFFFF3147))))
-            add(Action("热歌榜", stringResource(R.string.home_eyebrow_hot), stringResource(R.string.home_subtitle_hot), MeloXSymbol.Flame, listOf(Color(0xFFFFA14A), Color(0xFFFF5A36))))
-            add(Action("心动模式", stringResource(R.string.home_eyebrow_heart), stringResource(R.string.home_subtitle_heart), MeloXSymbol.Heart, listOf(Color(0xFFFF6EAC), Color(0xFF9B5DE5))))
-            add(Action("私人雷达", stringResource(R.string.home_eyebrow_radar), stringResource(R.string.home_subtitle_radar), MeloXSymbol.RadioWaves, listOf(Color(0xFF6B7BFF), Color(0xFF8C52FF))))
-            add(Action("私人漫游", stringResource(R.string.home_eyebrow_roam), stringResource(R.string.home_subtitle_roam), MeloXSymbol.Walk, listOf(Color(0xFF26C6DA), Color(0xFF4285F4))))
-            add(Action("相似歌曲", stringResource(R.string.home_eyebrow_similar), stringResource(R.string.home_subtitle_similar), MeloXSymbol.List, listOf(Color(0xFF58C9A3), Color(0xFF159D9A))))
+            add(HomeQuickAction("每日推荐", stringResource(R.string.home_eyebrow_daily), stringResource(R.string.home_subtitle_daily), MeloXSymbol.Calendar, listOf(Color(0xFFFF5B8A), Color(0xFFFF3147))))
+            add(HomeQuickAction("热歌榜", stringResource(R.string.home_eyebrow_hot), stringResource(R.string.home_subtitle_hot), MeloXSymbol.Flame, listOf(Color(0xFFFFA14A), Color(0xFFFF5A36))))
+            add(HomeQuickAction("心动模式", stringResource(R.string.home_eyebrow_heart), stringResource(R.string.home_subtitle_heart), MeloXSymbol.Heart, listOf(Color(0xFFFF6EAC), Color(0xFF9B5DE5))))
+            add(HomeQuickAction("私人雷达", stringResource(R.string.home_eyebrow_radar), stringResource(R.string.home_subtitle_radar), MeloXSymbol.RadioWaves, listOf(Color(0xFF6B7BFF), Color(0xFF8C52FF))))
+            add(HomeQuickAction("私人漫游", stringResource(R.string.home_eyebrow_roam), stringResource(R.string.home_subtitle_roam), MeloXSymbol.Walk, listOf(Color(0xFF26C6DA), Color(0xFF4285F4))))
+            add(HomeQuickAction("相似歌曲", stringResource(R.string.home_eyebrow_similar), stringResource(R.string.home_subtitle_similar), MeloXSymbol.List, listOf(Color(0xFF58C9A3), Color(0xFF159D9A))))
         }
-        add(Action("听歌识曲", stringResource(R.string.home_eyebrow_recognize), stringResource(R.string.home_subtitle_recognize), MeloXSymbol.Microphone, listOf(Color(0xFF7B61FF), Color(0xFF36C5F0))))
-        if (source == MusicSource.Netease) add(Action("私信", stringResource(R.string.home_eyebrow_messages), stringResource(R.string.home_subtitle_messages), MeloXSymbol.Mail, listOf(Color(0xFFFF6B8B), Color(0xFFFF3B30))))
+        add(HomeQuickAction("听歌识曲", stringResource(R.string.home_eyebrow_recognize), stringResource(R.string.home_subtitle_recognize), MeloXSymbol.Microphone, listOf(Color(0xFF7B61FF), Color(0xFF36C5F0))))
+        if (source == MusicSource.Netease) add(HomeQuickAction("私信", stringResource(R.string.home_eyebrow_messages), stringResource(R.string.home_subtitle_messages), MeloXSymbol.Mail, listOf(Color(0xFFFF6B8B), Color(0xFFFF3B30))))
         if (source == MusicSource.Netease && MeloXSettingsRuntime.podcastsEnabled && MeloXSettingsRuntime.podcastsHomePlacement) {
-            add(Action("播客", stringResource(R.string.home_eyebrow_podcasts), stringResource(R.string.home_subtitle_podcasts), MeloXSymbol.RadioWaves, listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
+            add(HomeQuickAction("播客", stringResource(R.string.home_eyebrow_podcasts), stringResource(R.string.home_subtitle_podcasts), MeloXSymbol.RadioWaves, listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
         }
         if (MeloXSettingsRuntime.downloadsEnabled && MeloXSettingsRuntime.downloadsHomePlacement) {
-            add(Action("下载", stringResource(R.string.home_eyebrow_downloads), stringResource(R.string.home_subtitle_downloads), MeloXSymbol.Download, listOf(Color(0xFF0EA5E9), Color(0xFF14B8A6))))
+            add(HomeQuickAction("下载", stringResource(R.string.home_eyebrow_downloads), stringResource(R.string.home_subtitle_downloads), MeloXSymbol.Download, listOf(Color(0xFF0EA5E9), Color(0xFF14B8A6))))
         }
         if (source == MusicSource.Netease && MeloXSettingsRuntime.cloudMusicEnabled && MeloXSettingsRuntime.cloudHomePlacement) {
-            add(Action("云盘", stringResource(R.string.home_eyebrow_cloud), stringResource(R.string.home_subtitle_cloud), MeloXSymbol.Storage, listOf(Color(0xFF64748B), Color(0xFF6366F1))))
+            add(HomeQuickAction("云盘", stringResource(R.string.home_eyebrow_cloud), stringResource(R.string.home_subtitle_cloud), MeloXSymbol.Storage, listOf(Color(0xFF64748B), Color(0xFF6366F1))))
         }
     }
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    if (actions.isEmpty()) return
+    val pages = actions.chunked(2)
+    val pagerState = rememberPagerState(pageCount = { pages.size })
+    // Two half-width cards per page; the pager snaps as one magnetic group so
+    // a swipe never rests on a half-visible tile.
+    HorizontalPager(
+        state = pagerState,
+        // Left edge follows the normal 20dp gutter; the right side keeps a
+        // 44dp peek of the next pair so the carousel reads as swipeable.
+        contentPadding = PaddingValues(start = 20.dp, end = 44.dp),
+        pageSpacing = 12.dp,
+    ) { page ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            pages[page].forEach { action ->
+                HomeQuickActionCard(
+                    action = action,
+                    active = active,
+                    perform = perform,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            repeat(2 - pages[page].size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickActionCard(
+    action: HomeQuickAction,
+    active: String?,
+    perform: (String) -> Unit,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier.clickable(enabled = active == null) { perform(action.title) },
     ) {
-        items(actions, key = { it.title }) { action ->
-            Column(
-                Modifier
-                    .width(310.dp)
-                    .clickable(enabled = active == null) { perform(action.title) },
-            ) {
-                Text(action.eyebrow.uppercase(), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .55f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Text(action.title, modifier = Modifier.padding(top = 3.dp), fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                Text(action.subtitle, modifier = Modifier.padding(top = 2.dp), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .52f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1.48f)
-                        .padding(top = 8.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Brush.linearGradient(action.colors)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    MeloXSymbolIcon(
-                        symbol = action.symbol,
-                        modifier = Modifier.fillMaxSize(),
-                        color = Color.White.copy(alpha = .24f),
-                        iconSize = 72.sp,
-                    )
-                    Text(action.title, modifier = Modifier.align(Alignment.BottomStart).padding(18.dp), color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-                    if (active == action.title) {
-                        CircularProgressIndicator(Modifier.size(52.dp), color = Color.White, strokeWidth = 3.dp)
-                    }
-                }
+        Text(action.eyebrow.uppercase(), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .55f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(action.title, modifier = Modifier.padding(top = 2.dp), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(action.subtitle, modifier = Modifier.padding(top = 1.dp), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .52f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp)
+                .aspectRatio(1.25f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(action.colors)),
+            contentAlignment = Alignment.Center,
+        ) {
+            MeloXSymbolIcon(
+                symbol = action.symbol,
+                modifier = Modifier.fillMaxSize(),
+                color = Color.White.copy(alpha = .24f),
+                iconSize = 48.sp,
+            )
+            Text(action.title, modifier = Modifier.align(Alignment.BottomStart).padding(14.dp), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            if (active == action.title) {
+                CircularProgressIndicator(Modifier.size(40.dp), color = Color.White, strokeWidth = 3.dp)
             }
         }
     }

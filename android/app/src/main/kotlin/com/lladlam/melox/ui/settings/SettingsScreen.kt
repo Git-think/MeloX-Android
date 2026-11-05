@@ -453,7 +453,6 @@ private fun SettingsAccountCard(
         if (onOpenServices != null) {
             MeloXIosListRow(
                 title = stringResource(R.string.tab_services),
-                subtitle = stringResource(R.string.settings_services_subtitle),
                 leading = { MeloXSymbolIcon(MeloXSymbol.MusicNote, Modifier.size(30.dp), accent) },
                 chevronTint = accent,
                 onClick = onOpenServices,
@@ -2758,6 +2757,17 @@ private fun ListenTogetherSettings(context: android.content.Context) {
                     MeloXListenTogetherCoordinator.Phase.Idle -> stringResource(R.string.settings_listen_resuming)
                 },
             )
+            MeloXIosListRow(
+                title = stringResource(R.string.settings_listen_solo),
+                subtitle = stringResource(R.string.settings_listen_solo_note),
+                leading = { MeloXSymbolIcon(MeloXSymbol.Person, Modifier.size(24.dp), MeloXSystemColors.Red) },
+                trailing = {
+                    MeloXGlassToggle(
+                        checked = state.solo,
+                        onCheckedChange = { MeloXListenTogetherCoordinator.setSolo(app, it) },
+                    )
+                },
+            )
         }
         Spacer(Modifier.height(10.dp))
         SettingsActionButton(stringResource(R.string.settings_listen_share)) {
@@ -2855,6 +2865,29 @@ private fun StorageSettings(context: android.content.Context) {
         StorageUsageRow(MeloXSymbol.RadioWaves, stringResource(R.string.settings_storage_temporary), usage.temporary, true)
         StorageUsageRow(MeloXSymbol.Storage, stringResource(R.string.settings_storage_local), usage.localData, true)
     }
+    Spacer(Modifier.height(14.dp))
+    var playbackCacheLimit by remember {
+        mutableStateOf(MeloXMediaCache.limitBytes(context))
+    }
+    Text(stringResource(R.string.settings_storage_playback_limit), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .48f))
+    Spacer(Modifier.height(8.dp))
+    SettingsGlassGroup {
+        listOf(256L, 512L, 1024L, 2048L).forEach { megabytes ->
+            val bytes = megabytes * 1024L * 1024L
+            val label = if (megabytes >= 1024L) "${megabytes / 1024L} GB" else "$megabytes MB"
+            SettingsChoiceRow(label, playbackCacheLimit == bytes) {
+                playbackCacheLimit = bytes
+                MeloXSettingsPreferences.setLong(context, "playback_cache_limit_bytes", bytes)
+                maintenanceMessage = "播放缓存上限已设为 $label，下次启动生效"
+            }
+        }
+    }
+    Text(
+        stringResource(R.string.settings_storage_playback_limit_note),
+        modifier = Modifier.padding(top = 6.dp),
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .50f),
+    )
     Spacer(Modifier.height(18.dp))
     Text(stringResource(R.string.settings_storage_cleanup), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .48f))
     Spacer(Modifier.height(8.dp))
