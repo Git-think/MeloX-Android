@@ -18,7 +18,10 @@ class BuiltInPlaybackResultTest {
     }
 
     @Test fun officialSuccessAndLoginResultsAreUnchanged() = runBlocking {
-        val result = PlaybackResolution.Playable("https://official.test/a.mp3", com.lladlam.melox.core.music.model.AudioQualityTier.High)
+        val result = PlaybackResolution.Playable(
+            url = "https://official.test/a.mp3",
+            requestedQuality = com.lladlam.melox.core.music.model.AudioQualityTier.High,
+        )
         assertSame(result, builtInPlaybackResult { result })
         assertEquals(PlaybackResolution.LoginRequired, builtInPlaybackResult { PlaybackResolution.LoginRequired })
     }
