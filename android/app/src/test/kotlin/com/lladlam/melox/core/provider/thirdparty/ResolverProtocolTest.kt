@@ -76,6 +76,8 @@ class ResolverProtocolTest {
         assertNull(ResolverAudioUrl.parse("""{"success":false,"url":"https://site.test/error"}"""))
         assertNull(ResolverAudioUrl.parse("<html>https://site.test/error</html>"))
         assertNull(ResolverAudioUrl.parse("file:///sdcard/song.mp3"))
+        assertNull(ResolverAudioUrl.parse("[".repeat(17) + "0" + "]".repeat(17)))
+        assertEquals("https://cdn.test/song.mp3", ResolverAudioUrl.parse("""{"data":{"url":"https://cdn.test/song.mp3","name":"[song]"}}"""))
     }
 
     @Test fun credentialsDoNotLeakIntoCacheIdentities() {

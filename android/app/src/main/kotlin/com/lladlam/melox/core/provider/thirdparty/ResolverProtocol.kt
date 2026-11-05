@@ -92,6 +92,22 @@ internal object ResolverAudioUrl {
     fun parse(body: String): String? {
         val text = body.trim()
         valid(text)?.let { return it }
+        // Enforce depth before org.json recursively builds the tree. A byte
+        // limit alone still permits thousands of nested brackets.
+        var depth = 0
+        var quoted = false
+        var escaped = false
+        for (character in text) {
+            if (quoted) {
+                if (escaped) escaped = false else if (character == '\\') escaped = true
+                else if (character == '"') quoted = false
+            } else when (character) {
+                '"' -> quoted = true
+                '{', '[' -> if (++depth > 16) return null
+                '}', ']' -> if (--depth < 0) return null
+            }
+        }
+        if (quoted || depth != 0) return null
         return runCatching { extract(JSONTokener(text).nextValue()) }.getOrNull()
     }
 

@@ -96,8 +96,11 @@ internal fun readResolverResponse(response: Response): String? {
         // response immediately is essential: never download a song as JSON/text.
         return ResolverAudioUrl.valid(response.request.url.toString())
     }
-    if (mime.startsWith("image/") || mime == "text/html") return null
+    if (mime.startsWith("image/")) return null
     val limit = 64L * 1024
     if (response.body.contentLength() > limit || response.body.source().request(limit + 1)) return null
+    // PHP APIs sometimes leave the default text/html MIME type even for JSON
+    // or a plain URL. Parse the bounded body, not the MIME label; real HTML
+    // markup is not a valid resolver payload and will be rejected by the parser.
     return ResolverAudioUrl.parse(response.body.string())
 }

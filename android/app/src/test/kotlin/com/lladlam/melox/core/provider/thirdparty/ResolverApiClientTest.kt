@@ -74,10 +74,17 @@ class ResolverApiClientTest {
     }
 
     @Test fun hugeAndHtmlResponsesAreRejected() {
-        for ((type, body) in listOf("application/json" to "x".repeat(70 * 1024), "text/html" to "https://site.test/not-a-song")) {
+        for ((type, body) in listOf("application/json" to "x".repeat(70 * 1024), "text/html" to "<html>https://site.test/not-a-song</html>")) {
             val api = ResolverApiClient(client(200, { body.toResponseBody(type.toMediaType()) }, AtomicInteger()))
             assertNull(api.resolve(settings, track, AudioQualityTier.High))
         }
+    }
+
+    @Test fun phpDefaultMimeDoesNotHideValidJson() {
+        val api = ResolverApiClient(client(200, {
+            """{"data":{"url":"https://cdn.test/song.mp3"}}""".toResponseBody("text/html".toMediaType())
+        }, AtomicInteger()))
+        assertEquals("https://cdn.test/song.mp3", api.resolve(settings, track, AudioQualityTier.High))
     }
 
     @Test fun simultaneousRequestsAreCoalesced() {
