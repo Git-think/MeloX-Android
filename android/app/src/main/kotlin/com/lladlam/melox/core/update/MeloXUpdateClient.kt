@@ -147,11 +147,11 @@ class MeloXUpdateClient(
         val value = JSONObject(body)
         val version = value.getString("version").trim()
         val pageUrl = value.getString("pageUrl").trim()
-        require(version.isNotBlank() && pageUrl.startsWith("https://github.com/lladlam/MeloX-Android/releases/")) {
+        require(version.isNotBlank() && pageUrl.startsWith(ReleasePagePrefix)) {
             "更新清单格式错误"
         }
         val apkUrl = value.optString("apkUrl").trim().takeIf(String::isNotBlank)
-        require(apkUrl == null || apkUrl.startsWith("https://github.com/lladlam/MeloX-Android/releases/download/")) {
+        require(apkUrl == null || apkUrl.startsWith(ReleaseDownloadPrefix)) {
             "更新下载地址不受信任"
         }
         return MeloXRelease(

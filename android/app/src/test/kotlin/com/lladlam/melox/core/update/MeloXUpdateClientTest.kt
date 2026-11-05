@@ -104,4 +104,14 @@ class MeloXUpdateClientTest {
         assertTrue(runCatching { client.parseManifest(upstream) }.isFailure)
         assertEquals(null, client.parseReleases("[$upstream]"))
     }
+
+    @Test
+    fun forkPageCannotSmuggleAnUpstreamApkDownload() {
+        val manifest = """{
+            "version":"0.7.1",
+            "pageUrl":"https://github.com/Git-think/MeloX-Android/releases/tag/0.7.1",
+            "apkUrl":"https://github.com/lladlam/MeloX-Android/releases/download/0.7.1/MeloX.apk"
+        }"""
+        assertTrue(runCatching { client.parseManifest(manifest) }.isFailure)
+    }
 }
