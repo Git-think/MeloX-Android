@@ -255,12 +255,13 @@ class MeloXUpdateClient(
     }
 
     private companion object {
-        const val GitHubReleasesUrl = "https://api.github.com/repos/lladlam/MeloX-Android/releases?per_page=100"
-        const val GitHubBranchUrl = "https://api.github.com/repos/lladlam/MeloX-Android/branches/main"
+        // Fork-signed installations must only download fork-signed updates.
+        const val GitHubReleasesUrl = "https://api.github.com/repos/Git-think/MeloX-Android/releases?per_page=100"
+        const val GitHubBranchUrl = "https://api.github.com/repos/Git-think/MeloX-Android/branches/main"
         const val DevBuildPageUrl =
-            "https://github.com/lladlam/MeloX-Android/releases/download/dev-latest/MeloX-Android-debug.apk"
-        const val ReleasePagePrefix = "https://github.com/lladlam/MeloX-Android/releases/"
-        const val ReleaseDownloadPrefix = "https://github.com/lladlam/MeloX-Android/releases/download/"
+            "https://github.com/Git-think/MeloX-Android/releases/download/dev-latest/MeloX-Android-debug.apk"
+        const val ReleasePagePrefix = "https://github.com/Git-think/MeloX-Android/releases/"
+        const val ReleaseDownloadPrefix = "https://github.com/Git-think/MeloX-Android/releases/download/"
         val VERSION_PATTERN = Regex(
             pattern = "^(?:android-)?v?(\\d+)\\.(\\d+)\\.(\\d+)(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?$",
             option = RegexOption.IGNORE_CASE,

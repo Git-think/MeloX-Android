@@ -139,9 +139,9 @@ class MeloXGitHubRouting(
 
     companion object {
         const val UpdateManifestUrl =
-            "https://raw.githubusercontent.com/lladlam/MeloX-Remote-Config-Public/main/v1/update.json"
+            "https://raw.githubusercontent.com/Git-think/MeloX-Remote-Config-Public/main/v1/update.json"
         const val RemoteConfigUrl =
-            "https://raw.githubusercontent.com/lladlam/MeloX-Remote-Config-Public/main/v1/latest.json"
+            "https://raw.githubusercontent.com/Git-think/MeloX-Remote-Config-Public/main/v1/latest.json"
 
         private const val PreferencesName = "melox_github_routing"
         private const val LegacyPreferencesName = "melox_app_settings"

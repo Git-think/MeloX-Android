@@ -285,14 +285,13 @@ class NeteasePlaybackResolver(
         songId: Long,
         request: CrossProviderFallbackRequest?,
     ): MusicTrack? {
-        if (request?.title.isNullOrBlank()) return null
         return MusicTrack(
             id = MusicResourceId(MusicSource.Netease, songId.toString()),
-            title = request.title,
-            artists = request.artist
+            title = request?.title.orEmpty(),
+            artists = request?.artist.orEmpty()
                 .let(CrossProviderPlaybackFallbackResolver::splitArtists)
                 .map { MusicArtistRef(name = it) },
-            durationMs = request.durationMs,
+            durationMs = request?.durationMs,
             providerMetadata = ProviderTrackMetadata.Netease(songId),
         )
     }

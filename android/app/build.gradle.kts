@@ -49,7 +49,8 @@ android {
             isEnable = true
             reset()
             include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
+            // Existing fork release/update workflows publish a fixed-name universal APK.
+            isUniversalApk = true
         }
     }
 
@@ -219,6 +220,7 @@ android {
     }
 
     packaging {
+        jniLibs.excludes += setOf("**/x86/**", "**/x86_64/**")
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/google/protobuf/**"
     }

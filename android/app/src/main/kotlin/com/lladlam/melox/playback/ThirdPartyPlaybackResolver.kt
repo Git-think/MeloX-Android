@@ -4,14 +4,16 @@ import android.content.Context
 import android.util.Log
 import com.lladlam.melox.core.music.model.AudioQualityTier
 import com.lladlam.melox.core.music.model.MusicTrack
+import com.lladlam.melox.core.provider.thirdparty.ResolverKind
 
 internal data class ThirdPartyTrack(
     val url: String,
     val requestHeaders: Map<String, String> = emptyMap(),
     val sourceLabel: String,
+    val expiresAtEpochMs: Long? = null,
 )
 
-/** One configured resolver source (CHKSZ or an imported LX script source). */
+/** One configured API resolver or an imported LX script source. */
 internal fun interface ThirdPartySource {
     fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack?
 
@@ -45,7 +47,9 @@ class ThirdPartyPlaybackResolver private constructor(
         membershipOnlyProvider = membershipOnlyProvider,
         sourceProvider = {
             listOf(
-                ChkszThirdPartySource(ChkszPlaybackResolver(context)),
+                ConfiguredResolverSource(context, ResolverKind.Meting),
+                ConfiguredResolverSource(context, ResolverKind.Chksz),
+                ConfiguredResolverSource(context, ResolverKind.Unm),
                 LxThirdPartySource(LxUserPlaybackResolver(context)),
             )
         },
@@ -64,7 +68,7 @@ class ThirdPartyPlaybackResolver private constructor(
     fun cacheIdentity(): String = if (!enabledProvider()) {
         "disabled"
     } else {
-        sources.joinToString("|") { it.cacheIdentity() }
+        "membershipOnly=${membershipOnlyProvider()}:" + sources.joinToString("|") { it.cacheIdentity() }
     }
 
     /**
@@ -76,7 +80,7 @@ class ThirdPartyPlaybackResolver private constructor(
         quality: AudioQualityTier,
         membershipFailure: Boolean,
     ): ThirdPartyTrack? {
-        if (!enabledProvider() || track.title.isBlank()) return null
+        if (!enabledProvider() || track.id.sourceId.builtIn == null) return null
         if (membershipOnlyProvider() && !membershipFailure) return null
         for (source in sources) {
             val result = runCatching { source.resolve(track, quality) }
@@ -96,22 +100,16 @@ class ThirdPartyPlaybackResolver private constructor(
     }
 }
 
-private class ChkszThirdPartySource(
-    private val resolver: ChkszPlaybackResolver,
-) : ThirdPartySource {
-    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? =
-        resolver.resolve(track, quality)?.let { ThirdPartyTrack(it.url, sourceLabel = "chksz") }
-
-    override fun cacheIdentity(): String = "chksz:${resolver.cacheIdentity()}"
-}
-
 private class LxThirdPartySource(
     private val resolver: LxUserPlaybackResolver,
 ) : ThirdPartySource {
-    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? =
-        resolver.resolve(track, quality)?.let {
+    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? {
+        // No installed scripts must also mean no matching search or runtime work.
+        if (resolver.cacheIdentity().isBlank()) return null
+        return resolver.resolve(track, quality)?.let {
             ThirdPartyTrack(it.url, it.requestHeaders, "lx:${it.sourceId}")
         }
+    }
 
     override fun cacheIdentity(): String = "lx:${resolver.cacheIdentity()}"
 }
