@@ -2,9 +2,9 @@
 
 [English](README.md)
 
-[![Downloads](https://img.shields.io/github/downloads/Git-think/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/Git-think/MeloX-Android/releases)
-[![Release](https://img.shields.io/github/v/release/Git-think/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/Git-think/MeloX-Android/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/Git-think/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/Git-think/MeloX-Android/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/lladlam/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/lladlam/MeloX-Android/releases)
+[![Release](https://img.shields.io/github/v/release/lladlam/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/lladlam/MeloX-Android/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/lladlam/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/lladlam/MeloX-Android/commits/main)
 [![QQ群](https://img.shields.io/badge/QQ%E7%BE%A4-MeloX--Android-12B7F5?logo=tencentqq&logoColor=white)](https://qm.qq.com/q/wbhFQxj7mo)
 [![Telegram](https://img.shields.io/badge/Telegram-MeloX--Android-26A5E4?logo=telegram&logoColor=white)](https://t.me/+Eiy42NxIVNUwOWU1)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -29,15 +29,15 @@
 
 > 弥乐是非官方开源项目，与网易云音乐、小米、Apple 及其关联公司不存在隶属、合作或授权关系。
 
-## 当前版本：0.7.0
+## 当前版本：0.7.1
 
-`0.7.0`（`versionCode 25`，2026-10-25）新增汽水音乐音源、LAN 一起放 / DLNA / 小米妙播与实验性 USB 音频输出，并重做播放回退、酷狗概念版签到和歌词罗马音显示。
+`0.7.1`（`versionCode 26`，2026-10-27）修复第三方音源 HTTP 拦截与 LX 脚本线程问题，将实验性 USB 独占扩展到全速／高速 UAC1 并支持日志导出诊断，同时加固启动与可选集成。
 
-- 汽水音乐支持抖音扫码登录、推荐、搜索、歌单、歌词与播放；LAN 一起放同步队列与跳转，DLNA、MiPlay 提供发现与播放会话，USB 输出以实验性 UAC1 方式接入。
-- 播放按“当前音源 → 其他内置音源严格完整音频匹配（网易云、QQ、酷狗概念版、汽水、酷我、Bilibili）→ 已配置的 CHKSZ/LX”顺序执行；Bilibili 他人收藏夹改用正确接口并按页加载。
-- 酷狗概念版每天自动签到并同时领取畅听与概念版 VIP；首次启动改为四步全屏引导，隐私政策与免责声明升级至 1.3，罗马音固定在每条视觉行下方并按发音单元横向对齐，更新弹窗限制在屏幕安全区内。
+- 第三方音源的导入、请求与播放改走隔离 HTTP 通道，支持动态域名、跳转与媒体 Range 请求，不继承账号 Cookie；LX 脚本会话固定在自己的 QuickJS 线程，等待覆盖默认 HTTP 超时。
+- USB 独占支持全速与高速 UAC1 自适应／同步端点及 16～32 位 PCM 容器（由 PCM16 左对齐补零转换，不宣称 bit-perfect），按 USB 微帧调度包长，暂停保留缓冲、拖动进度清理旧音频，并把 USB 描述符与速度结果附进导出日志；UAC2 与异步反馈仍待真机 DAC 验收。
+- 启动加固覆盖账号加密迁移失败、播放控制器绑定与音量广播、外部歌词桥接及可选小米／超级岛服务；修正 Android 10/EMUI 输出面板与画中画／前台服务版本判断。自动混音与 LAN 投放不再打断或误解除 USB 独占输出。
 
-- 下载与完整更新日志：[GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.7.0)
+- 下载与完整更新日志：[GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.7.1)
 - 详细版本记录：[CHANGELOG.md](CHANGELOG.md)
 - 本次版本说明：[CHANGELOG.md](CHANGELOG.md)
 
@@ -47,8 +47,6 @@
 ## 项目说明
 
 弥乐 Android 版基于 [MeloX](https://github.com/youshen2/MeloX) 的设计、交互与业务逻辑进行原生 Android 迁移。iOS ／ macOS 版 MeloX 由 [youshen2](https://github.com/youshen2) 制作，并非 Android 版维护者开发。
-
-本仓库是 [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android) 的 fork：本仓库的 Release 从这里的代码构建，并使用 fork 自己的签名密钥。
 
 项目目标不是使用 WebView 套壳，而是尽可能使用 Android 原生能力重新实现弥乐：
 
@@ -155,7 +153,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - Spotify、YouTube Music 与网易云等源共用同一套 provider-neutral 下载与离线播放链路（`MeloXProviderDownloadStore`）。
 - vivo 设备自动尝试接入 OriginOS 原子岛；不提供单独开关，不支持该能力的设备自动保留标准 Android 媒体通知。该适配使用阿里云文档所述的 `notification.superx.*` 本地通知扩展，不依赖 EMAS 远程推送。
 - 支持导入 LX Music 兼容的 JavaScript 音乐源，并在受限 QuickJS 运行时中解析播放地址。
-- 可配置 Meting API（兼容 metowolf/Meting）服务作为默认第三方解析源，优先解析网易云、QQ音乐和酷狗歌曲；旧版内置的 CHKSZ 解析源保留为可选开关。在「音乐服务」里填写 Meting 服务地址（服务端要求鉴权时再填 Auth 口令），或配置 CHKSZ 的 API Key。解析顺序：Meting → CHKSZ → UNM → LX 脚本。
+- 可配置 CHKSZ 个人 API Key，在当前音源和内置跨平台回退都失败后解析网易云、QQ音乐和酷狗歌曲；配置前需要前往 `api.chksz.com` 注册，目前仅支持 LinuxDo 用户注册。
 - 播放顺序：当前音源 → 其他内置音源的严格完整音频匹配（仅在开启“不可用资源从其他平台获取”时）→ 已配置的第三方解析源（仅在第三方开关和协议确认开启时）。全部失败时按不可播放处理，不会用试听片段冒充完整歌曲；歌词仍由弥乐自己的歌词路线处理。
 
 ## 平台范围
@@ -205,7 +203,7 @@ Liquid Glass 在 Android 上使用 Kyant0 `AndroidLiquidGlass` 的原生 Backdro
 1. 克隆仓库：
 
    ```bash
-   git clone https://github.com/Git-think/MeloX-Android.git
+   git clone https://github.com/lladlam/MeloX-Android.git
    cd MeloX-Android
    ```
 
@@ -227,10 +225,11 @@ Liquid Glass 在 Android 上使用 Kyant0 `AndroidLiquidGlass` 的原生 Backdro
 5. 构建产物位于：
 
    ```text
-   android/app/build/outputs/apk/debug/app-debug.apk
+   android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+   android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
    ```
 
-GitHub Actions 会在 `main` 分支代码更新时自动构建 Debug APK。正式提供给用户的开发版 APK 会使用项目发布密钥签名，并随对应版本号的 GitHub Release 发布。
+GitHub Actions 会在 `main` 分支代码更新时自动构建 Debug APK。滚动开发版发布到 `dev-latest` 预发布，使用 Android 默认 debug 密钥签名，不能覆盖安装正式版；正式版使用下述弥乐发布密钥签名。
 
 ## Release 签名验证
 
@@ -300,6 +299,7 @@ SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；
 
 ### API 与 UI 参考项目
 
+- [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — QQ 音乐匿名搜索与歌词协议、纯音乐占位识别、网易云 YRC、Lyricify Lines / Syllable 格式参考；Apache-2.0，详见 [LYRICS.md](docs/LYRICS.md)。
 - [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — 汽水音乐原生接口、扫码登录、目录、歌词与播放字段参考；MIT，接入范围与验证记录见 [QISHUI.md](docs/QISHUI.md)。
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — 一个基于 Mei 的仿 Apple Music 网易云音乐客户端，为弥乐 Android 版提供 UI 参考。
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API Python 客户端，为 Spotify API 接入提供参考。
@@ -317,7 +317,6 @@ SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；
 上游弥乐还特别鸣谢了以下项目；Android 迁移版在歌词 / 网易云接口等部分通过上游实现间接继承了这些设计与研究成果：
 
 - [jayfunc/BetterLyrics](https://github.com/jayfunc/BetterLyrics) — 逐字歌词渲染、光效与动效参考；
-- [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — 网易云 YRC 逐字歌词解析参考；
 - [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — 网易云接口与播放器实现参考；
 - [DanteAlighieri13210914/pv-tool](https://github.com/DanteAlighieri13210914/pv-tool) — 文字 PV 模板与特效的原始实现，按 PV Tool Non-Commercial License 移植。
 
@@ -329,7 +328,7 @@ Text PV / PV Tool、BeatNet 及其他弥乐功能继续按照上游项目要求�
 
 ### 反馈问题与建议
 
-- 请优先前往 [GitHub Issues](https://github.com/Git-think/MeloX-Android/issues) 提交问题或建议；
+- 请优先前往 [GitHub Issues](https://github.com/lladlam/MeloX-Android/issues) 提交问题或建议；
 - 如因网络问题无法访问，请**填写邮件发送至 `lladlam@outlook.com`**，注明**主题**、**问题详细说明 / 建议说明**，并附上**截图与日志**。
 
 ### 贡献代码

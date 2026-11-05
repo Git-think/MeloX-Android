@@ -54,14 +54,9 @@ jobs:
           before=$(git rev-parse HEAD)
           if ! git merge upstream/main --no-edit \
             -m "chore: sync upstream main @ $(git rev-parse --short upstream/main)"; then
-            echo "Merge hit conflicts; auto-resolving the fork's README patches."
-            python3 tools/fork_readme_resolve.py
-            if git ls-files -u | grep -q .; then
-              echo "::error::Unresolved conflicts remain outside the auto-resolved README files."
-              git ls-files -u
-              exit 1
-            fi
-            git commit --no-edit
+            echo "::error::Merge conflict. This fork does not patch READMEs; resolve the files below locally and push."
+            git ls-files -u
+            exit 1
           fi
           after=$(git rev-parse HEAD)
           if [ "$before" = "$after" ]; then

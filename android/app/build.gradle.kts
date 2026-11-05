@@ -58,8 +58,8 @@ android {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
         targetSdk = 37
-        versionCode = 25
-        versionName = "0.7.0"
+        versionCode = 26
+        versionName = "0.7.1"
         testInstrumentationRunner = providers.gradleProperty("meloxTestInstrumentationRunner")
             .getOrElse("com.lladlam.melox.core.autosync.AutoSyncDeviceRunner")
         externalNativeBuild {
@@ -91,7 +91,8 @@ android {
     //   2. android/keystore.properties   (in-repo; copy keystore/ to build machines)
     //
     // Every release APK must be signed by exactly one certificate:
-    //   CN=Oops MeloX,  SHA-256 0b3696412bf13ccaee032d2bd9672a2c729c86a4f8abc36a7c2cd59ec0fab44a
+    //   CN=MeloX, OU=Development, O=lladlam, C=CN
+    //   SHA-256 dfcca9865b87a402d341985a48eb132bd8679dfa6d9d502f365dd16210a5ebe9
     // Android refuses to *update* an installed app whose new APK carries a
     // different key (INSTALL_FAILED_UPDATE_INCOMPATIBLE). Mixing a throwaway
     // debug key with a real release key — as this project used to — makes every
@@ -327,6 +328,7 @@ dependencies {
 
     implementation("androidx.media3:media3-common:1.10.1")
     implementation("androidx.media3:media3-datasource:1.10.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.10.1")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
 

@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +94,8 @@ fun ProviderServicesScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val sourceRevision by MusicProviderSelectionStore.changes.collectAsState()
+    val selectedId = remember(sourceRevision) { MusicProviderSelectionStore.selectedSourceId(context) }
     val accountManager = remember(neteaseSession) {
         ProviderAccountManager(context, neteaseSessionStore = neteaseSession)
     }
@@ -298,8 +301,8 @@ fun ProviderServicesScreen(
                 MeloXIosListRow(
                     title = source.displayName,
                     subtitle = when {
-                        source == currentSource && account.loggedIn -> stringResource(R.string.provider_source_logged_in)
-                        source == currentSource -> stringResource(R.string.provider_source_logged_out)
+                        source == selectedId.builtIn && account.loggedIn -> stringResource(R.string.provider_source_logged_in)
+                        source == selectedId.builtIn -> stringResource(R.string.provider_source_logged_out)
                         account.loggedIn -> stringResource(R.string.provider_logged_in)
                         else -> stringResource(R.string.provider_not_signed_in)
                     },
@@ -307,13 +310,13 @@ fun ProviderServicesScreen(
                         MeloXSymbolIcon(
                             MeloXSymbol.MusicNote,
                             Modifier.size(25.dp),
-                            if (source == currentSource) MeloXSystemColors.Red else MaterialTheme.colorScheme.onSurface.copy(alpha = .70f),
+                            if (source == selectedId.builtIn) MeloXSystemColors.Red else MaterialTheme.colorScheme.onSurface.copy(alpha = .70f),
                         )
                     },
-                    trailing = if (source == currentSource) {
+                    trailing = if (source == selectedId.builtIn) {
                         { MeloXSymbolIcon(MeloXSymbol.Check, Modifier.size(21.dp), MeloXSystemColors.Red) }
                     } else null,
-                    onClick = { if (source != currentSource) onSourceSelected(source) },
+                    onClick = { onSourceSelected(source) },
                     showTopSeparator = index > 0,
                 )
             }
@@ -321,6 +324,7 @@ fun ProviderServicesScreen(
 
         Spacer(Modifier.size(24.dp))
         ServicesSectionLabel(stringResource(R.string.provider_current_account))
+        PluginServiceSection()
         MeloXIosGroupedList(surfaceColor = MaterialTheme.colorScheme.surface) {
                 MeloXIosListRow(
                     title = currentSource.displayName,
@@ -676,8 +680,14 @@ fun ProviderServicesScreen(
                                 require(url.startsWith("https://") || url.startsWith("http://")) { context.getString(R.string.provider_invalid_http) }
                                 val script = withContext(Dispatchers.IO) {
                                     val request = okhttp3.Request.Builder().url(url).build()
-                                    com.lladlam.melox.core.network.MeloXHttpClient.shared.newCall(request).execute().use { response ->
+                                    val client = com.lladlam.melox.core.network.MeloXHttpClient.thirdPartyAndMedia
+                                        .newBuilder().callTimeout(20, java.util.concurrent.TimeUnit.SECONDS).build()
+                                    client.newCall(request).execute().use { response ->
                                         if (!response.isSuccessful) error(context.getString(R.string.provider_download_failed, response.code))
+                                        require(response.body.contentLength() <= LxUserSourceStore.MaxScriptBytes &&
+                                            !response.body.source().request(LxUserSourceStore.MaxScriptBytes + 1)) {
+                                            "音乐源脚本过大（最大 9 MB）"
+                                        }
                                         response.body.string()
                                     }
                                 }
@@ -725,10 +735,13 @@ fun ProviderServicesScreen(
                             runCatching {
                                 require(jellyfinServerUrl.trim().startsWith("http://") || jellyfinServerUrl.trim().startsWith("https://")) { context.getString(R.string.provider_invalid_server) }
                                 require(jellyfinUsername.isNotBlank()) { context.getString(R.string.provider_username_required) }
-                                JellyfinApiClient(
-                                    com.lladlam.melox.core.network.MeloXHttpClient.shared,
-                                    trustUserServer = jellyfinTrustServer,
-                                ).authenticate(jellyfinServerUrl.trim(), jellyfinUsername.trim(), jellyfinPassword).also { JellyfinSessionStore.write(context, it) }
+                                withContext(Dispatchers.IO) {
+                                    JellyfinApiClient(
+                                        com.lladlam.melox.core.network.MeloXHttpClient.shared,
+                                        trustUserServer = jellyfinTrustServer,
+                                    ).authenticate(jellyfinServerUrl.trim(), jellyfinUsername.trim(), jellyfinPassword)
+                                        .also { JellyfinSessionStore.write(context, it) }
+                                }
                             }.onSuccess { jellyfinPassword = ""; jellyfinBusy = false; loginRevision++; showJellyfinDialog = false }
                                 .onFailure { jellyfinBusy = false; jellyfinError = it.message ?: context.getString(R.string.provider_jellyfin_failed) }
                         }

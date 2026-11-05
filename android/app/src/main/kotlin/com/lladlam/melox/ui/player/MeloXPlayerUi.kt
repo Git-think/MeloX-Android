@@ -331,7 +331,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
             ?: player.mediaMetadata
         val itemExtras = item.mediaMetadata.extras
         val extras = metadata.extras ?: itemExtras
-        val providerSource = PlaybackTrackIdentity.fromMediaItem(item)?.source
+        val providerSource = PlaybackTrackIdentity.fromMediaItem(item)?.sourceId?.builtIn
 
         mediaId = item?.mediaId
         val originalTitle = extras?.getString("melox.system.original_title")
@@ -397,7 +397,7 @@ class MeloXPlaybackUiState internal constructor(private val appContext: Context)
         val active = controller ?: return
         val item = active.currentMediaItem ?: return
         val identity = PlaybackTrackIdentity.fromMediaItem(item) ?: return
-        if (identity.source != MusicSource.Local) return
+        if (identity.sourceId.builtIn != MusicSource.Local) return
         val record = com.lladlam.melox.core.provider.local.LocalMusicRepository(appContext)
             .track(identity.value) ?: return
         val title = record.recognizedTitle ?: record.title.ifBlank { record.displayName }

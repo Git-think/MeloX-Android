@@ -2,9 +2,9 @@
 
 [中文](README.zh-Hans.md)
 
-[![Downloads](https://img.shields.io/github/downloads/Git-think/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/Git-think/MeloX-Android/releases)
-[![Release](https://img.shields.io/github/v/release/Git-think/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/Git-think/MeloX-Android/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/Git-think/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/Git-think/MeloX-Android/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/lladlam/MeloX-Android/total?label=downloads&color=2ea44f)](https://github.com/lladlam/MeloX-Android/releases)
+[![Release](https://img.shields.io/github/v/release/lladlam/MeloX-Android?display_name=release&label=release&color=ff2d55)](https://github.com/lladlam/MeloX-Android/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/lladlam/MeloX-Android/main?label=last%20commit&color=007aff)](https://github.com/lladlam/MeloX-Android/commits/main)
 [![QQ Group](https://img.shields.io/badge/QQ%20Group-MeloX--Android-12B7F5?logo=tencentqq&logoColor=white)](https://qm.qq.com/q/wbhFQxj7mo)
 [![Telegram](https://img.shields.io/badge/Telegram-MeloX--Android-26A5E4?logo=telegram&logoColor=white)](https://t.me/+Eiy42NxIVNUwOWU1)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -29,15 +29,15 @@ The **Windows** and **Linux** editions are in their final verification stage. If
 
 > MeloX Android is an unofficial open-source project. It is not affiliated with, partnered with, or authorized by NetEase Cloud Music, Xiaomi, Apple, or their related companies.
 
-## Current version: 0.7.0
+## Current version: 0.7.1
 
-`0.7.0` (versionCode **25**, 2026-10-25) adds the Qishui music provider, LAN Together / DLNA / MiPlay casting, and experimental USB audio output, while reworking playback fallbacks, Kugou Lite daily rewards and lyric romanization.
+`0.7.1` (versionCode **26**, 2026-10-27) fixes third-party HTTP music sources and LX script threading, widens the experimental USB exclusive output to full-speed and high-speed UAC1 with exportable diagnostics, and hardens startup plus optional integrations.
 
-- Qishui Music supports Douyin QR sign-in, recommendations, search, playlists, lyrics and playback. LAN Together now coordinates queue and seek changes; DLNA and MiPlay expose discovery and playback sessions; USB output is available as an experimental UAC1 path.
-- Playback resolves the current source first, then a strict full-audio match from another built-in source (NetEase, QQ Music, Kugou Lite, Qishui, Kuwo, Bilibili), and only then configured CHKSZ/LX resolvers. Bilibili collected folders use the correct endpoints and page lazily.
-- Kugou Lite checks in automatically once a day for both free-listening and concept VIP rewards. First-run onboarding is now a four-step full-screen flow, the privacy policy and disclaimer are version 1.3, lyric romanization stays under each visual line with per-unit alignment, and the update dialog stays inside screen safe areas.
+- Third-party sources now import, request and play over an isolated HTTP channel that supports dynamic domains, redirects and media Range requests without inheriting account cookies. LX script sessions stay on their own QuickJS thread with waits that cover the default HTTP timeout.
+- USB exclusive output accepts full-speed and high-speed UAC1 adaptive/synchronous endpoints with 16–32-bit PCM containers (widened from PCM16; not bit-perfect), schedules packets per USB microframe, keeps the buffer on pause, flushes stale audio on seek, and appends USB descriptors and speed results to exported logs. UAC2 and asynchronous feedback remain unsupported pending real-DAC validation.
+- Startup hardening covers account-encryption migration failures, audio-controller binding and volume broadcasts, external lyric bridges, and optional Xiaomi/超级岛 services; Android 10/EMUI output panels and PiP/service-type version checks are corrected. AutoMix and LAN cast can no longer interrupt or unmute a USB exclusive session.
 
-- Download and full notes: [GitHub Releases](https://github.com/Git-think/MeloX-Android/releases/tag/0.7.0)
+- Download and full notes: [GitHub Releases](https://github.com/lladlam/MeloX-Android/releases/tag/0.7.1)
 - Version history: [CHANGELOG.md](CHANGELOG.md)
 
 > [!WARNING]
@@ -46,8 +46,6 @@ The **Windows** and **Linux** editions are in their final verification stage. If
 ## About
 
 MeloX Android is a native Android port of the design, interaction, and business logic in [MeloX](https://github.com/youshen2/MeloX), the iOS / macOS client created by [youshen2](https://github.com/youshen2). The iOS version is not made by the Android maintainer.
-
-This repository is the Git-think fork of [lladlam/MeloX-Android](https://github.com/lladlam/MeloX-Android): releases here are built from this fork's code and signed with this fork's key.
 
 The goal is not a WebView wrapper. MeloX is reimplemented with native Android capabilities:
 
@@ -154,7 +152,7 @@ The playable quality depends on the track, account entitlement, region, and the 
 - Spotify, YouTube Music, NetEase, and the other sources share the provider-neutral download and offline path (`MeloXProviderDownloadStore`).
 - vivo devices automatically try OriginOS Atomic Island. There is no separate switch. Unsupported devices keep the standard Android media notification. The adapter uses the documented local `notification.superx.*` extras and does not depend on EMAS push.
 - LX Music compatible JavaScript sources can be imported and resolved in a restricted QuickJS runtime.
-- A Meting API server (metowolf/Meting compatible) can be configured as the default third-party resolver for NetEase, QQ Music, and Kugou tracks; the CHKSZ resolver from earlier releases is still available as an optional API key resolver. Enter the Meting server base URL (and auth token if required), or a CHKSZ API key, under Music Services. Resolution order: Meting → CHKSZ → UNM → LX scripts.
+- A personal CHKSZ API key can be configured to resolve NetEase, QQ Music, and Kugou tracks **after** the current source and the built-in cross-provider fallback both fail. Register at `api.chksz.com`. Registration currently requires a LinuxDo account.
 - Playback order is: the current source → a strict full-audio match from another built-in source (only when "fetch unavailable resources from other platforms" is on) → configured third-party resolvers (only when that switch and its agreement are on). If every stage fails, the track is reported as unavailable instead of playing a preview.
 
 ## Platform scope
@@ -204,7 +202,7 @@ Some RuntimeShader and Backdrop effects need a newer Android version. Older vers
 1. Clone:
 
    ```bash
-   git clone https://github.com/Git-think/MeloX-Android.git
+   git clone https://github.com/lladlam/MeloX-Android.git
    cd MeloX-Android
    ```
 
@@ -230,7 +228,7 @@ Some RuntimeShader and Backdrop effects need a newer Android version. Older vers
     android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
    ```
 
-GitHub Actions builds a debug APK when `main` changes. Development APKs published to users are signed with the project release key and attached to the matching GitHub Release.
+GitHub Actions builds a debug APK when `main` changes. Rolling development builds are published to the `dev-latest` prerelease; they are signed with Android's default debug key, so they cannot update an official release install in place. Official releases are signed with the MeloX release key described below.
 
 ## Experimental CLI
 
@@ -310,6 +308,7 @@ The glass effect is still experimental.
 
 ### API and UI references
 
+- [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — QQ Music anonymous search and lyric protocols, instrumental-placeholder detection, NetEase YRC, Lyricify Lines and Lyricify Syllable format references (Apache-2.0). See [LYRICS.md](docs/LYRICS.md).
 - [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — Qishui Music native API, QR sign-in, catalog, lyric, and playback-field reference. MIT; scope and validation: [QISHUI.md](docs/QISHUI.md).
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — Mei-based Apple Music style NetEase client used as a UI reference.
 - [thlucas1/SpotifyWebApiPython](https://github.com/thlucas1/SpotifyWebApiPython) — Spotify Web API reference.
@@ -327,7 +326,6 @@ The glass effect is still experimental.
 Upstream MeloX also credits these projects. The Android port inherits parts of their lyric and NetEase work through that implementation:
 
 - [jayfunc/BetterLyrics](https://github.com/jayfunc/BetterLyrics) — word-synced lyric rendering, glow, and motion;
-- [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — NetEase YRC parsing;
 - [qier222/YesPlayMusic](https://github.com/qier222/YesPlayMusic) — NetEase API and player reference.
 - [DanteAlighieri13210914/pv-tool](https://github.com/DanteAlighieri13210914/pv-tool) — original Text PV templates and effects, ported under the PV Tool Non-Commercial License.
 
@@ -339,7 +337,7 @@ Welcome to MeloX! Contributions are warmly welcome, whether you hand-craft every
 
 ### Reporting issues or suggestions
 
-- Prefer opening an issue on [GitHub Issues](https://github.com/Git-think/MeloX-Android/issues).
+- Prefer opening an issue on [GitHub Issues](https://github.com/lladlam/MeloX-Android/issues).
 - If GitHub is unreachable from your network, email **`lladlam@outlook.com`** instead. Include a clear **subject**, a **detailed description** of the problem or suggestion, and **screenshots and logs**.
 
 ### Contributing code

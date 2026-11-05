@@ -77,7 +77,8 @@ class ThirdPartyPlaybackResolver private constructor(
         membershipFailure: Boolean,
     ): ThirdPartyTrack? {
         if (!enabledProvider()) return null
-        if (track.id.source == MusicSource.Jellyfin || track.id.source == MusicSource.Local) return null
+        val builtInSource = track.id.sourceId.builtIn
+        if (builtInSource == MusicSource.Jellyfin || builtInSource == MusicSource.Local) return null
         if (membershipOnlyProvider() && !membershipFailure) return null
         for (source in sources) {
             val result = runCatching { source.resolve(track, quality) }
@@ -85,7 +86,7 @@ class ThirdPartyPlaybackResolver private constructor(
                 .getOrNull()
                 ?: continue
             if (result.url.startsWith("http://") || result.url.startsWith("https://")) {
-                Log.i(TAG, "Resolved via ${result.sourceLabel} source=${track.id.source.storageValue}")
+                Log.i(TAG, "Resolved via ${result.sourceLabel} source=${track.id.sourceId.value}")
                 return result
             }
         }
@@ -127,10 +128,14 @@ private class ChkszThirdPartySource(
 private class LxThirdPartySource(
     private val resolver: LxUserPlaybackResolver,
 ) : ThirdPartySource {
-    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? =
-        resolver.resolve(track, quality)?.let {
+    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? {
+        // No imported LX scripts: skip the resolver entirely instead of letting it
+        // fall through to the NetEase match search after an empty source loop.
+        if (resolver.cacheIdentity().isEmpty()) return null
+        return resolver.resolve(track, quality)?.let {
             ThirdPartyTrack(it.url, it.requestHeaders, "lx:${it.sourceId}")
         }
+    }
 
     override fun cacheIdentity(): String = "lx:${resolver.cacheIdentity()}"
 }

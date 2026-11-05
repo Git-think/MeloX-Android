@@ -8,6 +8,7 @@ import com.lladlam.melox.core.autosync.AutoSyncCoordinator
 import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.lyrics.LyricSource
 import com.lladlam.melox.core.lyrics.LyricsDocument
+import com.lladlam.melox.core.lyrics.withoutPlaceholderLyrics
 import com.lladlam.melox.core.lyrics.MeloXLyricPreference
 import com.lladlam.melox.core.lyrics.MeloXLyricScript
 import com.lladlam.melox.core.lyrics.MeloXLyricScriptConverter
@@ -58,25 +59,14 @@ import com.lladlam.melox.ui.settings.MeloXSettingsPreferences
  * is already animating. Apple Music / EVA / TextPV / Skyline all receive the same
  * stable [LyricsDocument] instance for one media identity.
  */
-private const val AutomaticSelectionCacheVersion = 6
+private const val AutomaticSelectionCacheVersion = 7
 
 internal object MeloXProviderLyricsLoader {
     private const val MaxCachedDocuments = 24
     private const val TotalLoadTimeoutMs = 45_000L
 
     /**
-     * How long a line-timed current-provider lyric waits for an authored
-     * word-timed AMLL lyric before falling back. Short on purpose: AMLL mirror
-     * lookups usually answer in well under a second, so this only covers the
-     * common case while keeping playback snappy.
-     */
-    private const val AmllWordTimingWindowMs = 2_000L
-
-    /**
-     * Background budget for upgrading a line-timed document to an authored
-     * word-timed AMLL one after the fast window already fell back. Longer than
-     * [AmllWordTimingWindowMs] because the user already has lyrics on screen;
-     * this only chases the upgrade.
+     * Background budget for retrying an authored AMLL upgrade.
      */
     private const val AmllUpgradeTimeoutMs = 15_000L
 
@@ -150,15 +140,28 @@ internal object MeloXProviderLyricsLoader {
             ?: return LyricsDocument(emptyList())
         val resourceId = PlaybackTrackIdentity.decode(resolvedMediaId)
             ?: return LyricsDocument(emptyList())
-        val localRecord = if (resourceId.source == MusicSource.Local) {
+        if (resourceId.sourceId.builtIn == null) {
+            val registry = MeloXMusicProviders.create(appContext)
+            val generation = registry.generation
+            val provider = registry[resourceId.sourceId] ?: return LyricsDocument(emptyList())
+            if (!provider.supports(com.lladlam.melox.core.music.provider.MusicCapability.Lyrics)) return LyricsDocument(emptyList())
+            val capability = provider as? com.lladlam.melox.core.music.provider.LyricsCapability
+                ?: return LyricsDocument(emptyList())
+            val track = com.lladlam.melox.core.music.model.MusicTrack(resourceId, title,
+                listOf(com.lladlam.melox.core.music.model.MusicArtistRef(name = artist)), durationMs = durationMs)
+            val document = capability.lyrics(track)
+            return if (generation == registry.generation && registry[resourceId.sourceId] === provider) document
+                else LyricsDocument(emptyList())
+        }
+        val localRecord = if (resourceId.sourceId.builtIn == MusicSource.Local) {
             LocalMusicRepository(appContext).track(resourceId.value)
         } else null
         // Local has no independent online lyric catalog. Always use the common
         // AMLL -> QQ -> NetEase -> persisted-local chain, even when automatic
         // selection is disabled for ordinary provider tracks.
         val auto = MeloXSettingsRuntime.automaticLyricSelectionEnabled ||
-            resourceId.source == MusicSource.Local
-        val bilibiliAlignment = resourceId.source == MusicSource.Bilibili &&
+            resourceId.sourceId.builtIn == MusicSource.Local
+        val bilibiliAlignment = resourceId.sourceId.builtIn == MusicSource.Bilibili &&
             MeloXSettingsPreferences.boolean(appContext, "bilibili_lyric_audio_alignment", false)
         val binding = if (auto && MeloXSettingsRuntime.lyricStrongBindingEnabled) {
             LyricBindingStore.read(appContext, resourceId)
@@ -182,7 +185,7 @@ internal object MeloXProviderLyricsLoader {
                 scheduleAutoSyncIfNeeded(
                     appContext,
                     cacheKey,
-                    "${resourceId.source.storageValue}:${resourceId.value}",
+                    "${resourceId.sourceId.value}:${resourceId.value}",
                     hit,
                     onUpgrade,
                 )
@@ -216,10 +219,11 @@ internal object MeloXProviderLyricsLoader {
             .take(count.coerceIn(0, 4))
             .mapNotNull { entry ->
                 val resourceId = PlaybackTrackIdentity.decode(entry.mediaId) ?: return@mapNotNull null
-                val automaticSelection = automaticSelectionEnabled || resourceId.source == MusicSource.Local
+                if (resourceId.sourceId.builtIn == null) return@mapNotNull null
+                val automaticSelection = automaticSelectionEnabled || resourceId.sourceId.builtIn == MusicSource.Local
                 // Bilibili matching can issue several catalog requests. Do not
                 // preload it without the active decoder duration.
-                if (resourceId.source == MusicSource.Bilibili && entry.durationMs <= 0L) return@mapNotNull null
+                if (resourceId.sourceId.builtIn == MusicSource.Bilibili && entry.durationMs <= 0L) return@mapNotNull null
                 LyricTrackSnapshot(
                     resourceId = resourceId,
                     title = entry.title,
@@ -228,13 +232,13 @@ internal object MeloXProviderLyricsLoader {
                     artworkUrl = entry.artworkUrl,
                     durationMs = entry.durationMs,
                     automaticSelection = automaticSelection,
-                    bilibiliAlignment = resourceId.source == MusicSource.Bilibili && bilibiliAlignment,
+                    bilibiliAlignment = resourceId.sourceId.builtIn == MusicSource.Bilibili && bilibiliAlignment,
                     binding = if (automaticSelection && MeloXSettingsRuntime.lyricStrongBindingEnabled) {
                         LyricBindingStore.read(appContext, resourceId)
                     } else null,
                 )
             }
-            .distinctBy { "${it.resourceId.source.storageValue}:${it.resourceId.value}" }
+            .distinctBy { "${it.resourceId.sourceId.value}:${it.resourceId.value}" }
         preloadJob?.cancel()
         if (snapshots.isEmpty()) return
         preloadJob = workerScope.launch {
@@ -258,7 +262,7 @@ internal object MeloXProviderLyricsLoader {
                 scheduleAutoSyncIfNeeded(
                     appContext,
                     cacheKey,
-                    "${snapshot.resourceId.source.storageValue}:${snapshot.resourceId.value}",
+                    "${snapshot.resourceId.sourceId.value}:${snapshot.resourceId.value}",
                     hit,
                     onUpgrade,
                 )
@@ -268,7 +272,7 @@ internal object MeloXProviderLyricsLoader {
         val deferred = synchronized(lock) {
             cache[cacheKey]?.let { return scripted(it) }
             inFlight[cacheKey] ?: workerScope.async {
-                LyricTimelineProcessor.process(loadDocument(appContext, snapshot)).also { document ->
+                LyricTimelineProcessor.process(loadDocument(appContext, snapshot).withoutPlaceholderLyrics()).also { document ->
                     if (document.lines.isNotEmpty()) remember(cacheKey, document)
                 }
             }.also { created ->
@@ -289,7 +293,7 @@ internal object MeloXProviderLyricsLoader {
             throw java.io.IOException("歌词加载超时")
         }
         if (onUpgrade != null) {
-            val trackKey = "${snapshot.resourceId.source.storageValue}:${snapshot.resourceId.value}"
+            val trackKey = "${snapshot.resourceId.sourceId.value}:${snapshot.resourceId.value}"
             // A timeline generated on an earlier visit is reused with no model
             // work at all; generation only starts when nothing is stored.
             val stored = runCatching {
@@ -446,7 +450,7 @@ internal object MeloXProviderLyricsLoader {
         appContext: Context,
         snapshot: LyricTrackSnapshot,
     ): LyricsDocument {
-        if (snapshot.resourceId.source == MusicSource.Bilibili) {
+        if (snapshot.resourceId.sourceId.builtIn == MusicSource.Bilibili) {
             val policy = bilibiliLyricLoadPolicy(
                 automaticSelection = snapshot.automaticSelection,
                 alignmentEnabled = snapshot.bilibiliAlignment,
@@ -457,7 +461,7 @@ internal object MeloXProviderLyricsLoader {
         }
         if (snapshot.automaticSelection) {
             snapshot.binding?.let { binding ->
-                val bound = loadBinding(appContext, binding, snapshot.preference)
+                val bound = loadBinding(appContext, binding, snapshot.preference).withoutPlaceholderLyrics()
                 // Bindings created by the former source-first algorithm may
                 // point at line-timed NetEase lyrics. Do not let such a stale
                 // binding suppress a newly available QRC/YRC word timeline.
@@ -663,65 +667,19 @@ internal object MeloXProviderLyricsLoader {
         appContext: Context,
         snapshot: LyricTrackSnapshot,
     ): LyricsDocument {
-        val orderedSources = automaticLyricSourcesFor(snapshot.resourceId.source)
-        // Every source is started together, but the current provider is awaited
-        // first: its own lyrics win the moment they are ready and the remaining
-        // sources are cancelled. Other platforms are only consulted when the
-        // current provider has none. Because those sources already run
-        // concurrently, the fallback path still costs no more than waiting for
-        // the slowest one.
-        //
-        // The jobs run on the loader's own scope rather than the caller's: the
-        // lyric clients use blocking OkHttp calls that ignore coroutine
-        // cancellation, so a structured scope would still wait for the losing
-        // sources to finish and defeat the early return.
+        val orderedSources = snapshot.resourceId.sourceId.builtIn?.let(::automaticLyricSourcesFor) ?: listOf(LyricAutoSource.Current)
+        // Wait for all already-started candidates before deciding. In particular,
+        // a fast LRC must not cancel a QQ QRC request merely because it takes
+        // longer than the old two-second window. Each source has its own timeout.
         val jobs = orderedSources.associateWith { source ->
             workerScope.async { resolveAutomaticSource(appContext, snapshot, source) }
         }
-        jobs[LyricAutoSource.Current]?.let { current ->
-            val currentResolved = current.await()
-            if (currentResolved.document.lines.isNotEmpty()) {
-                // AMLL word timing is preferred over the current provider's own
-                // lyrics: a provider document (even word-timed) can still be
-                // less precise than an authored AMLL one. Always give AMLL a
-                // short window; if it answers with word timing in time it wins,
-                // otherwise the current provider is used immediately so playback
-                // is never held up. A line-timed AMLL answer is treated as
-                // useless and never wins here (see selectAutomaticLyricCandidate).
-                val amllWithinWindow = jobs[LyricAutoSource.AmlL]?.let { amllJob ->
-                    withTimeoutOrNull(AmllWordTimingWindowMs) { amllJob.await() }
-                }
-                val amllHasWordTiming = amllWithinWindow != null &&
-                    amllWithinWindow.document.lines.isNotEmpty() &&
-                    hasWordTiming(amllWithinWindow.document)
-
-                jobs.forEach { (source, job) ->
-                    if (source != LyricAutoSource.Current) job.cancel()
-                }
-
-                val chosen = if (amllHasWordTiming) amllWithinWindow else currentResolved
-                Log.d(
-                    "MeloXLyricsAuto",
-                    "selectedCurrentProvider source=${chosen?.document?.source} " +
-                        "lines=${chosen?.document?.lines?.size ?: 0} " +
-                        "wordLines=${chosen?.document?.lines?.count { it.syllables.isNotEmpty() } ?: 0} " +
-                        "amllWindow=$amllHasWordTiming",
-                )
-                return rememberBinding(
-                    appContext,
-                    snapshot,
-                    chosen?.binding ?: currentResolved.binding,
-                    chosen?.document ?: currentResolved.document,
-                )
-            }
-        }
-        val candidates = orderedSources
-            .filter { it != LyricAutoSource.Current }
-            .mapIndexed { index, source ->
+        val selected = awaitAutomaticLyricCandidates(orderedSources.map { source ->
+            workerScope.async {
                 val resolved = jobs.getValue(source).await()
-                AutoLyricCandidate(index + 1, resolved.document, resolved.binding)
+                AutoLyricCandidate(orderedSources.indexOf(source), resolved.document, resolved.binding)
             }
-        val selected = selectAutomaticLyricCandidate(candidates)
+        })
         Log.d(
             "MeloXLyricsAuto",
             "selectedPriority=${selected?.priority} lines=${selected?.document?.lines?.size ?: 0} " +
@@ -741,14 +699,17 @@ internal object MeloXProviderLyricsLoader {
             LyricAutoSource.AmlL -> 12_000L
             LyricAutoSource.QQMusic -> 30_000L
             LyricAutoSource.Netease,
+            LyricAutoSource.Kugou,
             LyricAutoSource.Current -> 15_000L
         }
         val resolved = runCatching {
             withTimeoutOrNull(timeoutMs) { loadMatchedSource(appContext, snapshot, source) }
-        }.getOrNull() ?: ResolvedLyrics(LyricsDocument(emptyList()), null)
-        Log.d(
+        }.getOrNull()?.let { it.copy(document = it.document.withoutPlaceholderLyrics()) }
+            ?: ResolvedLyrics(LyricsDocument(emptyList()), null)
+        Log.i(
             "MeloXLyricsAuto",
-            "source=$source elapsed=${SystemClock.elapsedRealtime() - startedAt}ms " +
+            "track=${snapshot.resourceId.sourceId.value}:${snapshot.resourceId.value} " +
+                "source=$source elapsed=${SystemClock.elapsedRealtime() - startedAt}ms " +
                 "lines=${resolved.document.lines.size} " +
                 "wordLines=${resolved.document.lines.count { it.syllables.isNotEmpty() }} " +
                 "timeout=${resolved.document.lines.isEmpty() && SystemClock.elapsedRealtime() - startedAt >= timeoutMs}",
@@ -790,15 +751,17 @@ internal object MeloXProviderLyricsLoader {
         if (source == LyricAutoSource.Current) {
             val document = loadCurrentProvider(appContext, snapshot)
             return ResolvedLyrics(document, document.takeIf { it.lines.isNotEmpty() }?.let {
-                LyricBinding(BoundLyricSource.Provider, snapshot.resourceId.source, snapshot.resourceId.value, snapshot.title, snapshot.artist, snapshot.durationMs)
+                LyricBinding(BoundLyricSource.Provider, snapshot.resourceId.sourceId.builtIn, snapshot.resourceId.value, snapshot.title, snapshot.artist, snapshot.durationMs,
+                    providerSourceId = snapshot.resourceId.sourceId)
             })
         }
         val musicSource = when (source) {
             LyricAutoSource.QQMusic -> MusicSource.QQMusic
             LyricAutoSource.Netease -> MusicSource.Netease
-            LyricAutoSource.Current -> snapshot.resourceId.source
+            LyricAutoSource.Kugou -> MusicSource.Kugou
+            LyricAutoSource.Current -> return ResolvedLyrics.Empty // Handled above, including dynamic sources.
         }
-        if (musicSource == snapshot.resourceId.source) {
+        if (musicSource == snapshot.resourceId.sourceId.builtIn) {
             val document = loadCurrentProvider(appContext, snapshot)
             return ResolvedLyrics(document, document.takeIf { it.lines.isNotEmpty() }?.let {
                 LyricBinding(BoundLyricSource.Provider, musicSource, snapshot.resourceId.value, snapshot.title, snapshot.artist, snapshot.durationMs)
@@ -818,7 +781,7 @@ internal object MeloXProviderLyricsLoader {
         }.distinct()
         for (query in queries) {
             val results = runCatching { search.searchSongs(query, 1, 10).items }.getOrDefault(emptyList())
-            val match = results
+            val matches = results
                 .filter { candidate ->
                     isSafeCrossProviderLyricMatch(
                         targetTitle = snapshot.title,
@@ -827,14 +790,15 @@ internal object MeloXProviderLyricsLoader {
                         candidate = candidate,
                     )
                 }
-                .maxByOrNull { candidate -> trackMatchScore(snapshot, candidate) }
-                ?: continue
-            val document = runCatching { lyrics.lyrics(match) }.getOrNull()
-            if (document != null && document.lines.isNotEmpty()) {
-                return ResolvedLyrics(
-                    document,
-                    LyricBinding(BoundLyricSource.Provider, musicSource, match.id.value, match.title, match.artistText, match.durationMs ?: snapshot.durationMs),
-                )
+                .sortedByDescending { candidate -> trackMatchScore(snapshot, candidate) }
+            for (match in matches) {
+                val document = runCatching { lyrics.lyrics(match).withoutPlaceholderLyrics() }.getOrNull()
+                if (document != null && document.lines.isNotEmpty()) {
+                    return ResolvedLyrics(
+                        document,
+                        LyricBinding(BoundLyricSource.Provider, musicSource, match.id.value, match.title, match.artistText, match.durationMs ?: snapshot.durationMs),
+                    )
+                }
             }
         }
         return ResolvedLyrics.Empty
@@ -846,8 +810,8 @@ internal object MeloXProviderLyricsLoader {
             return runCatching { AmlldbLyricsClient().lyrics(query, preference) }
                 .getOrDefault(LyricsDocument(emptyList()))
         }
-        val providerSource = binding.provider ?: return LyricsDocument(emptyList())
-        val provider = MeloXMusicProviders.create(appContext).require(providerSource)
+        val providerSource = binding.providerSourceId ?: return LyricsDocument(emptyList())
+        val provider = MeloXMusicProviders.create(appContext)[providerSource] ?: return LyricsDocument(emptyList())
         val lyrics = provider as? LyricsCapability ?: return LyricsDocument(emptyList())
         val track = MusicTrack(
             id = MusicResourceId(providerSource, binding.resourceValue),
@@ -873,7 +837,7 @@ internal object MeloXProviderLyricsLoader {
 
     private fun amlldbQuery(appContext: Context, snapshot: LyricTrackSnapshot): AmlldbLyricQuery? {
         val id = snapshot.resourceId
-        return when (id.source) {
+        return when (id.sourceId.builtIn) {
             MusicSource.Netease -> id.value.toLongOrNull()?.let(AmlldbLyricQuery::Netease)
             MusicSource.QQMusic -> id.value.takeIf(String::isNotBlank)?.let(AmlldbLyricQuery::QQ)
             MusicSource.Spotify -> id.value.takeIf(String::isNotBlank)?.let(AmlldbLyricQuery::Spotify)
@@ -903,16 +867,17 @@ internal object MeloXProviderLyricsLoader {
         snapshot: LyricTrackSnapshot,
     ): LyricsDocument {
         val resourceId = snapshot.resourceId
-        if (resourceId.source == MusicSource.Netease) {
+        if (resourceId.sourceId.builtIn == MusicSource.Netease) {
             val songId = resourceId.value.toLongOrNull()
                 ?: return LyricsDocument(emptyList())
             return MeloXDownloadStore.get(appContext).localLyrics(songId)
+                ?.withoutPlaceholderLyrics()?.takeIf { it.lines.isNotEmpty() }
                 ?: NeteaseSearchClient(
                     cookieProvider = { NeteaseSessionStore.readCookie(appContext) },
                 ).lyrics(songId)
         }
 
-        val provider = MeloXMusicProviders.create(appContext).require(resourceId.source)
+        val provider = MeloXMusicProviders.create(appContext)[resourceId.sourceId] ?: return LyricsDocument(emptyList())
         val lyricCapability = provider as? LyricsCapability
             ?: return LyricsDocument(emptyList())
         val artistRefs = snapshot.artist
@@ -985,6 +950,10 @@ internal object MeloXProviderLyricsLoader {
 
 internal data class AutoLyricCandidate(val priority: Int, val document: LyricsDocument, val binding: LyricBinding? = null)
 
+internal suspend fun awaitAutomaticLyricCandidates(
+    candidates: List<Deferred<AutoLyricCandidate>>,
+): AutoLyricCandidate? = selectAutomaticLyricCandidate(candidates.map { it.await() })
+
 internal fun requestedLyricPreference(): MeloXLyricPreference =
     MeloXLyricPreference.fromSetting(MeloXSettingsRuntime.lyricLanguage)
 
@@ -999,11 +968,11 @@ internal fun applyLyricTranslationPreference(document: LyricsDocument, preferenc
     return MeloXLyricScriptConverter.convert(selected, preference.script)
 }
 
-internal enum class LyricAutoSource { AmlL, QQMusic, Netease, Current }
+internal enum class LyricAutoSource { AmlL, QQMusic, Netease, Kugou, Current }
 
 internal fun automaticLyricSourcesFor(source: MusicSource): List<LyricAutoSource> = buildList {
-    // The current provider's own lyrics are always preferred; the other
-    // platforms are only consulted when it has none.
+    // Preserve source order within each timing class; authored AMLL and genuine
+    // word timing can outrank the current provider's line-only response.
     add(LyricAutoSource.Current)
     add(LyricAutoSource.AmlL)
     if (source == MusicSource.QQMusic) {
@@ -1012,27 +981,34 @@ internal fun automaticLyricSourcesFor(source: MusicSource): List<LyricAutoSource
         add(LyricAutoSource.QQMusic)
         if (source != MusicSource.Netease) add(LyricAutoSource.Netease)
     }
+    if (source != MusicSource.Kugou && source != MusicSource.KugouLite) add(LyricAutoSource.Kugou)
 }.distinct()
 
 internal fun selectAutomaticLyrics(candidates: List<AutoLyricCandidate>): LyricsDocument? =
     selectAutomaticLyricCandidate(candidates)?.document
 
 internal fun selectAutomaticLyricCandidate(candidates: List<AutoLyricCandidate>): AutoLyricCandidate? {
-    // This runs over the cross-platform fallback candidates only: the current
-    // provider is resolved first and short-circuits before reaching here.
-    // Among these, AMLL only has absolute priority when it contains authored
-    // word timing; line-timed AMLL must not prevent the ordered QQ -> NetEase
-    // fallback selected by automaticLyricSourcesFor().
-    candidates.firstOrNull {
+    val available = candidates.map { it.copy(document = it.document.withoutPlaceholderLyrics()) }
+    // AMLL has absolute priority only for authored word timing; line-timed AMLL
+    // must not suppress ordinary provider fallbacks. Within each timing class,
+    // preserve the source order selected by automaticLyricSourcesFor().
+    available.firstOrNull {
         it.document.source == com.lladlam.melox.core.lyrics.LyricSource.AmlL &&
             it.document.lines.isNotEmpty() &&
             hasWordTiming(it.document)
     }?.let { return it }
-    return candidates
+    // Authored AMLL is the highest-quality word-timed source. Other genuine
+    // word-timed provider lyrics outrank any line-only document; among equal
+    // timing classes, preserve the source order selected by the caller.
+    available.asSequence()
+        .filter { it.document.lines.isNotEmpty() && hasWordTiming(it.document) }
+        .minByOrNull(AutoLyricCandidate::priority)
+        ?.let { return it }
+    return available
         .asSequence()
         .filterNot { it.document.source == com.lladlam.melox.core.lyrics.LyricSource.AmlL }
         .filter { it.document.lines.isNotEmpty() }
-        .minByOrNull(AutoLyricCandidate::priority)
+        .minWithOrNull(compareBy<AutoLyricCandidate> { it.document.isUnsynchronized }.thenBy { it.priority })
 }
 
 private fun hasWordTiming(document: LyricsDocument): Boolean =
@@ -1075,8 +1051,8 @@ internal fun isSafeCrossProviderLyricMatch(
     targetDurationMs: Long,
     candidate: MusicTrack,
 ): Boolean {
-    val target = lyricTitleIdentity(targetTitle)
-    val other = lyricTitleIdentity(candidate.title)
+    val target = lyricTitleIdentity(withoutFeaturedArtistSuffix(targetTitle, targetArtist))
+    val other = lyricTitleIdentity(withoutFeaturedArtistSuffix(candidate.title, candidate.artistText))
     if (target.baseTitle.isBlank() || target.baseTitle != other.baseTitle) return false
     if (target.version != other.version) return false
     if (target.version != LyricTrackVersion.Original && target.versionLabel != other.versionLabel) return false
@@ -1097,6 +1073,14 @@ internal fun isSafeCrossProviderLyricMatch(
     return targetArtistKey.isBlank() || candidateArtistKey.contains(targetArtistKey) || targetArtistKey.contains(candidateArtistKey)
 }
 
+private fun withoutFeaturedArtistSuffix(title: String, artist: String): String {
+    val suffix = Regex("(?i)\\s+(?:feat\\.?|ft\\.?)\\s*(.+?)\\s*$").find(title) ?: return title
+    val featured = normalizeLyricMatchText(suffix.groupValues[1])
+    // Strip only an actual artist credit, never an arbitrary version label.
+    if (featured.isBlank() || !normalizeLyricMatchText(artist).contains(featured)) return title
+    return title.substring(0, suffix.range.first).trim()
+}
+
 internal fun normalizeLyricMatchText(value: String): String = value.lowercase()
     .replace(Regex("[^\\p{L}\\p{N}]"), "")
 
@@ -1111,7 +1095,7 @@ internal fun lyricCacheKey(
     preference: MeloXLyricPreference = requestedLyricPreference(),
 ): String = buildString {
     append(if (automaticSelection) "auto-v$AutomaticSelectionCacheVersion" else "provider")
-    append(':').append(resourceId.source.storageValue).append(':').append(resourceId.value)
+    append(':').append(resourceId.sourceId.value).append(':').append(resourceId.value)
     if (automaticSelection) {
         append(":title:").append(normalizeLyricMatchText(title))
         append(":artist:").append(normalizeLyricMatchText(artist))
@@ -1119,7 +1103,7 @@ internal fun lyricCacheKey(
             durationMs.takeIf { it > 0L }?.let { ((it + 500L) / 1_000L) * 1_000L } ?: "unknown",
         )
     }
-    if (resourceId.source == MusicSource.Bilibili) append(":alignment:").append(bilibiliAlignment)
+    if (resourceId.sourceId.builtIn == MusicSource.Bilibili) append(":alignment:").append(bilibiliAlignment)
     binding?.let { append(":bound:").append(it.stableKey()) }
     append(":translation-v2:").append(preference.cacheKey())
 }

@@ -32,6 +32,8 @@ internal class PlaybackFallbackChain(
         membershipFailure: Boolean,
         thirdPartyTried: Boolean = false,
     ): PlaybackFallbackResolution? {
+        // Plugin transport and permissions never fall through into built-in/LX resolvers.
+        val builtInSource = track.id.sourceId.builtIn ?: return null
         val cross = runCatching {
             crossProvider?.resolve(
                 CrossProviderFallbackRequest(
@@ -40,7 +42,7 @@ internal class PlaybackFallbackChain(
                     artist = track.artistText,
                     durationMs = track.durationMs,
                     quality = quality,
-                    source = track.id.source,
+                    source = builtInSource,
                     resourceId = track.id.value,
                 ),
             )

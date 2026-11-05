@@ -23,7 +23,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -262,10 +262,17 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+                com.lladlam.melox.usb.MeloXUsbAudioSession.onSeek()
+            }
             if (!lanPreparing && reason == Player.DISCONTINUITY_REASON_SEEK) MeloXLanRuntime.onTogetherSeek()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // This listener is also attached to AutoMix's standby deck; derive
+            // the USB clock state from the deck that currently owns playback
+            // so pausing the standby deck cannot freeze the DAC.
+            com.lladlam.melox.usb.MeloXUsbAudioSession.onPlaybackChanged(player?.isPlaying == true)
             listenedTimeTracker.onPlayingChanged(SystemClock.elapsedRealtime(), isPlaying)
             Log.d(TAG, "isPlaying=$isPlaying, ongoing=${isPlaybackOngoing()}")
             // 与 STATE_READY 那条路径互补：无缝切歌（新歌已预加载、不经过 BUFFERING）
@@ -605,8 +612,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     override fun onCreate() {
         super.onCreate()
         MeloXPlaybackModePreferences.initialize(this)
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
+        val httpFactory = OkHttpDataSource.Factory(com.lladlam.melox.core.network.MeloXHttpClient.thirdPartyAndMedia)
             .setDefaultRequestProperties(
                 mapOf(
                     "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36",
@@ -660,7 +666,8 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             thirdPartySourcesEnabled = { ThirdPartyMusicSourceConsentStore.enabled(this@MeloXPlaybackService) },
         )
         autoMixAnalyzer = MeloXAutoMixAudioAnalyzer(this)
-        val upstream = DefaultDataSource.Factory(this, httpFactory)
+        val defaultUpstream = DefaultDataSource.Factory(this, httpFactory)
+        val upstream = androidx.media3.datasource.DataSource.Factory { PluginMediaDataSource(defaultUpstream) }
         val resolving = ResolvingDataSource.Factory(
             upstream,
             playbackResolver,
@@ -683,7 +690,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.isCurrentTrack = { expected ->
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 val id = PlaybackTrackIdentity.fromMediaItem(player?.currentMediaItem)
-                id != null && "${id.source.storageValue}:${id.value}" == expected
+                id != null && "${id.sourceId.value}:${id.value}" == expected
             }
         }
         com.lladlam.melox.core.autosync.AutoSyncPlaybackBridge.audioResolver = { expected ->
@@ -696,7 +703,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                 player?.currentMediaItem
             }
             val id = PlaybackTrackIdentity.fromMediaItem(item)
-            if (item == null || id == null || "${id.source.storageValue}:${id.value}" != expected) {
+            if (item == null || id == null || "${id.sourceId.value}:${id.value}" != expected) {
                 null
             } else {
                 // Never decode the user's playback stream: a hi-res item is tens
@@ -709,7 +716,10 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                 }
             }
         }
-        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(cached)
+        val pluginAwareCache = androidx.media3.datasource.DataSource.Factory {
+            PluginCacheRoutingDataSource(cached, resolving)
+        }
+        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(pluginAwareCache)
 
         val active = buildPlayer(managesAudioFocus = shouldManageAudioFocus())
             player = active
@@ -760,9 +770,9 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                 if (player.isPlaying) player.pause() else player.play()
             }
             ACTION_ANALYZE_PLAYLIST -> {
-                val source = MusicSource.fromStorageValue(intent.getStringExtra(EXTRA_ANALYSIS_SOURCE))
+                val source = intent.getStringExtra(EXTRA_ANALYSIS_SOURCE)?.let(com.lladlam.melox.core.music.model.SourceId::parse)?.builtIn
                 val playlistId = intent.getStringExtra(EXTRA_ANALYSIS_PLAYLIST_ID)
-                if (!playlistId.isNullOrBlank()) startPlaylistAnalysis(source, playlistId)
+                if (source != null && !playlistId.isNullOrBlank()) startPlaylistAnalysis(source, playlistId)
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -1171,8 +1181,8 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             positionMs = active.currentPosition.coerceAtLeast(0L),
             durationMs = active.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L,
             volume = (active.volume * 100f).toInt().coerceIn(0, 100),
-            trackId = identity?.let { "${it.source.storageValue}:${it.value}" },
-            source = identity?.source?.storageValue,
+            trackId = identity?.let { "${it.sourceId.value}:${it.value}" },
+            source = identity?.sourceId?.value,
             index = active.currentMediaItemIndex,
             queueLength = active.mediaItemCount,
             canNext = active.hasNextMediaItem(),
@@ -1634,6 +1644,15 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         }
         if (!enabled) {
             cancelPreparedMix(releaseStandby = true)
+            return
+        }
+        // The standby deck builds without the PCM tap, so an AutoMix crossfade
+        // would silence the USB DAC and strand it after promotion.
+        if (com.lladlam.melox.usb.MeloXUsbAudioSession.active) {
+            if (hasPreparedMix()) {
+                Log.i(TAG, "AutoMix cancelled: USB exclusive output is active")
+                cancelPreparedMix(releaseStandby = true)
+            }
             return
         }
         active.currentMediaItem?.let(::ensureBackgroundAnalysisScheduled)
@@ -2802,13 +2821,18 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             return
         }
         val registry = ProviderPlaybackRuntime.registryOrNull() ?: return outcome("no provider registry")
-        val provider = registry[identity.source]
-        val favoriteCapability = provider as? FavoriteCapability ?: return outcome("provider has no FavoriteCapability: ${identity.source.displayName}")
+        val provider = registry[identity.sourceId]
+        if (identity.sourceId.builtIn == null && provider?.supports(com.lladlam.melox.core.music.provider.MusicCapability.Favorites) != true)
+            return outcome("provider does not declare Favorites")
+        val favoriteCapability = provider as? FavoriteCapability ?: return outcome("provider has no FavoriteCapability: ${identity.sourceId.displayName}")
 
         val currentExtras = item.mediaMetadata.extras
         val currentlyFavorite = currentExtras?.getBoolean(PlaybackTrackIdentity.IsFavoriteExtra, false) ?: false
-        val targetFavorite = !currentlyFavorite
         val actionTrack = buildMusicTrackFromMediaItem(item, identity)
+        val targetFavorite = runCatching {
+            if (favoriteCapability is com.lladlam.melox.core.music.provider.FavoriteStateCapability)
+                !favoriteCapability.isFavorite(actionTrack) else !currentlyFavorite
+        }.getOrElse { return outcome("favorite status query failed") }
 
         runCatching {
             favoriteCapability.setFavorite(actionTrack, targetFavorite)
@@ -2824,15 +2848,16 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             }.onFailure { metaError ->
                 Log.w(TAG, "Failed to refresh MediaItem extras after favorite toggle", metaError)
             }
-            Log.i(TAG, "System favorite toggled for ${identity.source.displayName}:${identity.value} -> $targetFavorite")
+            Log.i(TAG, "System favorite toggled for ${identity.sourceId.displayName}:${identity.value} -> $targetFavorite")
             outcome("favorited=${targetFavorite}")
         }.onFailure { error ->
-            Log.w(TAG, "System favorite toggle failed for ${identity.source.displayName}:${identity.value}", error)
+            Log.w(TAG, "System favorite toggle failed for ${identity.sourceId.displayName}:${identity.value}", error)
             outcome("failed: ${error.message}")
         }
     }
 
     private fun buildMusicTrackFromMediaItem(item: MediaItem, identity: MusicResourceId): MusicTrack {
+        PlaybackTrackIdentity.restoredTrack(item)?.takeIf { it.id == identity }?.let { return it }
         val extras = item.mediaMetadata.extras
         val title = extras?.getString(PlaybackTrackIdentity.TitleExtra)
             ?.takeIf { it.isNotBlank() }
@@ -2853,7 +2878,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             artworkUrl = artwork,
             durationMs = durationMs,
             availability = TrackAvailability.Playable,
-            providerMetadata = when (identity.source) {
+            providerMetadata = when (identity.sourceId.builtIn) {
                 MusicSource.Netease -> ProviderTrackMetadata.Netease(
                     numericId = identity.value.toLongOrNull() ?: 0L,
                 )
@@ -2877,6 +2902,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                 MusicSource.Jellyfin -> ProviderTrackMetadata.Empty
                 MusicSource.Qishui -> ProviderTrackMetadata.Empty
                 MusicSource.KugouLite -> ProviderTrackMetadata.Kugou(hash = identity.value)
+                null -> ProviderTrackMetadata.Empty
             },
         )
     }
