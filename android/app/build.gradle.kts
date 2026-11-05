@@ -49,8 +49,7 @@ android {
             isEnable = true
             reset()
             include("arm64-v8a", "armeabi-v7a")
-            // Fixed-name fork update assets need an APK that supports both ARM architectures.
-            isUniversalApk = true
+            isUniversalApk = false
         }
     }
 
@@ -220,7 +219,6 @@ android {
     }
 
     packaging {
-        jniLibs.excludes += setOf("**/x86/**", "**/x86_64/**")
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/google/protobuf/**"
     }
@@ -331,6 +329,9 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.10.1")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
+    // Prebuilt Media3 FFmpeg audio decoder by Jellyfin (GPL-3.0); software FLAC fallback
+    // for devices whose platform FLAC decoder is broken (QtiFlacDecoderWorkaround).
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+1")
 
     // AutoSync word-level lyric alignment. Inference is fully local (ONNX
     // Runtime on CPU); weights are supplied per language, never bundled here.

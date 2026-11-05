@@ -11,7 +11,7 @@ internal object PluginWireContract {
     fun check(method: String, raw: String) {
         PluginJson.check(raw)
         when (method) {
-            "isFavorite" -> { check(raw.trim() in setOf("true", "false")) { "favorite state must be a boolean" }; return }
+            "isFavorite" -> { require(raw.trim() in setOf("true", "false")); return }
             "setFavorite" -> { require(raw.trim() == "null"); return }
             "accountSummary" -> if (raw.trim() == "null") return
         }

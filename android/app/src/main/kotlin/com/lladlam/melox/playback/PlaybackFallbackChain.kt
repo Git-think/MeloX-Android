@@ -30,7 +30,6 @@ internal class PlaybackFallbackChain(
         track: MusicTrack,
         quality: AudioQualityTier,
         membershipFailure: Boolean,
-        thirdPartyTried: Boolean = false,
     ): PlaybackFallbackResolution? {
         // Plugin transport and permissions never fall through into built-in/LX resolvers.
         val builtInSource = track.id.sourceId.builtIn ?: return null
@@ -57,7 +56,6 @@ internal class PlaybackFallbackChain(
                 thirdParty = null,
             )
         }
-        if (thirdPartyTried) return null
         val third = runCatching {
             thirdParty?.resolve(track, quality, membershipFailure)
         }.getOrNull() ?: return null

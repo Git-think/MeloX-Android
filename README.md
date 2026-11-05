@@ -287,6 +287,7 @@ MeloX Android comes from the MeloX Android migration and also uses or references
 
 - [AndroidX / Jetpack Compose](https://github.com/androidx/androidx) — Compose UI, Activity, Lifecycle, and Navigation. Mostly Apache License 2.0.
 - [AndroidX Media3](https://github.com/androidx/media) — ExoPlayer, MediaSession, and background playback. Apache License 2.0.
+- [Jellyfin androidx-media](https://github.com/jellyfin/jellyfin-androidx-media) — prebuilt Media3 FFmpeg audio decoder used as the software FLAC fallback on affected Android 8.1 devices; GPL-3.0.
 - [Coil](https://github.com/coil-kt/coil) — Compose image loading. Apache License 2.0.
 - [OkHttp](https://github.com/square/okhttp) — HTTP client. Apache License 2.0.
 - [kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) — coroutines. Apache License 2.0.
@@ -308,6 +309,7 @@ The glass effect is still experimental.
 
 ### API and UI references
 
+- [megadonkatsu/YTRear](https://github.com/megadonkatsu/YTRear) — source for the experimental optional [MeloX Rear fork](https://github.com/lladlam/YTRear); the upstream repository does not specify a license.
 - [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — QQ Music anonymous search and lyric protocols, instrumental-placeholder detection, NetEase YRC, Lyricify Lines and Lyricify Syllable format references (Apache-2.0). See [LYRICS.md](docs/LYRICS.md).
 - [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — Qishui Music native API, QR sign-in, catalog, lyric, and playback-field reference. MIT; scope and validation: [QISHUI.md](docs/QISHUI.md).
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — Mei-based Apple Music style NetEase client used as a UI reference.

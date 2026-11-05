@@ -122,21 +122,7 @@ class NeteasePlaybackResolver(
             }
         }
         return try {
-            val thirdPartyTried = thirdPartySourcesEnabled() && thirdPartyResolver?.shouldResolveFirst() == true
-            val thirdParty = if (thirdPartyTried) {
-                thirdPartyResolver?.resolve(fallbackTrack(songId, fallbackRequest), quality.toCommonTier(), false)
-            } else null
-            val resolved = thirdParty?.let {
-                if (quality == MusicQualityRuntime.selected) {
-                    CrossProviderPlaybackRuntime.clear(songId)
-                }
-                ResolvedRequest(
-                    uri = Uri.parse(it.url),
-                    headers = it.requestHeaders,
-                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-                    cacheIdentity = "third:${it.sourceLabel}",
-                )
-            } ?: try {
+            val resolved = try {
                 val source = qualityClient.playbackSourceBlocking(
                     songId = songId,
                     requestedQuality = quality,
@@ -144,17 +130,14 @@ class NeteasePlaybackResolver(
                 if (quality == MusicQualityRuntime.selected) {
                     CrossProviderPlaybackRuntime.clear(songId)
                 }
-                ResolvedRequest(
-                    uri = Uri.parse(source.url),
-                    expiresAtEpochMs = System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
-                )
+                ResolvedRequest(Uri.parse(source.url))
             } catch (error: NeteasePlaybackUnavailableException) {
                 val track = fallbackTrack(songId, fallbackRequest)
                 // The terminal NetEase failure covers membership/rights/region,
                 // so it counts as a membership failure for the third-party switch.
-                val fallback = fallbackChain.resolve(
-                    track, quality.toCommonTier(), membershipFailure = true, thirdPartyTried = thirdPartyTried,
-                ) ?: throw error
+                val fallback = track?.let {
+                    fallbackChain.resolve(it, quality.toCommonTier(), membershipFailure = true)
+                } ?: throw error
                 fallback.crossProvider?.let { cross ->
                     MusicQualityRuntime.recordActual(
                         songId = songId,
@@ -168,7 +151,7 @@ class NeteasePlaybackResolver(
                 ResolvedRequest(
                     uri = Uri.parse(fallback.url),
                     headers = fallback.requestHeaders,
-                    expiresAtEpochMs = fallback.expiresAtEpochMs ?: System.currentTimeMillis() + DIRECT_LINK_TTL_MS,
+                    expiresAtEpochMs = fallback.expiresAtEpochMs,
                     cacheIdentity = fallback.cacheIdentity,
                 )
             }
@@ -263,7 +246,7 @@ class NeteasePlaybackResolver(
         songId = songId,
         quality = quality,
         cookieHeader = cookieHeader,
-        fallbackIdentity = fallbackChain.cacheIdentity(),
+        fallbackIdentity = crossProviderFallback?.cacheIdentity().orEmpty(),
         metadataIdentity = fallbackRequest?.let {
             "${it.title}\u001f${it.artist}\u001f${it.durationMs.orZero()}"
         }.orEmpty(),
@@ -301,14 +284,15 @@ class NeteasePlaybackResolver(
     private fun fallbackTrack(
         songId: Long,
         request: CrossProviderFallbackRequest?,
-    ): MusicTrack {
+    ): MusicTrack? {
+        if (request?.title.isNullOrBlank()) return null
         return MusicTrack(
             id = MusicResourceId(MusicSource.Netease, songId.toString()),
-            title = request?.title.orEmpty(),
-            artists = request?.artist.orEmpty()
+            title = request.title,
+            artists = request.artist
                 .let(CrossProviderPlaybackFallbackResolver::splitArtists)
                 .map { MusicArtistRef(name = it) },
-            durationMs = request?.durationMs,
+            durationMs = request.durationMs,
             providerMetadata = ProviderTrackMetadata.Netease(songId),
         )
     }
@@ -354,7 +338,6 @@ class NeteasePlaybackResolver(
 
         /** 「音源不可用」失败的冷却时长：重试期间不重复跑整条降级链。 */
         private const val FAILURE_COOLDOWN_MS = 15_000L
-        private const val DIRECT_LINK_TTL_MS = 20 * 60 * 1_000L
 
         private fun playbackCacheKey(
             songId: Long,

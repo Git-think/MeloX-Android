@@ -77,11 +77,12 @@ class ProviderPlaybackResolver(
             .build()
     }
 
-    private fun resolveDynamicRequest(dataSpec: DataSpec, source: SourceId): DataSpec {
+    private fun resolveDynamicRequest(dataSpec: DataSpec, source: SourceId, expected: PluginMusicProvider? = null): DataSpec {
         if (providers[source] == null) providers.awaitPluginRestore()
         val generation = providers.generation
         val provider = providers[source] as? PluginMusicProvider
             ?: throw IOException("Music source ${source.value} is missing or disabled")
+        if (expected != null && provider !== expected) throw IOException("Plugin account or package changed before retry")
         if (!provider.supports(com.lladlam.melox.core.music.provider.MusicCapability.Playback))
             throw IOException("Plugin does not support playback")
         val uri = dataSpec.uri
@@ -106,7 +107,7 @@ class ProviderPlaybackResolver(
         }
         return dataSpec.buildUpon().setUri(url).setHttpRequestHeaders(headers)
             .setCustomData(PluginMediaRequest(provider, providers, generation, (resolution as? PlaybackResolution.Playable)?.credentialReference == "active",
-                reResolve = { resolveDynamicRequest(dataSpec, source) }))
+                reResolve = { resolveDynamicRequest(dataSpec, source, provider) }))
             .setKey("plugin:${source.value}:$generation:$url").build()
     }
 
@@ -162,18 +163,6 @@ class ProviderPlaybackResolver(
             Log.d(TAG, "resolve detail source=${source.storageValue} id=${resourceValue.take(8)} title=${track.title.take(40)} " +
                 "artists=${track.artistText.take(60)} durationMs=${track.durationMs} metadata=${track.providerMetadata.javaClass.simpleName}")
             Log.i(TAG, "Resolve start source=${source.storageValue} quality=${quality.name} thirdParty=${thirdPartySourcesEnabled()}")
-            val thirdPartyTried = thirdPartySourcesEnabled() && thirdPartyResolver?.shouldResolveFirst() == true && source != MusicSource.Jellyfin
-            if (thirdPartyTried) {
-                thirdPartyResolver?.resolve(track, quality, membershipFailure = false)?.let { resolved ->
-                    val result = ResolvedRequest(
-                        uri = Uri.parse(resolved.url),
-                        headers = resolved.requestHeaders,
-                    )
-                    synchronized(cacheLock) { resolvedUris[key] = result }
-                    pending.complete(result)
-                    return result
-                }
-            }
             val provider = providers.require(source)
             val playback = provider as? PlaybackCapability
                 ?: throw IOException("${provider.displayName} 当前没有实现播放能力")
@@ -184,7 +173,6 @@ class ProviderPlaybackResolver(
             /**
              * Playback order: current provider → strict full-audio match from
              * another built-in source → user-configured third-party resolvers.
-             * Already-attempted third-party sources must not run twice.
              *
              * The cross-provider stage only runs when the user enabled
              * "fetch unavailable resources from other platforms"; the final
@@ -198,7 +186,7 @@ class ProviderPlaybackResolver(
                 membershipFailure: Boolean,
             ): ResolvedRequest {
                 val fallback = runCatching {
-                    fallbackChain.resolve(track, quality, membershipFailure, thirdPartyTried)
+                    fallbackChain.resolve(track, quality, membershipFailure)
                 }.onFailure { Log.w(TAG, "Playback fallback failed", it) }
                     .getOrNull()
                 if (fallback != null) {

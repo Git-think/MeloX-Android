@@ -278,6 +278,7 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 
 - [AndroidX / Jetpack Compose](https://github.com/androidx/androidx) — Compose UI、Activity、Lifecycle、Navigation 等 Android 基础能力；主要使用 Apache License 2.0。
 - [AndroidX Media3](https://github.com/androidx/media) — ExoPlayer、MediaSession 与后台播放；Apache License 2.0。
+- [Jellyfin androidx-media](https://github.com/jellyfin/jellyfin-androidx-media) — 预编译的 Media3 FFmpeg 音频解码器，用于受影响 Android 8.1 设备的 FLAC 软件解码回退；GPL-3.0。
 - [Coil](https://github.com/coil-kt/coil) — Compose 图片与封面加载；Apache License 2.0。
 - [OkHttp](https://github.com/square/okhttp) — HTTP 网络客户端；Apache License 2.0。
 - [kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) — Kotlin 协程与异步任务；Apache License 2.0。
@@ -299,6 +300,7 @@ SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；
 
 ### API 与 UI 参考项目
 
+- [megadonkatsu/YTRear](https://github.com/megadonkatsu/YTRear) — 实验性可选背屏应用 [MeloX Rear](https://github.com/lladlam/YTRear) 的源码来源；上游仓库未声明许可证。
 - [WXRIW/Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper) — QQ 音乐匿名搜索与歌词协议、纯音乐占位识别、网易云 YRC、Lyricify Lines / Syllable 格式参考；Apache-2.0，详见 [LYRICS.md](docs/LYRICS.md)。
 - [guowenye/qishui-api](https://github.com/guowenye/qishui-api) — 汽水音乐原生接口、扫码登录、目录、歌词与播放字段参考；MIT，接入范围与验证记录见 [QISHUI.md](docs/QISHUI.md)。
 - [NEORUAA/MeiloX](https://github.com/NEORUAA/MeiloX) — 一个基于 Mei 的仿 Apple Music 网易云音乐客户端，为弥乐 Android 版提供 UI 参考。
