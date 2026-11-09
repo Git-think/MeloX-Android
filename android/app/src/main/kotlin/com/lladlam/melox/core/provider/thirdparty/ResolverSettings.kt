@@ -4,6 +4,8 @@ import android.content.Context
 import java.security.MessageDigest
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
+internal const val ResolverUrlTtlMs = 120_000L
+
 internal enum class ResolverKind(val label: String, val preferencesName: String) {
     Meting("Meting", "melox_meting_api"),
     Chksz("CHKSZ", "melox_chksz_api"),

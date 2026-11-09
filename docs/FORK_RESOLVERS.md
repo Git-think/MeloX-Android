@@ -83,3 +83,16 @@ filtering, bounded bodies, direct/redirected audio, cache expiry, cooldown,
 concurrent requests, fallback ordering, and exception classification. Run Android
 compilation and these tests in GitHub Actions; no local Android SDK/build is
 required for this rewrite.
+
+## Upstream compatibility
+
+The third-party result model and the LX-to-result mapper retain upstream's
+`sourceQuality` and `actualQuality` fields. Fork API expiration is computed in
+`ConfiguredResolverSource.kt`, not added to the upstream model. The installed-LX
+guard wraps the upstream mapper without rebuilding or losing its result fields;
+it checks the script cache identity on every resolution.
+
+This keeps the finite API cache and empty-script guard while reducing overlapping
+edits when upstream changes LX quality negotiation. Remaining integration points
+are merged normally; there is no blanket “ours” merge strategy or automatic
+discarding of upstream playback changes.

@@ -196,9 +196,12 @@ class PlaybackFallbackOrderTest {
     @Test
     fun apiUrlExpirySurvivesTheFallbackChain() {
         val chain = PlaybackFallbackChain(null, ThirdPartyPlaybackResolver({ true }, { false }, listOf(
-            ThirdPartySource { _, _ -> ThirdPartyTrack("https://third.example/audio", sourceLabel = "api", expiresAtEpochMs = 123456L) },
+            ThirdPartySource { _, _ -> ThirdPartyTrack("https://third.example/audio", sourceLabel = "Meting") },
         )))
-        assertEquals(123456L, chain.resolve(track(MusicSource.Netease), AudioQualityTier.High, false)?.expiresAtEpochMs)
+        val before = System.currentTimeMillis()
+        val expires = chain.resolve(track(MusicSource.Netease), AudioQualityTier.High, false)?.expiresAtEpochMs
+        val after = System.currentTimeMillis()
+        assertTrue(expires != null && expires in (before + 120_000L)..(after + 120_000L))
     }
 
     private fun thirdParty(calls: MutableList<String>) = ThirdPartyPlaybackResolver(

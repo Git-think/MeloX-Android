@@ -10,7 +10,10 @@ internal data class ThirdPartyTrack(
     val url: String,
     val requestHeaders: Map<String, String> = emptyMap(),
     val sourceLabel: String,
-    val expiresAtEpochMs: Long? = null,
+    /** Quality identifier requested from the third-party source. */
+    val sourceQuality: String? = null,
+    /** Best-effort actual tier; null when the source cannot report one. */
+    val actualQuality: AudioQualityTier? = null,
 )
 
 /** One configured API resolver or an imported LX script source. */
@@ -50,7 +53,7 @@ class ThirdPartyPlaybackResolver private constructor(
                 ConfiguredResolverSource(context, ResolverKind.Meting),
                 ConfiguredResolverSource(context, ResolverKind.Chksz),
                 ConfiguredResolverSource(context, ResolverKind.Unm),
-                LxThirdPartySource(LxUserPlaybackResolver(context)),
+                withInstalledLxGuard(LxThirdPartySource(LxUserPlaybackResolver(context))),
             )
         },
     )
@@ -88,7 +91,12 @@ class ThirdPartyPlaybackResolver private constructor(
                 .getOrNull()
                 ?: continue
             if (result.url.startsWith("http://") || result.url.startsWith("https://")) {
-                Log.i(TAG, "Resolved via ${result.sourceLabel} source=${track.id.sourceId.value}")
+                Log.i(
+                    TAG,
+                    "Resolved via ${result.sourceLabel} source=${track.id.sourceId.value} " +
+                        "requested=${quality.name} sourceQuality=${result.sourceQuality ?: "unknown"} " +
+                        "actual=${result.actualQuality?.name ?: "unknown"}",
+                )
                 return result
             }
         }
@@ -103,13 +111,16 @@ class ThirdPartyPlaybackResolver private constructor(
 private class LxThirdPartySource(
     private val resolver: LxUserPlaybackResolver,
 ) : ThirdPartySource {
-    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? {
-        // No installed scripts must also mean no matching search or runtime work.
-        if (resolver.cacheIdentity().isBlank()) return null
-        return resolver.resolve(track, quality)?.let {
-            ThirdPartyTrack(it.url, it.requestHeaders, "lx:${it.sourceId}")
+    override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? =
+        resolver.resolve(track, quality)?.let {
+            ThirdPartyTrack(
+                url = it.url,
+                requestHeaders = it.requestHeaders,
+                sourceLabel = "lx:${it.sourceId}",
+                sourceQuality = it.sourceQuality,
+                actualQuality = it.actualQuality,
+            )
         }
-    }
 
     override fun cacheIdentity(): String = "lx:${resolver.cacheIdentity()}"
 }

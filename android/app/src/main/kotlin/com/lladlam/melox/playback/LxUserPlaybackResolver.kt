@@ -9,13 +9,16 @@ import com.lladlam.melox.core.provider.lxuser.LxUserRuntime
 import com.lladlam.melox.core.provider.lxuser.LxUserScript
 import com.lladlam.melox.core.provider.lxuser.LxUserSourceStore
 import com.lladlam.melox.core.provider.lxuser.buildLxMusicInfo
-import com.lladlam.melox.core.network.NeteaseSearchClient
 import com.lladlam.melox.core.lyrics.LrcLyricsParser
 import com.lladlam.melox.core.lyrics.LyricFileParser
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.music.model.MusicArtistRef
 import com.lladlam.melox.core.music.model.MusicResourceId
-import com.lladlam.melox.core.music.model.ProviderTrackMetadata
+import com.lladlam.melox.core.music.provider.MeloXMusicProviders
+import com.lladlam.melox.core.music.provider.SearchCapability
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -24,6 +27,10 @@ internal data class LxUserPlaybackResult(
     val sourceId: String,
     val url: String,
     val requestHeaders: Map<String, String> = emptyMap(),
+    /** Quality identifier negotiated with the script (`master`, `hires`, ...). */
+    val sourceQuality: String? = null,
+    /** Best-effort tier represented by [sourceQuality]; not a probe of the URL. */
+    val actualQuality: AudioQualityTier? = null,
 )
 
 /** Resolves a song through locally installed LX Music user API scripts. */
@@ -63,7 +70,9 @@ class LxUserPlaybackResolver(
     private fun resolveAction(track: MusicTrack, action: String): Any? {
         val sourceCode = when (track.id.sourceId.builtIn) {
             MusicSource.QQMusic -> "tx"
-            MusicSource.Kugou -> "kg"
+            MusicSource.Kugou,
+            MusicSource.KugouLite,
+            -> "kg"
             MusicSource.Kuwo -> "kw"
             MusicSource.Netease -> "wy"
             else -> return null
@@ -124,165 +133,281 @@ class LxUserPlaybackResolver(
     }
 
     private fun resolveUncached(track: MusicTrack, quality: AudioQualityTier): LxUserPlaybackResult? {
-        val sourceCode = when (track.id.sourceId.builtIn) {
-            MusicSource.QQMusic -> "tx"
-            MusicSource.Kugou -> "kg"
-            MusicSource.Kuwo -> "kw"
-            MusicSource.Netease -> null
-            else -> return null
-        }
         val title = track.title
         val artist = track.artistText
         if (title.isBlank() || artist.isBlank()) return null
-        val resourceId = track.id.value
-        val lxQuality = quality.toLxQuality()
-        val song = buildLxMusicInfo(track, sourceCode, lxQuality)
-        Log.d(TAG, "LX resolve start provider=${track.id.source.storageValue} id=${resourceId.take(8)} quality=$lxQuality " +
-            "source=$sourceCode title=${title.take(40)} artist=${artist.take(40)}")
-        for (record in LxUserSourceStore.list(appContext)) {
-            val script = LxUserSourceStore.script(appContext, record.id) ?: continue
-            var phase = "load"
-                    runCatching {
-                val runtime = LxUserRuntime.session(record.id, script)
-                    phase = "request"
-                    (sourceCode?.let(::listOf) ?: listOf("kw", "kg", "tx", "wy", "mg"))
-                        .filter { runtime.supportsSource(it) && runtime.supportsAction(it, "musicUrl") }
-                        .flatMap { source ->
-                            lxQualityFallbacks(lxQuality).asSequence().map { requestedQuality -> source to requestedQuality }
-                        }
-                        .mapNotNull { (source, requestedQuality) ->
-                            val sourceQuality = runtime.qualityFor(source, requestedQuality)
-                            Log.d(TAG, "LX candidate script=${record.id} source=$source requested=$requestedQuality actual=$sourceQuality")
-                            runCatching {
-                                runtime.callAction(
-                                    "musicUrl",
-                                    song + mapOf(
-                                        "source" to source,
-                                        "type" to sourceQuality,
-                                        "musicInfo" to song,
-                                    ),
-                                )
-                            }.onFailure {
-                                Log.w(TAG, "LX candidate failed script=${record.id} source=$source quality=$sourceQuality detail=${it.safeLogMessage()}")
-                            }.getOrNull()?.let { value ->
-                                val url = when (value) {
-                                    is String -> value
-                                    is Map<*, *> -> value["url"]?.toString()
-                                    else -> null
-                                }?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-                                Log.d(TAG, "LX candidate result script=${record.id} source=$source quality=$sourceQuality url=${url != null}")
-                                url?.let { LxUserPlaybackResult(record.id, it) }
-                            }
-                        }
-                        .firstOrNull() ?: throw IOException("LX 音乐源没有返回可播放链接")
-                    }.onSuccess {
-                Log.i(TAG, "LX resolved source=${track.id.source.storageValue} script=${record.id}")
-                return it
-                    }.onFailure { error ->
-                Log.w(
-                    TAG,
-                    "LX failed source=${track.id.source.storageValue} script=${record.id} phase=$phase " +
-                        "error=${error.javaClass.simpleName} detail=${error.safeLogMessage()}",
-                )
-                    }
-        }
-        if (track.id.source != MusicSource.Netease) {
-            resolveViaNeteaseMatch(track, quality)?.let { return it }
+        val origin = lxSourceCode(track.id.source) ?: return null
+        val supported = supportedLxSourceCodes()
+        if (supported.isEmpty()) return null
+        // The track's own platform is always first; all remaining LX platforms
+        // are attempted with a strict cross-source lookup so every call gets a
+        // real platform ID instead of a NetEase numeric id reused as `songmid`.
+        val orderedSources = buildList {
+            add(origin)
+            addAll(LX_ALL_SOURCES.filter { it != origin })
+        }.filter { it in supported }
+        Log.d(
+            TAG,
+            "LX resolve start provider=${track.id.source.storageValue} id=${track.id.value.take(8)} " +
+                "quality=${quality.toLxQuality()} sources=${orderedSources.joinToString(",")} " +
+                "title=${title.take(40)} artist=${artist.take(40)}",
+        )
+        for (code in orderedSources) {
+            val candidate = trackForLxSource(track, code) ?: continue
+            resolveSourceCandidates(candidate, quality, listOf(code))?.let { return it }
         }
         Log.i(TAG, "LX unresolved source=${track.id.source.storageValue} scripts=${LxUserSourceStore.list(appContext).size}")
         return null
     }
 
-    private fun resolveViaNeteaseMatch(track: MusicTrack, quality: AudioQualityTier): LxUserPlaybackResult? {
-        val query = track.title.trim()
-        val candidates = runCatching {
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                NeteaseSearchClient().searchSongs(query, limit = 50)
-            }
-        }.onFailure { Log.w(TAG, "LX Netease match search failed title=${track.title.take(40)} detail=${it.safeLogMessage()}") }
-            .getOrNull().orEmpty()
-        val requestedArtist = normalizeLxText(track.artistText)
-        val match = candidates
-            .asSequence()
-            .filter { normalizeLxText(it.name) == normalizeLxText(track.title) }
-            .filter { candidate ->
-                requestedArtist.isBlank() || normalizeLxText(candidate.artists).contains(requestedArtist)
-            }
-            .filter { candidate -> track.durationMs == null || candidate.durationMs <= 0L || kotlin.math.abs(candidate.durationMs - track.durationMs) <= 3_000L }
-            .filter { candidate ->
-                val name = candidate.name.lowercase(Locale.ROOT)
-                !name.contains("live") && !name.contains("翻唱") && !name.contains("cover")
-            }
-            .sortedBy { candidate -> kotlin.math.abs(candidate.durationMs - (track.durationMs ?: candidate.durationMs)) }
-            .firstOrNull()
-        if (match == null) {
-            Log.w(TAG, "LX Netease match not found title=${track.title.take(40)} candidates=${candidates.size}")
-            return null
-        }
-
-        val neteaseTrack = MusicTrack(
-            id = MusicResourceId(MusicSource.Netease, match.id.toString()),
-            title = match.name,
-            artists = listOf(MusicArtistRef(name = match.artists)),
-            durationMs = match.durationMs,
-            artworkUrl = match.artworkUrl,
-            providerMetadata = ProviderTrackMetadata.Netease(match.id),
-        )
-        Log.i(TAG, "LX Netease match source=${track.id.source.storageValue} id=${track.id.value.take(8)} -> ${match.id}")
-        return resolveNeteaseTrack(neteaseTrack, quality)
+    private fun lxSourceCode(source: MusicSource): String? = when (source) {
+        MusicSource.Netease -> "wy"
+        MusicSource.QQMusic -> "tx"
+        MusicSource.Kugou,
+        MusicSource.KugouLite,
+        -> "kg"
+        MusicSource.Kuwo -> "kw"
+        else -> null
     }
 
-    private fun resolveNeteaseTrack(track: MusicTrack, quality: AudioQualityTier): LxUserPlaybackResult? {
-        val song = buildLxMusicInfo(track, "wy", quality.toLxQuality())
+    /**
+     * Strict cross-source ID lookup. The returned track must carry the target
+     * provider's own resource ID; we never pass a title match's numeric id from
+     * another platform to an LX script.
+     */
+    private fun trackForLxSource(track: MusicTrack, code: String): MusicTrack? {
+        if (code == lxSourceCode(track.id.source)) return track
+        // MeloX has no Migu provider, so there is no trustworthy Migu id to look up.
+        if (code == "mg") return null
+        val providerSource = when (code) {
+            "wy" -> MusicSource.Netease
+            "tx" -> MusicSource.QQMusic
+            "kg" -> if (track.id.source == MusicSource.KugouLite) MusicSource.KugouLite else MusicSource.Kugou
+            "kw" -> MusicSource.Kuwo
+            else -> return null
+        }
+        val matched = searchMatchedProviderTrack(providerSource, track) ?: return null
+        // Reject a provider result that somehow escaped its own catalog identity.
+        if (matched.id.source != providerSource) {
+            Log.w(TAG, "LX cross-source match rejected code=$code idSource=${matched.id.source.storageValue}")
+            return null
+        }
+        Log.i(
+            TAG,
+            "LX cross-source match ${track.id.source.storageValue}:${track.id.value.take(8)} -> " +
+                "$code:${matched.id.value.take(8)}",
+        )
+        return matched
+    }
+
+    private fun supportedLxSourceCodes(): Set<String> {
+        val supported = linkedSetOf<String>()
         for (record in LxUserSourceStore.list(appContext)) {
             val script = LxUserSourceStore.script(appContext, record.id) ?: continue
-            val result = runCatching {
+            val runtime = runCatching { LxUserRuntime.session(record.id, script) }.getOrNull() ?: continue
+            for (code in LX_ALL_SOURCES) {
+                if (runtime.supportsSource(code) && runtime.supportsAction(code, "musicUrl")) supported += code
+            }
+        }
+        return supported
+    }
+
+    private fun resolveSourceCandidates(
+        track: MusicTrack,
+        quality: AudioQualityTier,
+        sourceCodes: List<String>,
+    ): LxUserPlaybackResult? {
+        val lxQuality = quality.toLxQuality()
+        for (record in LxUserSourceStore.list(appContext)) {
+            val script = LxUserSourceStore.script(appContext, record.id) ?: continue
+            var phase = "load"
+            val resolved = runCatching {
                 val runtime = LxUserRuntime.session(record.id, script)
-                    if (!runtime.supportsAction("wy", "musicUrl")) return@runCatching null
-                    lxQualityFallbacks(quality.toLxQuality()).asSequence().mapNotNull { requestedQuality ->
-                        val sourceQuality = runtime.qualityFor("wy", requestedQuality)
-                        val response = runCatching {
-                            runtime.callAction("musicUrl", song + mapOf(
-                                "source" to "wy",
-                                "type" to sourceQuality,
-                                "musicInfo" to song,
-                            ))
-                        }.onFailure { Log.w(TAG, "LX Netease candidate failed quality=$sourceQuality detail=${it.safeLogMessage()}") }.getOrNull()
-                        val url = when (response) {
-                            is String -> response
-                            is Map<*, *> -> response["url"]?.toString()
-                            else -> null
-                        }?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-                        url?.let { LxUserPlaybackResult(record.id, it) }
-                    }.firstOrNull()
+                phase = "request"
+                sourceCodes
+                    .filter { runtime.supportsSource(it) && runtime.supportsAction(it, "musicUrl") }
+                    .flatMap { source ->
+                        lxQualityFallbacks(lxQuality).map { requestedQuality ->
+                            source to runtime.qualityFor(source, requestedQuality)
+                        }
+                    }
+                    .distinct()
+                    .mapNotNull { (source, sourceQuality) ->
+                        Log.d(TAG, "LX candidate script=${record.id} source=$source requested=$lxQuality actual=$sourceQuality")
+                        val candidateSong = buildLxMusicInfo(track, source, sourceQuality)
+                        runCatching {
+                            runtime.callAction(
+                                "musicUrl",
+                                candidateSong + mapOf(
+                                    "source" to source,
+                                    "type" to sourceQuality,
+                                    "musicInfo" to candidateSong,
+                                ),
+                            )
+                        }.onFailure {
+                            Log.w(TAG, "LX candidate failed script=${record.id} source=$source quality=$sourceQuality detail=${it.safeLogMessage()}")
+                        }.getOrNull()?.let { value ->
+                            val url = when (value) {
+                                is String -> value
+                                is Map<*, *> -> value["url"]?.toString()
+                                else -> null
+                            }?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                            Log.d(TAG, "LX candidate result script=${record.id} source=$source quality=$sourceQuality url=${url != null}")
+                            url?.let {
+                                LxUserPlaybackResult(
+                                    sourceId = record.id,
+                                    url = it,
+                                    sourceQuality = sourceQuality,
+                                    actualQuality = lxQualityTier(sourceQuality),
+                                )
+                            }
+                        }
+                    }
+                    .firstOrNull() ?: throw IOException("LX 音乐源没有返回可播放链接")
+            }.onSuccess {
+                Log.i(TAG, "LX resolved source=${track.id.source.storageValue} script=${record.id}")
+            }.onFailure { error ->
+                Log.w(
+                    TAG,
+                    "LX failed source=${track.id.source.storageValue} script=${record.id} phase=$phase " +
+                        "error=${error.javaClass.simpleName} detail=${error.safeLogMessage()}",
+                )
             }.getOrNull()
-            if (result != null) return result
+            if (resolved != null) return resolved
+        }
+        return null
+    }
+
+    private fun searchMatchedProviderTrack(source: MusicSource, target: MusicTrack): MusicTrack? {
+        val provider = runCatching { MeloXMusicProviders.create(appContext)[source] }.getOrNull() ?: return null
+        val search = provider as? SearchCapability ?: return null
+        val queries = listOf(
+            "${target.title} ${target.artistText.substringBefore(" /")}".trim(),
+            target.title.trim(),
+        ).filter(String::isNotBlank).distinct()
+        for (query in queries) {
+            val results = runCatching {
+                runBlocking(Dispatchers.IO) {
+                    withTimeoutOrNull(8_000L) {
+                        search.searchSongs(query, page = 1, pageSize = 20).items
+                    }
+                }
+            }.getOrNull().orEmpty()
+            val match = results
+                .filter { isSafeLxPlaybackMatch(target.title, target.artistText, target.durationMs, it) }
+                .maxByOrNull { candidate ->
+                    val distance = kotlin.math.abs(
+                        (candidate.durationMs ?: 0L) - (target.durationMs ?: candidate.durationMs ?: 0L),
+                    )
+                    -distance
+                }
+            if (match != null) return match
         }
         return null
     }
 
     private companion object {
         const val TAG = "MeloXThirdParty"
+        val LX_ALL_SOURCES = listOf("kw", "kg", "tx", "wy", "mg")
     }
 }
 
-private fun lxQualityFallbacks(requested: String): List<String> = when (requested) {
-    "flac24bit" -> listOf("flac24bit", "flac", "320k", "128k")
-    "flac" -> listOf("flac", "320k", "128k")
-    "320k" -> listOf("320k", "128k")
-    else -> listOf(requested)
+/** Every LX quality at or below [requested], highest first. */
+internal fun lxQualityFallbacks(requested: String): List<String> {
+    val index = com.lladlam.melox.core.provider.lxuser.LX_QUALITY_ORDER.indexOf(requested)
+    if (index < 0) return listOf(requested)
+    return com.lladlam.melox.core.provider.lxuser.LX_QUALITY_ORDER
+        .subList(0, index + 1)
+        .asReversed()
 }
 
 private fun normalizeLxText(value: String): String = value
     .lowercase(Locale.ROOT)
     .replace(Regex("[\\s\\p{Punct}·•，。！？、（）()\\[\\]【】]"), "")
 
+internal enum class LxTitleVersion { Original, Live, Dj, Remix, Instrumental }
 
-private fun AudioQualityTier.toLxQuality(): String = when (this) {
+internal data class LxTitleIdentity(
+    val baseTitle: String,
+    val version: LxTitleVersion,
+    val versionLabel: String,
+)
+
+internal fun lxTitleIdentity(title: String): LxTitleIdentity {
+    val normalized = title.lowercase(Locale.ROOT)
+    val version = when {
+        Regex("(?:^|[^a-z])dj(?:[^a-z]|$)|电音|舞曲").containsMatchIn(normalized) -> LxTitleVersion.Dj
+        Regex("remix|重混|混音版").containsMatchIn(normalized) -> LxTitleVersion.Remix
+        Regex("live|现场|演唱会|音乐节").containsMatchIn(normalized) -> LxTitleVersion.Live
+        Regex("instrumental|伴奏|纯音乐|off vocal|karaoke").containsMatchIn(normalized) -> LxTitleVersion.Instrumental
+        else -> LxTitleVersion.Original
+    }
+    val versionPattern = Regex(
+        "(?i)(?:[（(【\\[]?\\s*(?:dj(?:\\s+version)?|[^）)】\\]]*remix|live|现场版?|演唱会版?|音乐节版?|instrumental|伴奏版?|纯音乐|off\\s*vocal|karaoke)\\s*[）)】\\]]?)",
+    )
+    val base = normalizeLxText(title.replace(versionPattern, ""))
+    val label = normalizeLxText(title).removePrefix(base)
+    return LxTitleIdentity(base, version, label)
+}
+
+/** Playback-safe cross-provider match: title/version/artist first, duration last. */
+internal fun isSafeLxPlaybackMatch(
+    targetTitle: String,
+    targetArtist: String,
+    targetDurationMs: Long?,
+    candidate: MusicTrack,
+): Boolean {
+    val target = lxTitleIdentity(withoutLxFeaturedArtist(targetTitle, targetArtist))
+    val other = lxTitleIdentity(withoutLxFeaturedArtist(candidate.title, candidate.artistText))
+    if (target.baseTitle.isBlank() || target.baseTitle != other.baseTitle) return false
+    if (target.version != other.version) return false
+    if (target.version != LxTitleVersion.Original && target.versionLabel != other.versionLabel) return false
+    val targetArtistKey = normalizeLxText(targetArtist.substringBefore(" /"))
+    val candidateArtistKey = normalizeLxText(candidate.artistText)
+    if (targetArtistKey.isNotBlank() &&
+        !candidateArtistKey.contains(targetArtistKey) &&
+        !targetArtistKey.contains(candidateArtistKey)
+    ) return false
+    if (targetDurationMs != null && targetDurationMs > 0L) {
+        val candidateDuration = candidate.durationMs ?: return true
+        val hotRules = com.lladlam.melox.core.remoteconfig.MeloXHotRules.current
+        val tolerance = if (target.version == LxTitleVersion.Original) {
+            hotRules.lyricMatchOriginalToleranceMs
+        } else {
+            hotRules.lyricMatchVersionToleranceMs
+        }
+        if (kotlin.math.abs(targetDurationMs - candidateDuration) > tolerance) return false
+    }
+    return true
+}
+
+private fun withoutLxFeaturedArtist(title: String, artist: String): String {
+    val suffix = Regex("(?i)\\s+(?:feat\\.?|ft\\.?)\\s*(.+?)\\s*$").find(title) ?: return title
+    val featured = normalizeLxText(suffix.groupValues[1])
+    if (featured.isBlank() || !normalizeLxText(artist).contains(featured)) return title
+    return title.substring(0, suffix.range.first).trim()
+}
+
+
+internal fun AudioQualityTier.toLxQuality(): String = when (this) {
     AudioQualityTier.Standard -> "128k"
     AudioQualityTier.High -> "320k"
     AudioQualityTier.Lossless -> "flac"
-    AudioQualityTier.HiResolution, AudioQualityTier.Immersive, AudioQualityTier.Master -> "flac24bit"
+    AudioQualityTier.HiResolution -> "hires"
+    // HighDefinitionSurround/ImmersiveSurround share this tier; ask for the
+    // higher LX name so qualityFor can still fall back to `atmos` when needed.
+    AudioQualityTier.Immersive -> "atmos_plus"
+    AudioQualityTier.Master -> "master"
+}
+
+internal fun lxQualityTier(quality: String?): AudioQualityTier? = when (quality) {
+    "128k" -> AudioQualityTier.Standard
+    "320k" -> AudioQualityTier.High
+    "flac" -> AudioQualityTier.Lossless
+    "flac24bit", "hires" -> AudioQualityTier.HiResolution
+    "atmos", "atmos_plus" -> AudioQualityTier.Immersive
+    "master" -> AudioQualityTier.Master
+    else -> null
 }
 
 private fun Throwable.safeLogMessage(): String = message.orEmpty()

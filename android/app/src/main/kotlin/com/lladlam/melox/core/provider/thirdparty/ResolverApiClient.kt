@@ -73,7 +73,7 @@ internal class ResolverApiClient(
                 null
             }
             synchronized(lock) {
-                cache[key] = Entry(result, now() + if (result == null) 30_000L else 120_000L)
+                cache[key] = Entry(result, now() + if (result == null) 30_000L else ResolverUrlTtlMs)
             }
             future.complete(result)
             return result
