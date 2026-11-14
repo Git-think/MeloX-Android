@@ -61,14 +61,23 @@ and diagnostics omit raw credentials and complete request URLs.
 
 ## Testing
 
-**Test resolver** prefills the editable NetEase song ID `186016` and requests
-only the selected service. Receiving an audio URL does **not** prove that it was
-downloaded, decoded or played, and does not verify battery use or temperature.
+**Test resolver** prefills the editable NetEase song ID `22676167` (DJ OKAWARI,
+“Flower Dance”), selected from an actual Meting search and an audio-header check.
+Only the selected service is requested, and service availability can still
+change. Receiving an audio URL does **not** prove that it was downloaded,
+decoded or played, and does not verify battery use or temperature.
+
+Failed tests show the HTTP status and response body as selectable plain text.
+Empty responses are explicit, non-text bodies are not rendered, and previews
+are limited to 4,096 characters with configured credentials redacted. Response
+bodies never enter playback logs. Explicit tests always make fresh requests,
+without reusing playback caches or service cooldowns.
 
 Regression tests cover protocol paths and source IDs, the preset test ID,
 disabled configuration, bounded response parsing, direct/redirected audio,
 cache expiry and cooldown, concurrent requests, fallback order, cancellation,
-quality preservation, and dynamic LX installation/removal.
+quality preservation, dynamic LX installation/removal, response previews,
+truncation, and credential redaction.
 
 Run Android builds and tests in GitHub Actions. Real-service playback and
 real-device UI evidence remain separate acceptance checks.

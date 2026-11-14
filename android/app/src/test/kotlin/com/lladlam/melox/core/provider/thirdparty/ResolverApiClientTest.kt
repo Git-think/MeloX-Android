@@ -7,6 +7,7 @@ import com.lladlam.melox.core.music.model.MusicTrack
 import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.OkHttpClient
@@ -16,6 +17,7 @@ import okhttp3.ResponseBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.BufferedSource
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -70,7 +72,86 @@ class ResolverApiClientTest {
         } }, requests))
         assertEquals("https://resolver.test/api.php?server=netease&type=url&id=123&br=320&level=exhigh",
             api.resolve(settings, track, AudioQualityTier.High))
-        assertEquals(1, requests.get())
+        assertEquals("https://resolver.test/api.php?server=netease&type=url&id=123&br=320&level=exhigh",
+            api.test(settings, track, AudioQualityTier.High).url)
+        assertEquals(2, requests.get())
+    }
+
+    @Test fun failedTestsExposeHttpStatusAndResponseBody() {
+        for ((status, body) in listOf(200 to "<html>Song unavailable</html>", 403 to """{"error":"Access denied"}""")) {
+            val api = ResolverApiClient(client(status, { body.toResponseBody("text/html".toMediaType()) }, AtomicInteger()))
+            val result = api.test(settings, track, AudioQualityTier.High)
+            assertNull(result.url)
+            assertEquals(status, result.httpStatus)
+            assertEquals("text/html", result.contentType)
+            assertEquals(body, result.responseBody)
+            assertFalse(result.responseTruncated)
+        }
+    }
+
+    @Test fun emptyResponseIsKeptDistinctFromUnreadBinaryContent() {
+        val empty = ResolverApiClient(client(200, { "".toResponseBody("text/html".toMediaType()) }, AtomicInteger()))
+            .test(settings, track, AudioQualityTier.High)
+        assertNull(empty.url)
+        assertEquals("", empty.responseBody)
+        val image = ResolverApiClient(client(200, { "image".toResponseBody("image/png".toMediaType()) }, AtomicInteger()))
+            .test(settings, track, AudioQualityTier.High)
+        assertNull(image.url)
+        assertNull(image.responseBody)
+        assertEquals("image/png", image.contentType)
+    }
+
+    @Test fun responsePreviewRedactsRawEncodedAndJsonEscapedCredentials() {
+        val credential = "private+key/\"one"
+        val encoded = URLEncoder.encode(credential, "UTF-8")
+        val escaped = JSONObject.quote(credential).removeSurrounding("\"")
+        val body = "raw=$credential; encoded=$encoded; escaped=$escaped"
+        val api = ResolverApiClient(client(401, { body.toResponseBody("text/plain".toMediaType()) }, AtomicInteger()))
+        val result = api.test(settings.copy(credential = credential), track, AudioQualityTier.High)
+        val displayed = result.responseBody!!
+        assertNull(result.url)
+        assertFalse(displayed.contains(credential))
+        assertFalse(displayed.contains(encoded))
+        assertFalse(displayed.contains(escaped))
+        assertEquals("raw=[redacted]; encoded=[redacted]; escaped=[redacted]", result.responseBody)
+    }
+
+    @Test fun responsePreviewsStayBoundedAndMarkTruncation() {
+        for (length in listOf(8 * 1024, 70 * 1024)) {
+            val api = ResolverApiClient(client(500, { "x".repeat(length).toResponseBody("text/plain".toMediaType()) }, AtomicInteger()))
+            val result = api.test(settings, track, AudioQualityTier.High)
+            assertNull(result.url)
+            assertTrue(result.responseTruncated)
+            assertEquals(ResolverResponsePreviewChars, result.responseBody!!.length)
+        }
+    }
+
+    @Test fun credentialsEmbeddedInEndpointQueryAreAlsoRedacted() {
+        val api = ResolverApiClient(client(401, { "token=endpoint-key".toResponseBody("text/plain".toMediaType()) }, AtomicInteger()))
+        val result = api.test(settings.copy(endpoint = "https://resolver.test/api.php?token=endpoint-key"), track, AudioQualityTier.High)
+        assertEquals("token=[redacted]", result.responseBody)
+    }
+
+    @Test fun explicitTestsBypassPlaybackFailureCacheAndNeverLogResponseBodies() {
+        val requests = AtomicInteger()
+        val logs = mutableListOf<String>()
+        val api = ResolverApiClient(client(200, {
+            if (requests.get() == 1) "no source".toResponseBody("text/plain".toMediaType())
+            else """{"url":"https://cdn.test/fresh.mp3"}""".toResponseBody("application/json".toMediaType())
+        }, requests), report = { logs += it })
+        assertNull(api.resolve(settings, track, AudioQualityTier.High))
+        assertEquals("https://cdn.test/fresh.mp3", api.test(settings, track, AudioQualityTier.High).url)
+        assertEquals(2, requests.get())
+        assertTrue(logs.isEmpty())
+    }
+
+    @Test fun requestErrorsAreShownWithoutLeakingCredentials() {
+        val http = OkHttpClient.Builder().addInterceptor { throw IOException("Failed auth=private-key") }.build()
+        val result = ResolverApiClient(http).test(settings.copy(credential = "private-key"), track, AudioQualityTier.High)
+        assertNull(result.url)
+        assertNull(result.httpStatus)
+        assertNull(result.responseBody)
+        assertEquals("IOException: Failed auth=[redacted]", result.requestError)
     }
 
     @Test fun hugeAndHtmlResponsesAreRejected() {
