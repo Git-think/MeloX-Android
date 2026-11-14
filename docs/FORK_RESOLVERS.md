@@ -96,3 +96,7 @@ This keeps the finite API cache and empty-script guard while reducing overlappin
 edits when upstream changes LX quality negotiation. Remaining integration points
 are merged normally; there is no blanket “ours” merge strategy or automatic
 discarding of upstream playback changes.
+
+The built-in fallback adapter runs inside upstream's bounded provider resolution.
+Provider timeouts and cancellation still propagate as failures, never as a
+terminal no-source result that could start third-party fallback requests.

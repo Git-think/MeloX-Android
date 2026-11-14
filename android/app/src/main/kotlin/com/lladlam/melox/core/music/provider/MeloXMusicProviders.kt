@@ -5,6 +5,7 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.provider.applemusic.AppleMusicApiClient
 import com.lladlam.melox.core.provider.applemusic.AppleMusicSessionStore
 import com.lladlam.melox.core.provider.kugou.KugouLiteProvider
+import com.lladlam.melox.core.provider.kugou.KugouProvider
 import com.lladlam.melox.core.provider.kugou.KugouSessionStore
 import com.lladlam.melox.core.provider.kuwo.KuwoProvider
 import com.lladlam.melox.core.provider.kuwo.KuwoSessionStore
@@ -15,6 +16,7 @@ import com.lladlam.melox.core.provider.bilibili.BilibiliProvider
 import com.lladlam.melox.core.provider.bilibili.BilibiliSessionStore
 import com.lladlam.melox.core.provider.bilibili.BilibiliPlaybackAssociationStore
 import com.lladlam.melox.core.provider.bilibili.BilibiliApiCache
+import com.lladlam.melox.core.provider.bilibili.BilibiliDirectedTrafficPolicy
 import com.lladlam.melox.core.provider.spotify.SpotifyClientConfig
 import com.lladlam.melox.core.provider.spotify.SpotifyProvider
 import com.lladlam.melox.core.provider.youtubemusic.YouTubeMusicProvider
@@ -52,6 +54,7 @@ object MeloXMusicProviders {
         val nativeProviders = listOf<MusicProvider>(
                 NeteaseProvider({ PlaybackAccountStore.neteaseCookie(appContext) }, httpClient),
                 QQMusicProvider({ PlaybackAccountStore.qqSession(appContext) }, httpClient),
+                KugouProvider({ PlaybackAccountStore.kugouSession(appContext) }, httpClient),
                 liteProvider(appContext, httpClient),
                 QishuiProvider({ QishuiSessionStore.read(appContext) }, httpClient),
                 KuwoProvider({ PlaybackAccountStore.kuwoSession(appContext) }, httpClient),
@@ -61,6 +64,7 @@ object MeloXMusicProviders {
                     { bvid, cid -> BilibiliPlaybackAssociationStore.read(appContext, bvid, cid) },
                     BilibiliApiCache.shared(appContext),
                     { BilibiliSessionStore.revision(appContext) },
+                    { BilibiliDirectedTrafficPolicy.isActive(appContext) },
                 ),
                 JellyfinProvider({ JellyfinSessionStore.read(appContext) }, httpClient),
                 LocalProvider(appContext),
@@ -120,6 +124,7 @@ object MeloXMusicProviders {
                     associationProvider = { bvid, cid -> BilibiliPlaybackAssociationStore.read(context, bvid, cid) },
                     apiCache = BilibiliApiCache.shared(context),
                     sessionRevisionProvider = { BilibiliSessionStore.revision(context) },
+                    directedTrafficProvider = { BilibiliDirectedTrafficPolicy.isActive(context) },
                 ),
                 JellyfinProvider({ JellyfinSessionStore.read(context) }, httpClient),
                 LocalProvider(context),

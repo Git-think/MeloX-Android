@@ -25,13 +25,26 @@ import org.json.JSONObject
 /**
  * 单批 song/detail 的歌曲数。
  *
- * 原值 100：1000 首的歌单要发 **10 次串行**请求 ⇒ 首屏等待 = 10 × 往返（实测单批 ~200ms，
- * 弱网翻倍 ⇒ 2–4s），这是歌单页「转圈久」的主因。
- * 2026-10-17 实测 `/api/v3/song/detail`（未登录 eapi）：批 500 → 200 songs / 698KB / 314ms、
- * 批 1000 → 1.16MB / 367ms，服务端照收不限流 ⇒ 批大小不是风控维度。
- * 取 **250**：单包 ~350KB（弱网不易超时），1000 首歌单 10 批降到 4 批。
+ * ⚠ 这是服务端硬上限，不是越大越快：2026-11-13 分别实测未登录 eapi 与 weapi 的
+ * `/api/v3/song/detail`（`c` 为 id 数组字符串），请求 100 首返回 100 首，请求
+ * 101/150/200/250 首都只返回 100 首，其余 id 被静默丢弃（HTTP 200、code 200）。
+ * 236afc6 曾把批量改为 250，导致歌单缺歌，收藏还要串行补漏而变慢、超时。
+ * 每批保持 ≤100，并由 [isTruncatedSongDetailResponse] 兜底识别服务端截断。
  */
-private const val SONG_DETAIL_PAGE_SIZE = 250
+internal const val SONG_DETAIL_PAGE_SIZE = 100
+
+/** 服务端单次 song/detail 响应的歌曲数上限；用于区分截断与歌曲本身已失效。 */
+internal const val SONG_DETAIL_RESPONSE_CAP = 100
+
+/**
+ * 响应填满服务端上限却仍少于请求数时，多余 id 是被截断而非歌曲不存在。
+ * 小于上限的缺歌响应不重试，避免已删除歌曲造成无意义的递归请求。
+ */
+internal fun isTruncatedSongDetailResponse(
+    requested: Int,
+    returned: Int,
+    cap: Int = SONG_DETAIL_RESPONSE_CAP,
+): Boolean = requested > 1 && returned >= cap && returned < requested
 
 /**
  * song/detail 补页的并发上限。
@@ -66,13 +79,11 @@ class NeteaseLibraryClient(
         val playlists = allPlaylists
         val likedIds = likedSongIdsBlocking(userId)
         var likedById = songDetailsPaged(likedIds).associateBy(SearchSong::id)
-        // 任一 id 在 song/detail 里被静默丢掉都算「丢歌」。先整批重试一次：瞬态空响应
-        // 经常是偶发，小批重试成功率更高（批 250 已接近截断阈值，50 留足余量）。
+        // 任一 id 在 song/detail 里被静默丢掉都算「丢歌」。瞬态空响应可小批重试；
+        // 使用与首轮相同的受控并发，避免收藏较多时补漏退化为几十次串行往返。
         val missingIds = likedIds.filterNot { it in likedById }
         if (missingIds.isNotEmpty()) {
-            val retried = missingIds.chunked(50)
-                .flatMap { songDetailsBlocking(it) }
-                .associateBy(SearchSong::id)
+            val retried = songDetailsPaged(missingIds, pageSize = 50).associateBy(SearchSong::id)
             likedById = likedById + retried
         }
         // A transient failure in the song-detail request comes back as an empty payload.
@@ -147,12 +158,17 @@ class NeteaseLibraryClient(
             }.getOrNull()
         } else null
 
-        val playlistsResponse = eapi(
-            "/api/personalized/playlist",
-            JSONObject().put("limit", limit).put("total", true).put("n", 1_000),
-            authenticated,
-        )
-        val fallbackPlaylists = parsePlaylists(playlistsResponse.optJSONArray("result") ?: JSONArray())
+        // Only fetch the fallback sections the home block did not fill. Previously
+        // every fallback was requested eagerly even when the server block was
+        // complete, adding eight unnecessary authenticated calls per refresh.
+        val fallbackPlaylists = if (serverBlocks?.recommendedPlaylists.isNullOrEmpty()) {
+            val playlistsResponse = eapi(
+                "/api/personalized/playlist",
+                JSONObject().put("limit", limit).put("total", true).put("n", 1_000),
+                authenticated,
+            )
+            parsePlaylists(playlistsResponse.optJSONArray("result") ?: JSONArray())
+        } else emptyList()
         val songData = JSONObject().put("type", "recommend").put("limit", limit).put("areaId", areaId(area))
         val songsResponse = if (authenticated) try {
             authenticatedWeapi.post("/api/personalized/newsong", songData)
@@ -168,18 +184,32 @@ class NeteaseLibraryClient(
             }
         }
 
-        val accountPlaylists = if (authenticated && userId != null) {
+        val needsRadar = serverBlocks?.radarPlaylists.isNullOrEmpty()
+        val needsPersonal = serverBlocks?.personalPlaylists.isNullOrEmpty()
+        val accountPlaylists = if (authenticated && userId != null && (needsRadar || needsPersonal)) {
             runCatching { userPlaylistsBlocking(userId).drop(1) }.getOrDefault(emptyList())
         } else emptyList()
-        val fallbackRadar = accountPlaylists.filter { it.name.contains("雷达") }.take(limit)
-        val fallbackPersonal = accountPlaylists.filter { it.creatorUserId == userId }.take(limit)
-        val fallbackRecent = runCatching { topSongs("全部", limit) }.getOrDefault(emptyList())
-        val fallbackCharts = runCatching { explorePlaylists("排行榜", limit) }.getOrDefault(emptyList())
-        val fallbackRegional = runCatching { topSongs(area, limit) }.getOrDefault(emptyList())
-        val fallbackRoaming = if (authenticated) runCatching { personalFm(explore = true, limit = limit) }.getOrDefault(emptyList()) else emptyList()
-        val likedSeedId = if (authenticated && userId != null) runCatching { likedSongIdsBlocking(userId).firstOrNull() }.getOrNull() else null
-        val fallbackSimilar = likedSeedId?.let { runCatching { similarSongsBlocking(it, limit) }.getOrDefault(emptyList()) }.orEmpty()
-        val fallbackPodcasts = if (podcastsEnabled) runCatching {
+        val fallbackRadar = if (needsRadar) accountPlaylists.filter { it.name.contains("雷达") }.take(limit) else emptyList()
+        val fallbackPersonal = if (needsPersonal) accountPlaylists.filter { it.creatorUserId == userId }.take(limit) else emptyList()
+        val fallbackRecent = if (serverBlocks?.recentlyTrending.isNullOrEmpty()) {
+            runCatching { topSongs("全部", limit) }.getOrDefault(emptyList())
+        } else emptyList()
+        val fallbackCharts = if (serverBlocks?.chartPlaylists.isNullOrEmpty()) {
+            runCatching { explorePlaylists("排行榜", limit) }.getOrDefault(emptyList())
+        } else emptyList()
+        val fallbackRegional = if (serverBlocks?.regionalSongs.isNullOrEmpty()) {
+            runCatching { topSongs(area, limit) }.getOrDefault(emptyList())
+        } else emptyList()
+        val fallbackRoaming = if (authenticated && serverBlocks?.roamingSongs.isNullOrEmpty()) {
+            runCatching { personalFm(explore = true, limit = limit) }.getOrDefault(emptyList())
+        } else emptyList()
+        val fallbackSimilar = if (serverBlocks?.likedSongRecommendations.isNullOrEmpty()) {
+            val likedSeedId = if (authenticated && userId != null) {
+                runCatching { likedSongIdsBlocking(userId).firstOrNull() }.getOrNull()
+            } else null
+            likedSeedId?.let { runCatching { similarSongsBlocking(it, limit) }.getOrDefault(emptyList()) }.orEmpty()
+        } else emptyList()
+        val fallbackPodcasts = if (podcastsEnabled && serverBlocks?.podcasts.isNullOrEmpty()) runCatching {
             val path = "/api/program/recommend/v1"
             val data = JSONObject().put("limit", limit.coerceIn(1, 50)).put("offset", 0)
             val result = if (authenticated) try {
@@ -502,9 +532,13 @@ class NeteaseLibraryClient(
      * 分页 song/detail 的**受控并发**封装：顺序保持（[awaitAll] 保序），
      * 单批时退化为一次直接调用（不额外起协程）。
      */
-    private suspend fun songDetailsPaged(ids: List<Long>): List<SearchSong> {
+    private suspend fun songDetailsPaged(
+        ids: List<Long>,
+        pageSize: Int = SONG_DETAIL_PAGE_SIZE,
+    ): List<SearchSong> {
         if (ids.isEmpty()) return emptyList()
-        val pages = ids.chunked(SONG_DETAIL_PAGE_SIZE)
+        require(pageSize in 1..SONG_DETAIL_PAGE_SIZE) { "song/detail page size exceeds server cap" }
+        val pages = ids.chunked(pageSize)
         if (pages.size == 1) return songDetailsBlocking(pages.first())
         val gate = Semaphore(SONG_DETAIL_PARALLELISM)
         return coroutineScope {
@@ -518,8 +552,11 @@ class NeteaseLibraryClient(
 
     fun songDetailsBlocking(ids: List<Long>): List<SearchSong> {
         if (ids.isEmpty()) return emptyList()
-        // ⚠ 上限跟分页大小对齐（原本硬编码 100，会把 250 的页再截回 100，放大批大小就白改了）。
-        val descriptors = JSONArray().apply { ids.take(SONG_DETAIL_PAGE_SIZE).forEach { put(JSONObject().put("id", it)) } }
+        // Public callers may pass more than one page; never silently drop the tail.
+        if (ids.size > SONG_DETAIL_PAGE_SIZE) {
+            return ids.chunked(SONG_DETAIL_PAGE_SIZE).flatMap { songDetailsBlocking(it) }
+        }
+        val descriptors = JSONArray().apply { ids.forEach { put(JSONObject().put("id", it)) } }
         val path = "/api/v3/song/detail"
         val data = JSONObject().put("c", descriptors.toString())
         val authenticated = NeteaseSessionStore.containsMusicU(cookieProvider())
@@ -530,6 +567,12 @@ class NeteaseLibraryClient(
             eapi(path, data, true)
         } else eapi(path, data, false)
         val songs = response.optJSONArray("songs") ?: JSONArray()
+        // 服务端截断不返回错误码；响应填满上限却少于请求数时必须拆批，
+        // 否则歌单、收藏和一起听会永久缺歌。单 id 不再拆分，已删除歌曲可正常结束。
+        if (isTruncatedSongDetailResponse(requested = ids.size, returned = songs.length())) {
+            val midpoint = ids.size / 2
+            return songDetailsBlocking(ids.take(midpoint)) + songDetailsBlocking(ids.drop(midpoint))
+        }
         return buildList {
             for (index in 0 until songs.length()) {
                 parseSong(songs.optJSONObject(index))?.let(::add)

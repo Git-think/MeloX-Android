@@ -14,6 +14,10 @@ internal const val MELOX_LAN_VERSION = 1
 internal const val MELOX_LAN_DISCOVERY_PORT = 47830
 internal const val MELOX_LAN_DEFAULT_PORT = 47831
 internal const val MELOX_LAN_MAX_MESSAGE_BYTES = 256 * 1024
+internal const val MAX_LAN_CLIENTS = 8
+internal const val MAX_PENDING_HANDSHAKES = 8
+internal const val PIN_FAILURE_LIMIT = 10
+internal const val PIN_LOCKOUT_MS = 60_000L
 internal const val MELOX_LAN_BARRIER = "together_barrier_v2"
 
 data class MeloXLanPlayback(
@@ -188,10 +192,12 @@ data class MeloXLanCastFormat(
 data class MeloXLanCastHandshake(
     val port: Int,
     val format: MeloXLanCastFormat,
+    val token: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("castPort", port)
         .put("format", format.toJson())
+        .put("castToken", token)
 }
 
 /**

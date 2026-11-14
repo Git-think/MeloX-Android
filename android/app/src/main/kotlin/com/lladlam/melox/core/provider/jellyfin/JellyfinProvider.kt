@@ -16,6 +16,7 @@ import com.lladlam.melox.core.music.model.MusicSource
 import com.lladlam.melox.core.music.model.MusicTrack
 import com.lladlam.melox.core.music.model.PlaybackResolution
 import com.lladlam.melox.core.music.model.TrackAvailability
+import com.lladlam.melox.core.music.model.rank
 import com.lladlam.melox.core.music.provider.MusicCapability
 import com.lladlam.melox.core.music.provider.MusicProvider
 import com.lladlam.melox.core.music.provider.PlaybackCapability
@@ -78,12 +79,26 @@ class JellyfinProvider(
 
     override suspend fun resolvePlayback(track: MusicTrack, quality: AudioQualityTier): PlaybackResolution =
         withContext(Dispatchers.IO) {
+            require(track.id.source == source) { "只能播放 Jellyfin 曲目" }
             val session = requireSession()
+            // Ask the server to transcode down when the user selected a lower tier.
+            // Lossless and above are left uncapped because the Jellyfin library may
+            // contain hi-res masters that would otherwise be needlessly transcoded.
+            val bitrateCap = when (quality) {
+                AudioQualityTier.Standard -> 128_000
+                AudioQualityTier.High -> 320_000
+                else -> null
+            }
+            val url = buildString {
+                append("${session.baseUrl}/Audio/${track.id.value}/universal")
+                if (bitrateCap != null) append("?MaxStreamingBitrate=$bitrateCap")
+            }
+            val actual = listOfNotNull(track.bestQuality, quality).minBy { it.rank() }
             PlaybackResolution.Playable(
-                url = "${session.baseUrl}/Audio/${track.id.value}/universal",
+                url = url,
                 requestHeaders = mapOf("X-Emby-Token" to session.accessToken),
                 requestedQuality = quality,
-                actualQuality = quality,
+                actualQuality = actual,
                 format = "audio",
             )
         }
@@ -120,18 +135,19 @@ class JellyfinProvider(
 
     override suspend fun albumDetail(album: MusicAlbumSummary, page: Int, pageSize: Int): MusicAlbumDetail =
         withContext(Dispatchers.IO) {
-            val tracks = queryTracks(mapOf("ParentId" to album.id.value), page, pageSize)
-            MusicAlbumDetail(album, tracks, tracks.size.toLong())
+            val result = queryTracks(mapOf("ParentId" to album.id.value), page, pageSize)
+            MusicAlbumDetail(album, result.items, result.total ?: result.items.size.toLong())
         }
 
     override suspend fun artistDetail(artist: MusicArtistSummary, page: Int, pageSize: Int): MusicArtistDetail =
         withContext(Dispatchers.IO) {
-            val tracks = queryTracks(mapOf("ArtistIds" to artist.id.value), page, pageSize)
-            MusicArtistDetail(artist, tracks, tracks.size.toLong())
+            val result = queryTracks(mapOf("ArtistIds" to artist.id.value), page, pageSize)
+            MusicArtistDetail(artist, result.items, result.total ?: result.items.size.toLong())
         }
 
     override suspend fun setFavorite(track: MusicTrack, favorite: Boolean) {
         withContext(Dispatchers.IO) {
+            require(track.id.source == source) { "只能收藏 Jellyfin 曲目" }
             val session = requireSession()
             if (favorite) api.post(session, "/Users/${session.userId}/FavoriteItems/${track.id.value}")
             else api.delete(session, "/Users/${session.userId}/FavoriteItems/${track.id.value}")
@@ -143,6 +159,9 @@ class JellyfinProvider(
 
     override suspend fun addTrackToPlaylist(track: MusicTrack, playlist: MusicPlaylistSummary) {
         withContext(Dispatchers.IO) {
+            require(track.id.source == source && playlist.id.source == source) {
+                "只能将 Jellyfin 曲目添加到 Jellyfin 歌单"
+            }
             api.post(requireSession(), "/Playlists/${playlist.id.value}/Items?Ids=${track.id.value}")
         }
     }
@@ -161,6 +180,9 @@ class JellyfinProvider(
 
     override suspend fun removeTrackFromPlaylist(track: MusicTrack, playlist: MusicPlaylistSummary) {
         withContext(Dispatchers.IO) {
+            require(track.id.source == source && playlist.id.source == source) {
+                "只能从 Jellyfin 歌单移除 Jellyfin 曲目"
+            }
             api.delete(requireSession(), "/Playlists/${playlist.id.value}/Items?EntryIds=${track.id.value}")
         }
     }
@@ -188,17 +210,20 @@ class JellyfinProvider(
         return MusicPage(items, page, size, json.optLong("TotalRecordCount").takeIf { it > 0 })
     }
 
-    private fun queryTracks(filters: Map<String, String>, page: Int, pageSize: Int): List<MusicTrack> {
+    private data class TrackQueryResult(val items: List<MusicTrack>, val total: Long?)
+
+    private fun queryTracks(filters: Map<String, String>, page: Int, pageSize: Int): TrackQueryResult {
         val session = requireSession()
         val size = pageSize.coerceIn(1, 100)
         val json = api.get(session, "/Users/${session.userId}/Items", filters + mapOf(
             "IncludeItemTypes" to "Audio", "Recursive" to "true",
             "StartIndex" to ((page - 1).coerceAtLeast(0) * size).toString(), "Limit" to size.toString(),
         ))
-        val array = json.optJSONArray("Items") ?: return emptyList()
-        return buildList {
+        val array = json.optJSONArray("Items")
+        val items = if (array == null) emptyList() else buildList {
             for (index in 0 until array.length()) array.optJSONObject(index)?.let { add(toTrack(it)) }
         }
+        return TrackQueryResult(items, json.optLong("TotalRecordCount").takeIf { it >= 0L })
     }
 
     private fun toTrack(item: JSONObject): MusicTrack {

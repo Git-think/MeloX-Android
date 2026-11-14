@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.concurrent.Executor
 import java.util.UUID
+import com.lladlam.melox.core.audio.MeloXNetworkQualityPolicy
 
 object PlaybackCommands {
     private const val TAG = "MeloXPlayback"
@@ -133,7 +134,7 @@ object PlaybackCommands {
         serverOrder: List<Long>?,
     ) {
         val appContext = context.applicationContext
-        val quality = MusicQualityPreferences.read(appContext)
+        val quality = com.lladlam.melox.core.audio.MeloXNetworkQualityPolicy.effectiveQuality(appContext)
         MusicQualityRuntime.selected = quality
         MusicQualityRuntime.clear()
         CrossProviderPlaybackRuntime.clear()
@@ -270,7 +271,7 @@ object PlaybackCommands {
 
     fun addToQueue(context: Context, song: SearchSong) {
         val appContext = context.applicationContext
-        val quality = MusicQualityPreferences.read(appContext)
+        val quality = com.lladlam.melox.core.audio.MeloXNetworkQualityPolicy.effectiveQuality(appContext)
         val controller = activeController
         if (controller == null) {
             playQueue(context, listOf(song), song.id)
@@ -319,7 +320,7 @@ object PlaybackCommands {
 
     fun playNext(context: Context, song: SearchSong) {
         val appContext = context.applicationContext
-        val quality = MusicQualityPreferences.read(appContext)
+        val quality = com.lladlam.melox.core.audio.MeloXNetworkQualityPolicy.effectiveQuality(appContext)
         val controller = activeController
         if (controller == null) {
             playQueue(context, listOf(song), song.id)
@@ -359,9 +360,26 @@ object PlaybackCommands {
     }
 
     fun changeQuality(context: Context, quality: MusicQuality) {
+        applyQuality(context, quality, persist = true)
+    }
+
+    /** Network policy changes the effective tier without overwriting the user's saved default. */
+    internal fun applyNetworkQuality(context: Context, quality: MusicQuality) {
+        applyQuality(context, quality, persist = false)
+    }
+
+    private fun applyQuality(context: Context, quality: MusicQuality, persist: Boolean) {
         val appContext = context.applicationContext
-        MusicQualityPreferences.write(appContext, quality)
-        MusicQualityRuntime.selected = quality
+        if (persist) MusicQualityPreferences.write(appContext, quality)
+        // The saved default and the network-aware preset stay separate: while
+        // the policy is on, the effective tier comes from the Wi-Fi/mobile
+        // preset, not from the default the user just changed.
+        val effective = if (persist && MeloXNetworkQualityPolicy.isEnabled(appContext)) {
+            MeloXNetworkQualityPolicy.effectiveQuality(appContext)
+        } else {
+            quality
+        }
+        MusicQualityRuntime.selected = effective
         MusicQualityRuntime.clear()
         CrossProviderPlaybackRuntime.clear()
 
@@ -377,7 +395,7 @@ object PlaybackCommands {
                 .setUri(
                     NeteasePlaybackResolver.uriForSong(
                         songId = songId,
-                        quality = quality,
+                        quality = effective,
                         title = item.mediaMetadata.title?.toString(),
                         artist = item.mediaMetadata.artist?.toString(),
                         durationMs = item.mediaMetadata.extras

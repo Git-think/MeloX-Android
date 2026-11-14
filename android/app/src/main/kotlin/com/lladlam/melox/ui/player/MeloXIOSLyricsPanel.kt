@@ -128,9 +128,8 @@ import com.lladlam.melox.ui.settings.MeloXSettingsRuntime
 import com.lladlam.melox.ui.meloXEdgeOverscrollHaptic
 import com.lladlam.melox.MeloXAppVisibility
 import com.lladlam.melox.ui.settings.MeloXLyricsStyle
-import com.lladlam.melox.ui.theme.MeloXLanTingProFontFamily
+import com.lladlam.melox.ui.theme.MeloXOnDemandFont
 import com.lladlam.melox.R
-import androidx.core.content.res.ResourcesCompat
 import com.lladlam.melox.ui.settings.MeloXLyricsRenderingQuality
 import com.lladlam.melox.ui.settings.MeloXLyricAnnotationDisplayMode
 import com.lladlam.melox.ui.settings.MeloXLyricsGroupingMode
@@ -1695,6 +1694,18 @@ private fun MeloXAppleMusicLyricsPanel(
                         //   再乘相对比值会 clamp 到 1 ⇒ 整行全白，"逐字亮到哪"就看不出来了。
                         val timedUnplayedAlpha = timedUnplayedRaw +
                             (followingLineAlpha - timedUnplayedRaw) * scrubFlat
+                        // A backing vocal has its own visibility window. When the
+                        // host line's own clock is idle but an accompaniment track
+                        // is sounding, the row must stay bright and keep running
+                        // its accompaniment timeline instead of being dimmed by
+                        // the lead-vocal row alpha.
+                        val accompanimentActive = line.accompaniment.any { vocal ->
+                            val end = vocal.durationMs?.let { vocal.timeMs + it }
+                                ?: vocal.syllables.maxOfOrNull { it.endTimeMs }
+                                ?: vocal.timeMs
+                            val now = renderedPositionState.longValue
+                            now in (vocal.timeMs - 600L)..(end + 600L)
+                        }
                         val scaleRaw = 1f + (MeloXSettingsRuntime.lyricFocusScale - 1f) *
                             max(scaleProgress[index].value, fp)
                         // 拖动预览时取消聚焦放大 ⇒ 所有行同尺寸（用户在意的「大小层级」）。
@@ -1725,17 +1736,27 @@ private fun MeloXAppleMusicLyricsPanel(
                             // needs the playback clock. Subscribing every visible
                             // syllable row made the complete LazyColumn redraw at
                             // the lyric refresh rate on low-end devices.
-                            supportsTimedLyrics = line.syllables.isNotEmpty() &&
-                                MeloXSettingsRuntime.lyricWordByWordEnabled &&
-                                (effectiveFocus > 0.001f || isActiveLine),
+                            //
+                            // An accompaniment track keeps its own clock too: when
+                            // only the backing vocal is sounding, the host line is
+                            // not the active one and would otherwise suppress the
+                            // accompaniment's timing effects entirely.
+                            supportsTimedLyrics = (
+                                line.syllables.isNotEmpty() &&
+                                    MeloXSettingsRuntime.lyricWordByWordEnabled &&
+                                    (effectiveFocus > 0.001f || isActiveLine)
+                                ) || accompanimentActive,
                             fontScale = lyricFontScale,
                             reduceMotion = MeloXSettingsRuntime.lyricReduceMotion,
                             focusProgress = effectiveFocus,
-                            timingEffectsStrength = if (isActiveLine) 1f else effectiveFocus,
+                            timingEffectsStrength = if (isActiveLine || accompanimentActive) 1f else effectiveFocus,
                             timedUnplayedAlpha = timedUnplayedAlpha,
                             visualScale = quantizedScale,
                             visualOffsetPx = visualOffset,
-                            rowAlpha = quantizedRowAlpha,
+                            // Backing vocals must not inherit the host line's dimming:
+                            // their own visibility window is handled inside
+                            // MeloXTimedAccompaniment.
+                            rowAlpha = if (accompanimentActive && !isActiveLine) 1f else quantizedRowAlpha,
                             // ★ 2026-11-03（第 31 轮）：传**平滑后**的半径。`distanceBlur` 与
                             //   `focusBlur` 已经在 `smoothBlurDp` 里取过 `max`，而下游只做
                             //   `max(distanceBlurDp, focusBlurDp, edgeBlurDp)`，所以这里
@@ -2092,12 +2113,12 @@ private fun MeloXRubyLyricText(
     val context = LocalContext.current
     val density = LocalDensity.current
     val useSystemFont = MeloXSettingsRuntime.lyricSystemFontEnabled
-    val fontTypeface = remember(useSystemFont) {
+    val fontTypeface = remember(useSystemFont, MeloXOnDemandFont.revision) {
         if (useSystemFont) Typeface.DEFAULT
-        else ResourcesCompat.getFont(context, R.font.mi_lan_pro) ?: Typeface.DEFAULT
+        else MeloXOnDemandFont.typeface(context) ?: Typeface.DEFAULT
     }
     val measureStyle = TextStyle(
-        fontFamily = if (useSystemFont) FontFamily.Default else MeloXLanTingProFontFamily,
+        fontFamily = if (useSystemFont) FontFamily.Default else MeloXOnDemandFont.fontFamily(context) ?: FontFamily.Default,
         fontSize = (UpstreamLyrics.FONT_SIZE_SP * fontScale).sp,
         fontWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight,
         textAlign = if (line.agent?.alignment == com.lladlam.melox.core.lyrics.LyricAgentAlignment.Flipped) {
@@ -2179,13 +2200,13 @@ private fun MeloXRomanizationRow(
     val context = LocalContext.current
     val density = LocalDensity.current
     val useSystemFont = MeloXSettingsRuntime.lyricSystemFontEnabled
-    val typeface = remember(useSystemFont) {
+    val typeface = remember(useSystemFont, MeloXOnDemandFont.revision) {
         if (useSystemFont) Typeface.DEFAULT
-        else ResourcesCompat.getFont(context, R.font.mi_lan_pro) ?: Typeface.DEFAULT
+        else MeloXOnDemandFont.typeface(context) ?: Typeface.DEFAULT
     }
     val weight = MeloXSettingsRuntime.lyricFontWeight.composeWeight
     val measureStyle = TextStyle(
-        fontFamily = if (useSystemFont) FontFamily.Default else MeloXLanTingProFontFamily,
+        fontFamily = if (useSystemFont) FontFamily.Default else MeloXOnDemandFont.fontFamily(context) ?: FontFamily.Default,
         fontSize = (UpstreamLyrics.FONT_SIZE_SP * fontScale).sp,
         fontWeight = weight,
         textAlign = if (flipped) TextAlign.End else TextAlign.Start,
@@ -2543,16 +2564,16 @@ private fun MeloXGlyphLyricText(
     val density = LocalDensity.current
     val lyricWeight = MeloXSettingsRuntime.lyricFontWeight.composeWeight
     val useSystemFont = MeloXSettingsRuntime.lyricSystemFontEnabled
-    val fontTypeface = remember(useSystemFont) {
+    val fontTypeface = remember(useSystemFont, MeloXOnDemandFont.revision) {
         if (useSystemFont) Typeface.DEFAULT
-        else ResourcesCompat.getFont(context, R.font.mi_lan_pro) ?: Typeface.DEFAULT
+        else MeloXOnDemandFont.typeface(context) ?: Typeface.DEFAULT
     }
     val textMeasurer = rememberTextMeasurer(cacheSize = 64)
     BoxWithConstraints(modifier = modifier) {
         val widthPx = with(density) { maxWidth.roundToPx().coerceAtLeast(1) }
         val style = TextStyle(
             color = Color.White,
-            fontFamily = if (useSystemFont) FontFamily.Default else MeloXLanTingProFontFamily,
+            fontFamily = if (useSystemFont) FontFamily.Default else MeloXOnDemandFont.fontFamily(context) ?: FontFamily.Default,
             fontSize = (UpstreamLyrics.FONT_SIZE_SP * fontScale).sp,
             lineHeight = (UpstreamLyrics.LINE_HEIGHT_SP * fontScale).sp,
             fontWeight = lyricWeight,

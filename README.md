@@ -243,6 +243,12 @@ python3 tools/melox_cli.py --package com.lladlam.melox.android.dev status
 
 Supports playback controls, queue/status queries, seeking, volume, shuffle/repeat, and provider search/play. See [CLI documentation](docs/CLI.md) for setup and commands.
 
+A local, token-protected MCP endpoint is available under the same experimental section; see [MCP documentation](docs/MCP.md).
+
+## Bilibili carrier data (experimental)
+
+**Settings → Bilibili → Bilibili carrier data (experimental)** prefers official Bilibili CDN addresses for DASH audio on mobile data and avoids PCDN or third-party hosts. It only changes which media address is used — cookies, `Referer`, `User-Agent` and the WBI request identity are untouched, and host rewrites are limited to paths whose signature is host-agnostic. Whether traffic is actually exempt is decided by your carrier; the app cannot verify or guarantee it. See [the documentation](docs/BILIBILI-DIRECTED-TRAFFIC.md).
+
 ## Release signature
 
 Official APKs on GitHub Releases are signed with the MeloX release certificate. SHA-256 fingerprint:
@@ -306,7 +312,7 @@ MeloX Android comes from the MeloX Android migration and also uses or references
 
 The Android app depends on the `backdrop` component from [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass). `MeloXBackdropComponents.kt` adapts the official `LiquidButton` and `LiquidBottomTabs` samples while keeping MeloX iOS sizes and layout.
 
-SF Pro / SF Symbols are Apple Inc. system fonts used only for the app's icon glyphs. Normal UI text stays on XiaomiLTPro / MiLanPro. They are not covered by GPLv3; see [SF-Pro-NOTICE.md](docs/SF-Pro-NOTICE.md).
+SF Pro / SF Symbols are Apple Inc. system fonts used only for the app's icon glyphs. Normal UI text uses the Android system font everywhere by default; the optional MiSans family is downloaded on demand from its GitHub release and is not bundled in the APK. They are not covered by GPLv3; see [SF-Pro-NOTICE.md](docs/SF-Pro-NOTICE.md).
 
 The glass effect is still experimental.
 

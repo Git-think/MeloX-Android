@@ -63,6 +63,7 @@ import com.lladlam.melox.ui.glass.MeloXSymbol
 import com.lladlam.melox.ui.glass.MeloXSystemColors
 import com.lladlam.melox.ui.library.MeloXUnifiedSongListDetailScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
@@ -131,6 +132,8 @@ private fun DailyHistoryPage(
     var entry by remember { mutableStateOf<DailyHistoryEntry?>(null) }
     var entryLoading by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
 
     val month = YearMonth.of(year, monthValue)
     val today = MeloXDailyClock.today()
@@ -138,18 +141,24 @@ private fun DailyHistoryPage(
     val cells = remember(month) { MeloXDailyClock.monthCells(month) }
     val contentState = MeloXDailyClock.isEmptyState(dateKeys, selectedKey)
 
-    val refresh: () -> Unit = {
-        scope.launch {
+    fun refresh() {
+        if (refreshJob?.isActive == true) return
+        refreshJob = scope.launch {
             loading = true
+            error = null
             val key = withContext(Dispatchers.IO) {
                 accountKeyOf(NeteaseSessionStore.readCookie(app))
             }
             accountKey = key
-            dateKeys = withContext(Dispatchers.IO) { DailyHistoryStore.listDateKeys(app, key) }
+            dateKeys = runCatching {
+                withContext(Dispatchers.IO) { DailyHistoryStore.listDateKeys(app, key) }
+            }.onFailure {
+                error = it.message ?: "历史日推读取失败"
+            }.getOrDefault(emptyList())
             loading = false
         }
     }
-    val latestRefresh by rememberUpdatedState(refresh)
+    val latestRefresh by rememberUpdatedState(::refresh)
     LaunchedEffect(Unit) { refresh() }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -163,11 +172,16 @@ private fun DailyHistoryPage(
         val key = accountKey ?: return@LaunchedEffect
         val requestedKey = selectedKey
         entry = null
+        error = null
         entryLoading = requestedKey != null && requestedKey in dateKeys
         entry = if (requestedKey == null || requestedKey !in dateKeys) {
             null
         } else {
-            withContext(Dispatchers.IO) { DailyHistoryStore.read(app, key, requestedKey) }
+            runCatching {
+                withContext(Dispatchers.IO) { DailyHistoryStore.read(app, key, requestedKey) }
+            }.onFailure {
+                error = it.message ?: "历史日推读取失败"
+            }.getOrNull()
         }
         entryLoading = false
     }
@@ -219,6 +233,9 @@ private fun DailyHistoryPage(
                     Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = MeloXSystemColors.Red)
                     }
+                }
+                error != null -> {
+                    EmptyHint(error.orEmpty())
                 }
                 contentState == EmptyState.NO_HISTORY -> {
                     EmptyHint(stringResource(R.string.daily_history_empty_all))

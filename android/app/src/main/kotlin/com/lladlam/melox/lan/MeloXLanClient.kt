@@ -1,6 +1,7 @@
 package com.lladlam.melox.lan
 
 import android.util.Log
+import com.lladlam.melox.core.network.readBoundedLine
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
@@ -63,10 +64,7 @@ internal class MeloXLanClient(
         socket = created
         reader = BufferedReader(InputStreamReader(created.getInputStream(), Charsets.UTF_8))
         writer = BufferedWriter(OutputStreamWriter(created.getOutputStream(), Charsets.UTF_8))
-        var result = sendHello(pin)
-        if (result == MeloXLanConnectResult.PinRequired && pin == null && device.trusted) {
-            result = sendHello(null)
-        }
+        val result = sendHello(pin)
         if (result != MeloXLanConnectResult.Connected) {
             close()
             return@withContext result
@@ -187,8 +185,13 @@ internal class MeloXLanClient(
             stopCast()
             return null
         }
+        val token = response.optString("castToken").takeIf { it.length in 16..128 } ?: run {
+            Log.w(TAG, "Cast receiver did not provide an authentication token")
+            stopCast()
+            return null
+        }
         Log.i(TAG, "Cast receiver ready: ${device.address}:$port $negotiated")
-        return MeloXLanCastHandshake(port, negotiated)
+        return MeloXLanCastHandshake(port, negotiated, token)
     }
 
     suspend fun stopCast(): Boolean = request("cast.stop")?.optBoolean("ok") == true
@@ -250,7 +253,7 @@ internal class MeloXLanClient(
     }
 
     private fun readJson(): JSONObject? {
-        val line = reader?.readLine() ?: return null
+        val line = runCatching { reader?.readBoundedLine(MELOX_LAN_MAX_MESSAGE_BYTES) }.getOrNull() ?: return null
         if (line.length > MELOX_LAN_MAX_MESSAGE_BYTES) return null
         return runCatching { JSONObject(line) }.getOrNull()
     }

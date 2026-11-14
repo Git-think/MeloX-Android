@@ -126,12 +126,17 @@ internal fun MeloXSongDetailScreen(song: SearchSong, onBack: () -> Unit) {
         NeteaseMusicOperationsClient(cookieProvider = { NeteaseSessionStore.readCookie(app) })
     }
     var liked by remember(song.id) { mutableStateOf<Boolean?>(null) }
+    // Invalidates pending favorite lookups so a slow initial load cannot
+    // overwrite the state the user just toggled.
+    var favoriteGeneration by remember(song.id) { mutableStateOf(0) }
     var busy by remember(song.id) { mutableStateOf(false) }
     var error by remember(song.id) { mutableStateOf<String?>(null) }
     val unifiedFavoritesEnabled = MeloXUnifiedFavorites.enabled(app)
     val unifiedFavoritesRevision = MeloXUnifiedFavorites.revision
 
     LaunchedEffect(song.id, unifiedFavoritesEnabled, unifiedFavoritesRevision) {
+        val generation = favoriteGeneration + 1
+        favoriteGeneration = generation
         if (unifiedFavoritesEnabled) {
             liked = MeloXUnifiedFavorites.contains(app, MeloXUnifiedFavorites.fromNetease(song))
             return@LaunchedEffect
@@ -144,7 +149,7 @@ internal fun MeloXSongDetailScreen(song: SearchSong, onBack: () -> Unit) {
                 val client = NeteaseLibraryClient(cookieProvider = { NeteaseSessionStore.readCookie(app) })
                 client.likedSongIdsBlocking(userId).contains(song.id)
             }
-        }.onSuccess { liked = it }
+        }.onSuccess { if (generation == favoriteGeneration) liked = it }
     }
 
     MeloXPinnedListPage(
@@ -209,15 +214,23 @@ internal fun MeloXSongDetailScreen(song: SearchSong, onBack: () -> Unit) {
                     onClick = {
                         if (busy) return@MeloXGlassButton
                         busy = true
+                        val target = liked != true
                         if (unifiedFavoritesEnabled) {
+                            // The unified playlist is a local mirror; NetEase still owns the
+                            // source of truth used by the next library refresh.
                             liked = MeloXUnifiedFavorites.toggle(app, MeloXUnifiedFavorites.fromNetease(song))
-                            busy = false
+                            scope.launch {
+                                runCatching { operations.setSongLiked(song.id, target) }
+                                    .onFailure { error = it.message ?: "收藏失败" }
+                                busy = false
+                            }
                             return@MeloXGlassButton
                         }
                         scope.launch {
-                            val target = liked != true
+                            val generation = favoriteGeneration + 1
+                            favoriteGeneration = generation
                             runCatching { operations.setSongLiked(song.id, target) }
-                                .onSuccess { liked = target }
+                                .onSuccess { if (generation == favoriteGeneration) liked = target }
                                 .onFailure { error = it.message ?: "收藏失败" }
                             busy = false
                         }

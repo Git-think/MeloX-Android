@@ -16,6 +16,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +33,7 @@ import com.lladlam.melox.core.autosync.AutoSyncManifest
 import com.lladlam.melox.core.autosync.AutoSyncModelRepository
 import com.lladlam.melox.core.autosync.AutoSyncModelStore
 import com.lladlam.melox.core.network.MeloXGitHubRouting
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -54,31 +56,45 @@ internal fun AutoSyncModelPanel(context: Context) {
     var index by remember { mutableStateOf<AutoSyncModelRepository.Index?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var installed by remember { mutableStateOf(AutoSyncModelStore.installedLanguages(context)) }
+    var installed by remember { mutableStateOf(emptyList<String>()) }
     var busyLanguage by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableFloatStateOf(0f) }
-    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    val downloadJobs = remember { mutableStateListOf<Job>() }
     var confirmLanguage by remember { mutableStateOf<String?>(null) }
+    var deleteLanguage by remember { mutableStateOf<String?>(null) }
     var precisionLanguage by remember { mutableStateOf<String?>(null) }
     var manifests by remember { mutableStateOf(emptyMap<String, AutoSyncManifest>()) }
-    var dictionaryInstalled by remember {
-        mutableStateOf(AutoSyncDictionaryRepository.dictionaryDirectory(context) != null)
-    }
-    var dictionarySize by remember { mutableStateOf(AutoSyncDictionaryRepository.installedBytes(context)) }
+    var dictionaryInstalled by remember { mutableStateOf(false) }
+    var dictionarySize by remember { mutableStateOf(0L) }
     var dictionaryBusy by remember { mutableStateOf(false) }
     var dictionaryConfirming by remember { mutableStateOf(false) }
+    var dictionaryDeleteConfirming by remember { mutableStateOf(false) }
     var dictionaryNotice by remember { mutableStateOf<String?>(null) }
 
-    fun reloadInstalled() {
-        dictionaryInstalled = AutoSyncDictionaryRepository.dictionaryDirectory(context) != null
-        dictionarySize = AutoSyncDictionaryRepository.installedBytes(context)
-        installed = AutoSyncModelStore.installedLanguages(context)
-        manifests = installed.mapNotNull { language ->
-            AutoSyncModelStore.manifest(context, language)?.let { language to it }
-        }.toMap()
+    suspend fun reloadInstalled() {
+        val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val languages = AutoSyncModelStore.installedLanguages(context)
+            Triple(
+                AutoSyncDictionaryRepository.dictionaryDirectory(context) != null,
+                AutoSyncDictionaryRepository.installedBytes(context),
+                languages to languages.mapNotNull { language ->
+                    AutoSyncModelStore.manifest(context, language)?.let { language to it }
+                }.toMap(),
+            )
+        }
+        dictionaryInstalled = snapshot.first
+        dictionarySize = snapshot.second
+        installed = snapshot.third.first
+        manifests = snapshot.third.second
     }
 
-    DisposableEffect(Unit) { onDispose { downloadJob?.cancel() } }
+    DisposableEffect(Unit) { onDispose { downloadJobs.forEach(Job::cancel) } }
+
+    fun launchDownload(block: suspend CoroutineScope.() -> Unit) {
+        downloadJobs.removeAll { it.isCompleted }
+        val job = scope.launch { block() }
+        downloadJobs += job
+    }
 
     fun refresh() {
         loading = true
@@ -128,11 +144,14 @@ internal fun AutoSyncModelPanel(context: Context) {
                         val snapshot = index ?: return@ModelRow
                         busyLanguage = pack.language
                         progress = 0f
-                        downloadJob = scope.launch {
-                            repository.install(pack, snapshot) { fraction -> progress = fraction }
-                                .onSuccess { reloadInstalled() }
-                                .onFailure { error = it.message }
-                            busyLanguage = null
+                        launchDownload {
+                            try {
+                                repository.install(pack, snapshot) { fraction -> progress = fraction }
+                                    .onSuccess { reloadInstalled() }
+                                    .onFailure { error = it.message }
+                            } finally {
+                                busyLanguage = null
+                            }
                         }
                     },
                     onPrecision = { precisionLanguage = pack.language },
@@ -143,11 +162,14 @@ internal fun AutoSyncModelPanel(context: Context) {
                         val variant = pack.optionalModel ?: return@ModelRow
                         busyLanguage = "<prefix>" + pack.language
                         progress = 0f
-                        downloadJob = scope.launch {
-                            repository.install(pack, snapshot, precision = variant) { fraction -> progress = fraction }
-                                .onSuccess { reloadInstalled() }
-                                .onFailure { error = it.message }
-                            busyLanguage = null
+                        launchDownload {
+                            try {
+                                repository.install(pack, snapshot, precision = variant) { fraction -> progress = fraction }
+                                    .onSuccess { reloadInstalled() }
+                                    .onFailure { error = it.message }
+                            } finally {
+                                busyLanguage = null
+                            }
                         }
                     },
                     onPrecisionDelete = {
@@ -155,19 +177,24 @@ internal fun AutoSyncModelPanel(context: Context) {
                         val snapshot = index ?: return@ModelRow
                         busyLanguage = "<prefix>" + pack.language
                         progress = 0f
-                        downloadJob = scope.launch {
-                            repository.install(pack, snapshot) { fraction -> progress = fraction }
-                                .onSuccess { reloadInstalled() }
-                                .onFailure { error = it.message }
-                            busyLanguage = null
+                        launchDownload {
+                            try {
+                                repository.install(pack, snapshot) { fraction -> progress = fraction }
+                                    .onSuccess { reloadInstalled() }
+                                    .onFailure { error = it.message }
+                            } finally {
+                                busyLanguage = null
+                            }
                         }
                     },
                     onDelete = {
-                        confirmLanguage = null
+                        deleteLanguage = null
                         precisionLanguage = null
-                        repository.delete(pack.language)
-                        reloadInstalled()
+                        launchDownload { repository.delete(pack.language) }
                     },
+                    onDeleteRequest = { deleteLanguage = pack.language },
+                    onCancelDelete = { deleteLanguage = null },
+                    deleteConfirming = deleteLanguage == pack.language,
                     dictionaryInstalled = dictionaryInstalled,
                     dictionarySize = dictionarySize,
                     dictionaryBusy = dictionaryBusy,
@@ -180,19 +207,26 @@ internal fun AutoSyncModelPanel(context: Context) {
                         dictionaryBusy = true
                         progress = 0f
                         error = null
-                        downloadJob = scope.launch {
-                            dictionaryRepository.install { fraction -> progress = fraction }
-                                .onSuccess {
-                                    dictionaryNotice = dictionaryRepository.licenseNotice()
-                                    reloadInstalled()
-                                }
-                                .onFailure { error = it.message }
-                            dictionaryBusy = false
+                        launchDownload {
+                            try {
+                                dictionaryRepository.install { fraction -> progress = fraction }
+                                    .onSuccess {
+                                        dictionaryNotice = dictionaryRepository.licenseNotice()
+                                        reloadInstalled()
+                                    }
+                                    .onFailure { error = it.message }
+                            } finally {
+                                dictionaryBusy = false
+                            }
                         }
                     },
                     onDictionaryDelete = {
+                        dictionaryDeleteConfirming = true
+                    },
+                    onDictionaryDeleteConfirm = {
+                        dictionaryDeleteConfirming = false
                         dictionaryBusy = true
-                        downloadJob = scope.launch {
+                        launchDownload {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 dictionaryRepository.delete()
                             }
@@ -201,6 +235,8 @@ internal fun AutoSyncModelPanel(context: Context) {
                             reloadInstalled()
                         }
                     },
+                    onDictionaryDeleteCancel = { dictionaryDeleteConfirming = false },
+                    dictionaryDeleteConfirming = dictionaryDeleteConfirming,
                 )
             }
         }
@@ -236,15 +272,21 @@ private fun ModelRow(
     onPrecisionConfirm: () -> Unit,
     onPrecisionDelete: () -> Unit,
     onDelete: () -> Unit,
+    onDeleteRequest: () -> Unit,
+    onCancelDelete: () -> Unit,
+    deleteConfirming: Boolean,
     dictionaryInstalled: Boolean = false,
     dictionarySize: Long = 0L,
     dictionaryBusy: Boolean = false,
     dictionaryConfirming: Boolean = false,
+    dictionaryDeleteConfirming: Boolean = false,
     dictionaryNotice: String? = null,
     onDictionaryDownload: () -> Unit = {},
     onDictionaryCancel: () -> Unit = {},
     onDictionaryConfirm: () -> Unit = {},
     onDictionaryDelete: () -> Unit = {},
+    onDictionaryDeleteConfirm: () -> Unit = {},
+    onDictionaryDeleteCancel: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(
@@ -290,8 +332,20 @@ private fun ModelRow(
                     fontSize = 13.sp,
                 )
                 manifest != null && updateAvailable -> PanelButton(stringResource(R.string.autosync_model_update), onClick = onDownload)
-                manifest != null -> PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDelete)
+                manifest != null -> PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDeleteRequest)
                 else -> PanelButton(stringResource(R.string.autosync_model_download), onClick = onDownload)
+            }
+        }
+        if (deleteConfirming && !busy) {
+            Text(
+                stringResource(R.string.autosync_model_delete_confirm),
+                modifier = Modifier.padding(top = 6.dp),
+                color = MaterialTheme.colorScheme.error.copy(alpha = .8f),
+                fontSize = 12.sp,
+            )
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                PanelButton(stringResource(R.string.action_cancel), onClick = onCancelDelete)
+                PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDelete)
             }
         }
         if (confirming && !busy) {
@@ -346,6 +400,18 @@ private fun ModelRow(
                 Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     PanelButton(stringResource(R.string.action_cancel), onClick = onDictionaryCancel)
                     PanelButton(stringResource(R.string.autosync_model_download), onClick = onDictionaryConfirm)
+                }
+            }
+            if (dictionaryDeleteConfirming && !dictionaryBusy) {
+                Text(
+                    stringResource(R.string.autosync_dict_delete_confirm),
+                    modifier = Modifier.padding(top = 6.dp),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = .8f),
+                    fontSize = 12.sp,
+                )
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PanelButton(stringResource(R.string.action_cancel), onClick = onDictionaryDeleteCancel)
+                    PanelButton(stringResource(R.string.autosync_model_delete), onClick = onDictionaryDeleteConfirm)
                 }
             }
             dictionaryNotice?.let { notice ->

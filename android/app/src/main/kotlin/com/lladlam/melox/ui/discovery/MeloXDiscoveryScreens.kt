@@ -406,6 +406,42 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
     var localCandidates by rememberRetainedPageState { mutableStateOf(emptyList<MusicTrack>()) }
     val homeCacheKey = "${session.cookie.hashCode()}_${MeloXSettingsRuntime.musicArea}_${MeloXSettingsRuntime.podcastsEnabled}"
 
+    // A request running during recreation was cancelled; the restored skeleton
+    // must not stay "loaded but empty" forever.
+    var restoredSongListRetry by remember { mutableStateOf(false) }
+    LaunchedEffect(songList) {
+        val list = songList ?: return@LaunchedEffect
+        if (restoredSongListRetry || list.loading || list.error != null || list.songs.isNotEmpty()) return@LaunchedEffect
+        restoredSongListRetry = true
+        val action = list.title
+        if (action !in HomeSongListActions) return@LaunchedEffect
+        songList = list.copy(loading = true)
+        scope.launch {
+            val songs = runCatching {
+                when (action) {
+                    "每日推荐" -> client.dailyRecommendedSongs()
+                    "热歌榜" -> client.hotSongs()
+                    "私人雷达" -> {
+                        val uid = session.profile?.userId ?: throw IllegalStateException("请先登录网易云音乐")
+                        val radar = client.snapshot(uid).playlists.firstOrNull { it.name.contains("雷达") }
+                            ?: throw IllegalStateException("当前账号没有可用的私人雷达")
+                        client.playlistDetail(radar.id).songs
+                    }
+                    else -> emptyList()
+                }
+            }.getOrElse { emptyList() }
+            val current = songList ?: return@launch
+            val updated = if (songs.isEmpty()) {
+                current.copy(loading = false)
+            } else {
+                current.copy(loading = false, songs = songs, subtitle = "网易云音乐 · ${songs.size} 首歌曲")
+            }
+            songList = updated
+            overlaySongList = updated
+            if (songs.isNotEmpty()) quickActionCache = quickActionCache + (action to songs)
+        }
+    }
+
     fun refresh(forceServer: Boolean = false) {
         if (refreshing) return
         scope.launch {
@@ -589,17 +625,18 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
                             if (action == "每日推荐") {
                                 val profileUserId = session.profile?.userId
                                 scope.launch(Dispatchers.IO) {
-                                    runCatching {
-                                        DailyHistoryStore.archive(
-                                            context = context,
-                                            accountKey = accountKeyOf(
-                                                NeteaseSessionStore.readCookie(context),
-                                                profileUserId,
-                                            ),
-                                            dateKey = MeloXDailyClock.todayKey(),
-                                            songs = songs,
-                                            userId = profileUserId,
-                                        )
+                                    val archived = DailyHistoryStore.archive(
+                                        context = context,
+                                        accountKey = accountKeyOf(
+                                            NeteaseSessionStore.readCookie(context),
+                                            profileUserId,
+                                        ),
+                                        dateKey = MeloXDailyClock.todayKey(),
+                                        songs = songs,
+                                        userId = profileUserId,
+                                    )
+                                    if (!archived) withContext(Dispatchers.Main) {
+                                        error = "每日推荐归档失败，请检查存储空间"
                                     }
                                 }
                             }
@@ -660,17 +697,18 @@ private fun NeteaseHomeDataScreen(onOpenTool: (String) -> Unit) {
                             if (action == "每日推荐") {
                                 val profileUserId = session.profile?.userId
                                 scope.launch(Dispatchers.IO) {
-                                    runCatching {
-                                        DailyHistoryStore.archive(
-                                            context = context,
-                                            accountKey = accountKeyOf(
-                                                NeteaseSessionStore.readCookie(context),
-                                                profileUserId,
-                                            ),
-                                            dateKey = MeloXDailyClock.todayKey(),
-                                            songs = songs,
-                                            userId = profileUserId,
-                                        )
+                                    val archived = DailyHistoryStore.archive(
+                                        context = context,
+                                        accountKey = accountKeyOf(
+                                            NeteaseSessionStore.readCookie(context),
+                                            profileUserId,
+                                        ),
+                                        dateKey = MeloXDailyClock.todayKey(),
+                                        songs = songs,
+                                        userId = profileUserId,
+                                    )
+                                    if (!archived) withContext(Dispatchers.Main) {
+                                        error = "每日推荐归档失败，请检查存储空间"
                                     }
                                 }
                             }
@@ -801,6 +839,8 @@ private fun encodeHomeSongList(list: HomeSongList?): String? {
             .put("title", list.title)
             .put("subtitle", list.subtitle)
             .put("artworkUrl", list.artworkUrl.orEmpty())
+            .put("loading", list.loading)
+            .put("error", list.error.orEmpty())
             .put("songs", org.json.JSONArray().apply {
                 list.songs.forEach { song ->
                     put(JSONObject()
@@ -827,6 +867,8 @@ private fun decodeHomeSongList(raw: String?): HomeSongList? {
             title = value.optString("title"),
             subtitle = value.optString("subtitle"),
             artworkUrl = value.optString("artworkUrl").takeIf(String::isNotBlank),
+            loading = value.optBoolean("loading", false),
+            error = value.optString("error").takeIf(String::isNotBlank),
             songs = buildList {
                 for (index in 0 until songs.length()) {
                     val song = songs.optJSONObject(index) ?: continue
@@ -1214,6 +1256,7 @@ private fun HomeAccountButton(account: HomeAccountUi) {
 }
 
 private data class HomeQuickAction(
+    val key: String,
     val title: String,
     val eyebrow: String,
     val subtitle: String,
@@ -1225,23 +1268,23 @@ private data class HomeQuickAction(
 private fun HomeQuickActions(source: MusicSource, active: String?, perform: (String) -> Unit) {
     val actions = buildList {
         if (source == MusicSource.Netease) {
-            add(HomeQuickAction("每日推荐", stringResource(R.string.home_eyebrow_daily), stringResource(R.string.home_subtitle_daily), MeloXSymbol.Calendar, listOf(Color(0xFFFF5B8A), Color(0xFFFF3147))))
-            add(HomeQuickAction("热歌榜", stringResource(R.string.home_eyebrow_hot), stringResource(R.string.home_subtitle_hot), MeloXSymbol.Flame, listOf(Color(0xFFFFA14A), Color(0xFFFF5A36))))
-            add(HomeQuickAction("心动模式", stringResource(R.string.home_eyebrow_heart), stringResource(R.string.home_subtitle_heart), MeloXSymbol.HeartPulse, listOf(Color(0xFFFF6EAC), Color(0xFF9B5DE5))))
-            add(HomeQuickAction("私人雷达", stringResource(R.string.home_eyebrow_radar), stringResource(R.string.home_subtitle_radar), MeloXSymbol.RadioWaves, listOf(Color(0xFF6B7BFF), Color(0xFF8C52FF))))
-            add(HomeQuickAction("私人漫游", stringResource(R.string.home_eyebrow_roam), stringResource(R.string.home_subtitle_roam), MeloXSymbol.Walk, listOf(Color(0xFF26C6DA), Color(0xFF4285F4))))
-            add(HomeQuickAction("相似歌曲", stringResource(R.string.home_eyebrow_similar), stringResource(R.string.home_subtitle_similar), MeloXSymbol.List, listOf(Color(0xFF58C9A3), Color(0xFF159D9A))))
+            add(HomeQuickAction("每日推荐", stringResource(R.string.home_action_daily), stringResource(R.string.home_eyebrow_daily), stringResource(R.string.home_subtitle_daily), MeloXSymbol.Calendar, listOf(Color(0xFFFF5B8A), Color(0xFFFF3147))))
+            add(HomeQuickAction("热歌榜", stringResource(R.string.home_action_hot), stringResource(R.string.home_eyebrow_hot), stringResource(R.string.home_subtitle_hot), MeloXSymbol.Flame, listOf(Color(0xFFFFA14A), Color(0xFFFF5A36))))
+            add(HomeQuickAction("心动模式", stringResource(R.string.home_action_heart), stringResource(R.string.home_eyebrow_heart), stringResource(R.string.home_subtitle_heart), MeloXSymbol.HeartPulse, listOf(Color(0xFFFF6EAC), Color(0xFF9B5DE5))))
+            add(HomeQuickAction("私人雷达", stringResource(R.string.home_action_radar), stringResource(R.string.home_eyebrow_radar), stringResource(R.string.home_subtitle_radar), MeloXSymbol.RadioWaves, listOf(Color(0xFF6B7BFF), Color(0xFF8C52FF))))
+            add(HomeQuickAction("私人漫游", stringResource(R.string.home_action_roam), stringResource(R.string.home_eyebrow_roam), stringResource(R.string.home_subtitle_roam), MeloXSymbol.Walk, listOf(Color(0xFF26C6DA), Color(0xFF4285F4))))
+            add(HomeQuickAction("相似歌曲", stringResource(R.string.home_action_similar), stringResource(R.string.home_eyebrow_similar), stringResource(R.string.home_subtitle_similar), MeloXSymbol.List, listOf(Color(0xFF58C9A3), Color(0xFF159D9A))))
         }
-        add(HomeQuickAction("听歌识曲", stringResource(R.string.home_eyebrow_recognize), stringResource(R.string.home_subtitle_recognize), MeloXSymbol.Microphone, listOf(Color(0xFF7B61FF), Color(0xFF36C5F0))))
-        if (source == MusicSource.Netease) add(HomeQuickAction("私信", stringResource(R.string.home_eyebrow_messages), stringResource(R.string.home_subtitle_messages), MeloXSymbol.Mail, listOf(Color(0xFFFF6B8B), Color(0xFFFF3B30))))
+        add(HomeQuickAction("听歌识曲", stringResource(R.string.home_action_recognize), stringResource(R.string.home_eyebrow_recognize), stringResource(R.string.home_subtitle_recognize), MeloXSymbol.Microphone, listOf(Color(0xFF7B61FF), Color(0xFF36C5F0))))
+        if (source == MusicSource.Netease) add(HomeQuickAction("私信", stringResource(R.string.home_action_messages), stringResource(R.string.home_eyebrow_messages), stringResource(R.string.home_subtitle_messages), MeloXSymbol.Mail, listOf(Color(0xFFFF6B8B), Color(0xFFFF3B30))))
         if (source == MusicSource.Netease && MeloXSettingsRuntime.podcastsEnabled && MeloXSettingsRuntime.podcastsHomePlacement) {
-            add(HomeQuickAction("播客", stringResource(R.string.home_eyebrow_podcasts), stringResource(R.string.home_subtitle_podcasts), MeloXSymbol.RadioWaves, listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
+            add(HomeQuickAction("播客", stringResource(R.string.home_action_podcasts), stringResource(R.string.home_eyebrow_podcasts), stringResource(R.string.home_subtitle_podcasts), MeloXSymbol.RadioWaves, listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
         }
         if (MeloXSettingsRuntime.downloadsEnabled && MeloXSettingsRuntime.downloadsHomePlacement) {
-            add(HomeQuickAction("下载", stringResource(R.string.home_eyebrow_downloads), stringResource(R.string.home_subtitle_downloads), MeloXSymbol.Download, listOf(Color(0xFF0EA5E9), Color(0xFF14B8A6))))
+            add(HomeQuickAction("下载", stringResource(R.string.home_action_downloads), stringResource(R.string.home_eyebrow_downloads), stringResource(R.string.home_subtitle_downloads), MeloXSymbol.Download, listOf(Color(0xFF0EA5E9), Color(0xFF14B8A6))))
         }
         if (source == MusicSource.Netease && MeloXSettingsRuntime.cloudMusicEnabled && MeloXSettingsRuntime.cloudHomePlacement) {
-            add(HomeQuickAction("云盘", stringResource(R.string.home_eyebrow_cloud), stringResource(R.string.home_subtitle_cloud), MeloXSymbol.Storage, listOf(Color(0xFF64748B), Color(0xFF6366F1))))
+            add(HomeQuickAction("云盘", stringResource(R.string.home_action_cloud), stringResource(R.string.home_eyebrow_cloud), stringResource(R.string.home_subtitle_cloud), MeloXSymbol.Storage, listOf(Color(0xFF64748B), Color(0xFF6366F1))))
         }
     }
     if (actions.isEmpty()) return
@@ -1281,7 +1324,7 @@ private fun HomeQuickActionCard(
     modifier: Modifier,
 ) {
     Column(
-        modifier = modifier.clickable(enabled = active == null) { perform(action.title) },
+        modifier = modifier.clickable(enabled = active == null) { perform(action.key) },
     ) {
         Text(action.eyebrow.uppercase(), color = MaterialTheme.colorScheme.onBackground.copy(alpha = .55f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(action.title, modifier = Modifier.padding(top = 2.dp), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1302,7 +1345,7 @@ private fun HomeQuickActionCard(
                 iconSize = 48.sp,
             )
             Text(action.title, modifier = Modifier.align(Alignment.BottomStart).padding(14.dp), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            if (active == action.title) {
+            if (active == action.key) {
                 CircularProgressIndicator(Modifier.size(40.dp), color = Color.White, strokeWidth = 3.dp)
             }
         }
@@ -1332,30 +1375,42 @@ private fun NeteaseExploreDataScreen() {
     var category by rememberSaveable { mutableStateOf(visibleCategories.first()) }
     var collections by rememberRetainedPageState(category) { mutableStateOf<List<DiscoveryCollection>>(emptyList()) }
     var refreshing by remember { mutableStateOf(false) }
+    var refreshGeneration by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var selectedCollection by rememberSaveable(stateSaver = DiscoveryCollectionSaver) { mutableStateOf<DiscoveryCollection?>(null) }
     // 见 NeteaseHomeDataScreen：内容保留到退出过渡结束，返回时封面才能 morph 回卡片。
     var overlayCollection by remember { mutableStateOf(selectedCollection) }
 
     fun refresh() {
-        if (category == "播客" || refreshing) return
+        if (category == "播客") return
         val requested = category
+        val generation = ++refreshGeneration
         scope.launch {
             refreshing = true
             runCatching { client.explorePlaylists(requested) }
                 .onSuccess {
-                    if (category == requested) collections = it.map { playlist -> DiscoveryCollection.Netease(playlist) }
+                    // A newer category switch may have started after this request;
+                    // never let the old response overwrite the new category's list.
+                    if (generation == refreshGeneration && category == requested) {
+                        collections = it.map { playlist -> DiscoveryCollection.Netease(playlist) }
+                        error = null
+                    }
                     cache.saveExplore(requested, it)
-                    error = null
                 }
-                .onFailure { error = it.message ?: "发现页加载失败" }
-            refreshing = false
+                .onFailure {
+                    if (generation == refreshGeneration) error = it.message ?: "发现页加载失败"
+                }
+            if (generation == refreshGeneration) refreshing = false
         }
     }
 
     LaunchedEffect(category) {
-        if (category == "播客") return@LaunchedEffect
-        if (collections.isEmpty()) collections = cache.loadExplore(category).orEmpty().map { DiscoveryCollection.Netease(it) }
+        if (category == "播客") {
+            refreshing = false
+            return@LaunchedEffect
+        }
+        error = null
+        collections = cache.loadExplore(category).orEmpty().map { DiscoveryCollection.Netease(it) }
         if (collections.isEmpty() || NeteaseLibraryCache.beginExploreColdStartRefresh(category, cache.cacheDir)) refresh()
     }
 

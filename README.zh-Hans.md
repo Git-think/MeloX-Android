@@ -157,6 +157,7 @@ Root 权限不是应用正常运行的必要条件；平台增强功能应尽量
 - 支持导入 LX Music 兼容的 JavaScript 音乐源，并在受限 QuickJS 运行时中解析播放地址。
 - 可配置 CHKSZ 个人 API Key，在当前音源和内置跨平台回退都失败后解析网易云、QQ音乐和酷狗歌曲；配置前需要前往 `api.chksz.com` 注册，目前仅支持 LinuxDo 用户注册。
 - 播放顺序：当前音源 → 其他内置音源的严格完整音频匹配（仅在开启“不可用资源从其他平台获取”时）→ 已配置的第三方解析源（仅在第三方开关和协议确认开启时）。全部失败时按不可播放处理，不会用试听片段冒充完整歌曲；歌词仍由弥乐自己的歌词路线处理。
+- Bilibili 音源提供实验性「B站定向流量」开关：仅在移动数据下优先选用 B 站官方 CDN 线路，避开 PCDN 与第三方主机；请求身份（Cookie / Referer / User-Agent / WBI 签名）保持不变。是否真正免流由运营商计费策略决定，应用无法查询或保证，详见 [定向流量说明](docs/BILIBILI-DIRECTED-TRAFFIC.md)。
 
 ## 平台范围
 
@@ -296,7 +297,7 @@ apksigner verify --verbose --print-certs MeloX-Android-0.5.3.apk
 
 Android 版直接依赖 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) 的 `backdrop` 组件；`MeloXBackdropComponents.kt` 基于其官方 `LiquidButton` 与 `LiquidBottomTabs` 示例适配，在保留弥乐 iOS 尺寸和布局的前提下提供折射、模糊、按压高光与底栏选中透镜。
 
-SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；正文继续使用 XiaomiLTPro / MiLanPro，不属于 GPLv3 范围；授权说明见 [SF-Pro-NOTICE.md](docs/SF-Pro-NOTICE.md)。
+SF Pro / SF Symbols 为 Apple Inc. 系统字体，仅用于应用图标字形；正文默认全局使用 Android 系统字体，可选的 MiSans 字体按需从 GitHub Release 下载，不打包进 APK；不属于 GPLv3 范围；授权说明见 [SF-Pro-NOTICE.md](docs/SF-Pro-NOTICE.md)。
 
 当前玻璃效果仍属于实验性实现，视觉与兼容性会继续调整。
 

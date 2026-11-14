@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -124,7 +125,9 @@ fun ProviderServicesScreen(
     var jellyfinBusy by remember { mutableStateOf(false) }
     var jellyfinTrustServer by remember { mutableStateOf(false) }
     val localRepository = remember(context) { LocalMusicRepository(context) }
-    var localTrackCount by remember { mutableStateOf(localRepository.tracks().size) }
+    var localTrackCount by remember { mutableStateOf(0) }
+    var localScanRoots by remember { mutableStateOf(emptyList<LocalScanRoot>()) }
+    var localStateRevision by remember { mutableIntStateOf(0) }
     var localScanBusy by remember { mutableStateOf(false) }
     var localScanMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -138,10 +141,18 @@ fun ProviderServicesScreen(
                 .onSuccess { records ->
                     localTrackCount = records.size
                     localScanMessage = context.getString(R.string.provider_scanned_count, records.size)
+                    localStateRevision++
                 }
                 .onFailure { localScanMessage = it.message ?: context.getString(R.string.provider_scan_failed) }
             localScanBusy = false
         }
+    }
+    LaunchedEffect(localStateRevision) {
+        val snapshot = withContext(Dispatchers.IO) {
+            localRepository.tracks().size to localRepository.scanRoots()
+        }
+        localTrackCount = snapshot.first
+        localScanRoots = snapshot.second
     }
     val localPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -366,7 +377,6 @@ fun ProviderServicesScreen(
                 )
                 MeloXIosListRow(
                     title = stringResource(R.string.provider_add_folder),
-                    subtitle = stringResource(R.string.provider_add_folder_subtitle),
                     leading = { MeloXSymbolIcon(MeloXSymbol.Storage, Modifier.size(24.dp), MeloXSystemColors.Red) },
                     onClick = { localTreeLauncher.launch(null) },
                     showTopSeparator = true,
@@ -374,22 +384,24 @@ fun ProviderServicesScreen(
                 localScanMessage?.let { message ->
                     MeloXIosListRow(
                         title = message,
-                        subtitle = stringResource(R.string.provider_local_stays_local),
                         leading = { Spacer(Modifier.width(25.dp)) },
                         onClick = null,
                         showTopSeparator = true,
                     )
                 }
-                localRepository.scanRoots().forEach { root ->
+                localScanRoots.forEach { root ->
                     MeloXIosListRow(
                         title = stringResource(R.string.provider_authorized_folder),
                         subtitle = root.uri,
                         leading = { Spacer(Modifier.width(25.dp)) },
                         detail = stringResource(R.string.provider_remove),
                         onClick = {
-                            localRepository.removeScanRoot(root.uri)
-                            runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(root.uri), root.persistedFlags) }
-                            scanLocalMusic()
+                            scope.launch {
+                                withContext(Dispatchers.IO) { localRepository.removeScanRoot(root.uri) }
+                                runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(root.uri), root.persistedFlags) }
+                                localStateRevision++
+                                scanLocalMusic()
+                            }
                         },
                         showTopSeparator = true,
                     )
@@ -546,7 +558,11 @@ fun ProviderServicesScreen(
                                 MusicSource.Bilibili -> showBilibiliLogin = true
                                 MusicSource.Spotify -> showSpotifyLogin = true
                                 MusicSource.YouTubeMusic -> showYouTubeLogin = true
-                                MusicSource.Jellyfin -> Unit
+                                MusicSource.Jellyfin -> {
+                                    jellyfinError = null
+                                    jellyfinPassword = ""
+                                    showJellyfinDialog = true
+                                }
                                 MusicSource.Local -> Unit
                             }
                         }
@@ -665,16 +681,25 @@ fun ProviderServicesScreen(
                 MeloXGlassButton(onClick = { JellyfinSessionStore.clear(context); showJellyfinDialog = false }, modifier = Modifier.weight(1f), style = MeloXGlassButtonStyle.Plain) { Text(stringResource(R.string.provider_logout)) }
                 MeloXGlassButton(
                     onClick = {
+                        // Only one connection attempt at a time, and the
+                        // credentials are captured here: editing the fields
+                        // while the request runs must not change (or let an
+                        // older response overwrite) the stored session.
+                        if (jellyfinBusy) return@MeloXGlassButton
                         jellyfinBusy = true
+                        val requestUrl = jellyfinServerUrl.trim()
+                        val requestUser = jellyfinUsername.trim()
+                        val requestPassword = jellyfinPassword
+                        val requestTrust = jellyfinTrustServer
                         scope.launch {
                             runCatching {
-                                require(jellyfinServerUrl.trim().startsWith("http://") || jellyfinServerUrl.trim().startsWith("https://")) { context.getString(R.string.provider_invalid_server) }
-                                require(jellyfinUsername.isNotBlank()) { context.getString(R.string.provider_username_required) }
+                                require(requestUrl.startsWith("http://") || requestUrl.startsWith("https://")) { context.getString(R.string.provider_invalid_server) }
+                                require(requestUser.isNotBlank()) { context.getString(R.string.provider_username_required) }
                                 withContext(Dispatchers.IO) {
                                     JellyfinApiClient(
                                         com.lladlam.melox.core.network.MeloXHttpClient.shared,
-                                        trustUserServer = jellyfinTrustServer,
-                                    ).authenticate(jellyfinServerUrl.trim(), jellyfinUsername.trim(), jellyfinPassword)
+                                        trustUserServer = requestTrust,
+                                    ).authenticate(requestUrl, requestUser, requestPassword)
                                         .also { JellyfinSessionStore.write(context, it) }
                                 }
                             }.onSuccess { jellyfinPassword = ""; jellyfinBusy = false; loginRevision++; showJellyfinDialog = false }

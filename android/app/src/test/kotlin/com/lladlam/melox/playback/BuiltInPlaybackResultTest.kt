@@ -5,7 +5,10 @@ import com.lladlam.melox.core.audio.NeteasePlaybackUnavailableException
 import com.lladlam.melox.core.music.model.PlaybackResolution
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -31,6 +34,15 @@ class BuiltInPlaybackResultTest {
             val result = runCatching { runBlocking { builtInPlaybackResult { throw error } } }
             assertSame(error, result.exceptionOrNull())
         }
+    }
+
+    @Test fun providerTimeoutIsNotMisclassifiedAsNoSource() {
+        val result = runCatching {
+            runBlocking {
+                builtInPlaybackResult { withTimeout(50L) { awaitCancellation() } }
+            }
+        }
+        assertTrue(result.exceptionOrNull() is TimeoutCancellationException)
     }
 
     @Test fun disablingThirdPartyConsentPreservesUpstreamExceptionBehaviour() {

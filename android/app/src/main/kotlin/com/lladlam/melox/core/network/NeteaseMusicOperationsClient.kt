@@ -1,5 +1,6 @@
 package com.lladlam.melox.core.network
 
+import android.util.Log
 import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.library.NeteasePlaylistSummary
 import java.io.IOException
@@ -99,6 +100,17 @@ internal suspend fun <T> retryNeteaseFavorite(
     return operation()
 }
 
+/**
+ * Payload for the EAPI `song/like` endpoint. `trackId`/`like` are strings and
+ * `time=3` is required by the current mobile endpoint; sending a numeric id or
+ * a JSON boolean can return code=200 without persisting the favorite.
+ */
+internal fun neteaseSongLikePayload(songId: Long, liked: Boolean): JSONObject = JSONObject()
+    .put("trackId", songId.toString())
+    .put("like", if (liked) "true" else "false")
+    .put("time", "3")
+    .put("checkToken", "")
+
 internal fun neteasePlaylistCreateSpec(name: String, privatePlaylist: Boolean): NeteasePlaylistCreateSpec {
     val normalizedName = name.trim()
     require(normalizedName.isNotBlank()) { "歌单名称不能为空" }
@@ -130,10 +142,6 @@ class NeteaseMusicOperationsClient(
     private val syntheticDeviceId = randomHex(26).uppercase()
     private val authenticatedWeapi = NeteaseAuthenticatedWeapi(cookieProvider, httpClient)
 
-    /** [setSongLiked] 需要的 uid 缓存（键为 cookie；换账号/过期后自动重查）。 */
-    private var cachedUserId = 0L
-    private var cachedUserIdCookie = ""
-
     /**
      * 收藏 / 取消收藏单曲（写进「我喜欢的音乐」）。
      *
@@ -145,41 +153,26 @@ class NeteaseMusicOperationsClient(
      *     ② 列表数据来自 `/api/song/like/get`（读的是**歌单**），服务端根本没这条记录；
      *     ③ 任何一次刷新/N 分钟后的冷启动（`FRESH_WINDOW_MS = 30min`）就用服务端真值
      *        覆盖本地 ⇒ 歌"被移除"，且每次刷新都少一点、越来越多。
-     *   ⇒ 正路是 `/api/song/like`：eapi，参数 `trackId` + `userid` + `like`（布尔），
-     *     与官方客户端「收藏单曲」完全同一个接口。
+     *   ⇒ 正路是 `/api/song/like`：eapi，参数 `trackId`（字符串）+ `like`
+     *     （字符串 true/false）+ `time=3`，与官方移动端「收藏单曲」同一个接口。
+     *     注意：`trackId` 传数字、`like` 传 JSON 布尔值时，服务端可能返回 200
+     *     却不真正落库（2026-11-10 用户报障「点红心后歌曲过一会消失」）。
      */
     suspend fun setSongLiked(songId: Long, liked: Boolean) = withContext(Dispatchers.IO) {
         if (songId <= 0L) return@withContext
         ensureLoggedIn()
-        retryNeteaseFavorite {
+        val response = retryNeteaseFavorite {
             eapi(
                 "/api/song/like",
-                JSONObject()
-                    .put("trackId", songId)
-                    .put("userid", resolveUserId())
-                    .put("like", liked),
+                neteaseSongLikePayload(songId, liked),
                 true,
             )
         }
+        Log.i(
+            "NeteaseOps",
+            "song/like id=$songId liked=$liked playlistId=${response.optLong("playlistId", -1L)}",
+        )
         Unit
-    }
-
-    /**
-     * 当前登录 uid。
-     *
-     * `/api/song/like` 的 `userid` 虽然服务端多半能从 MUSIC_U 推出来，但缺它时写库行为
-     * 不稳定（有时返回 200 却不落库）⇒ 显式带上。只在每个 client 实例的首次写入时
-     * 花一次 `accountProfile()`，之后按 cookie 命中缓存。
-     */
-    private suspend fun resolveUserId(): Long {
-        val cookie = cookieProvider()
-        if (cachedUserId > 0L && cachedUserIdCookie == cookie) return cachedUserId
-        val userId = NeteaseSearchClient(httpClient = httpClient, cookieProvider = cookieProvider)
-            .accountProfile(cookie)
-            .userId
-        cachedUserId = userId
-        cachedUserIdCookie = cookie
-        return userId
     }
 
     suspend fun addSongToPlaylist(songId: Long, playlistId: Long) = withContext(Dispatchers.IO) {
@@ -760,6 +753,11 @@ private fun collectWikiUiText(ui: JSONObject?, lines: MutableList<String>) {
         val b=Request.Builder().url("https://interface.music.163.com${uri.replace("/api/","/eapi/")}")
             .header("Accept","*/*").header("User-Agent",if(authenticated) "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)" else "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148")
         if(authenticated)b.header("Cookie",encodedCookie(header))
+        // Creating / deleting / updating resources is not idempotent: a retry
+        // would create a second playlist (or delete twice).
+        if (isNonIdempotentNeteaseApi(uri)) {
+            b.header(RetryInterceptor.NO_RETRY_HEADER, "true")
+        }
         val req=b.post(FormBody.Builder().add("params",params).build()).build()
         httpClient.newCall(req).execute().use { response ->
             val body=response.body.string(); if(!response.isSuccessful)throw NeteaseRequestException(response.code, "网易云请求失败：HTTP ${response.code}")
@@ -776,4 +774,25 @@ private fun collectWikiUiText(ui: JSONObject?, lines: MutableList<String>) {
     private fun md5Hex(v:String)=MessageDigest.getInstance("MD5").digest(v.toByteArray()).joinToString(""){"%02x".format(it)}
     private fun aes(d:ByteArray,k:ByteArray)=Cipher.getInstance("AES/ECB/PKCS5Padding").run{init(Cipher.ENCRYPT_MODE,SecretKeySpec(k,"AES"));doFinal(d)}
     private fun ByteArray.toHex()=joinToString(""){"%02X".format(it)}
+}
+
+
+/**
+ * NetEase endpoints that mutate server state. A replayed request would create
+ * a second playlist, delete twice, ...
+ */
+private val NON_IDEMPOTENT_API_MARKERS = listOf(
+    "/create", "/delete", "/del", "/remove", "/add", "/update", "/subscribe",
+    "/like", "/comment", "/upload", "/pub/", "/tracks", "/end/",
+    "/send", "/accept", "/command/report", "/captcha/sent", "/login",
+)
+
+/** Read/query endpoints are safe to retry even when their path mentions a resource. */
+private val READ_ONLY_NETEASE_API_SUFFIXES = listOf("/get", "/check", "/list", "/detail", "/query", "/status")
+
+internal fun isNonIdempotentNeteaseApi(uri: String): Boolean {
+    val path = uri.substringBefore('?').trimEnd('/')
+    if (READ_ONLY_NETEASE_API_SUFFIXES.any(path::endsWith)) return false
+    if (path.contains("/comments/") || path.contains("/comments?")) return false
+    return NON_IDEMPOTENT_API_MARKERS.any(path::contains)
 }

@@ -29,7 +29,12 @@ class SpotifyLibrespotPlayback(
     private val credentialsDir: File = File(context.filesDir, "librespot").apply { mkdirs() }
     private val credentialsFile = File(credentialsDir, "credentials.json")
     private val playbackCacheDir = File(credentialsDir, "tracks").apply { mkdirs() }
+    /** Which account the stored librespot credentials belong to. */
+    private val accountMarkerFile = File(credentialsDir, "account.id")
     @Volatile private var session: Session? = null
+    @Volatile private var sessionAccountId: String? = null
+    private val connectionLock = Any()
+    private val trackLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
     val isConnected: Boolean get() = session != null
 
@@ -37,9 +42,22 @@ class SpotifyLibrespotPlayback(
      * Connect to Spotify's Access Point. Uses stored credentials first, falling
      * back to the OAuth access token for first login. Returns the session.
      */
-    suspend fun connect(accessToken: String): Session = withContext(Dispatchers.IO) {
+    suspend fun connect(accessToken: String, accountId: String = ""): Session = withContext(Dispatchers.IO) {
+        synchronized(connectionLock) {
         val existing = session
-        if (existing != null) return@withContext existing
+        if (existing != null) {
+            val current = sessionAccountId.orEmpty()
+            if (accountId.isNotBlank() && current == accountId) return@withContext existing
+            // The account changed (or was logged out): the old session must not
+            // be reused, otherwise the previous account keeps playing.
+            invalidate()
+        }
+        // Stored credentials belong to an account and may only be reused for it.
+        val storedAccount = runCatching { accountMarkerFile.readText() }.getOrNull().orEmpty()
+        val useStored = credentialsFile.exists() && storedAccount.isNotBlank() && storedAccount == accountId
+        if (!useStored) {
+            runCatching { credentialsFile.delete() }
+        }
         val config = Session.Configuration.Builder()
             .setCacheEnabled(true)
             .setCacheDir(credentialsDir)
@@ -50,7 +68,7 @@ class SpotifyLibrespotPlayback(
             .setDeviceType(Connect.DeviceType.SMARTPHONE)
             .setDeviceName("MeloX")
             .setDeviceId(deviceId)
-        if (credentialsFile.exists()) {
+        if (useStored) {
             builder.stored(credentialsFile)
         } else if (accessToken.isNotBlank()) {
             builder.credentials(
@@ -64,14 +82,37 @@ class SpotifyLibrespotPlayback(
         }
         val created = builder.create()
         session = created
+        sessionAccountId = accountId
+        if (accountId.isNotBlank()) runCatching { accountMarkerFile.writeText(accountId) }
         created
+        }
     }
 
     /** Disconnect and clear the in-memory session. */
     fun disconnect() {
-        val existing = session ?: return
-        session = null
-        runCatching { existing.close() }
+        synchronized(connectionLock) {
+            val existing = session ?: return
+            session = null
+            sessionAccountId = null
+            runCatching { existing.close() }
+        }
+    }
+
+    /**
+     * Fully invalidate the playback identity: close the session and delete the
+     * stored credentials plus the account scoped audio cache. Used on logout
+     * and when the Spotify account changes.
+     */
+    fun invalidate() {
+        synchronized(connectionLock) {
+            val existing = session
+            session = null
+            sessionAccountId = null
+            runCatching { existing?.close() }
+            runCatching { credentialsFile.delete() }
+            runCatching { accountMarkerFile.delete() }
+            runCatching { playbackCacheDir.listFiles()?.forEach { it.delete() } }
+        }
     }
 
     /**
@@ -84,16 +125,30 @@ class SpotifyLibrespotPlayback(
             val playableId = TrackId.fromUri("spotify:track:$trackId")
             val destination = File(playbackCacheDir, "$trackId.audio")
             if (destination.isFile && destination.length() > 0L) return@runCatching destination
-            val loaded = s.contentFeeder().load(
-                playableId,
-                AudioQualityPicker { files -> files.firstOrNull() },
-                false,
-                null,
-            )
-            destination.outputStream().use { output ->
-                loaded.`in`.stream().use { input -> input.copyTo(output) }
+            val trackLock = trackLocks.getOrPut(trackId) { Any() }
+            synchronized(trackLock) {
+                // Another resolver may have completed this exact track meanwhile.
+                if (destination.isFile && destination.length() > 0L) return@synchronized destination
+                val loaded = s.contentFeeder().load(
+                    playableId,
+                    AudioQualityPicker { files -> files.firstOrNull() },
+                    false,
+                    null,
+                )
+                val temporary = File.createTempFile("$trackId.", ".part", playbackCacheDir)
+                try {
+                    temporary.outputStream().use { output ->
+                        loaded.`in`.stream().use { input -> input.copyTo(output) }
+                    }
+                    if (!temporary.renameTo(destination)) {
+                        throw IOException("cannot publish Spotify audio cache")
+                    }
+                } finally {
+                    temporary.delete()
+                    trackLocks.remove(trackId, trackLock)
+                }
+                destination
             }
-            destination
         }
     }
 

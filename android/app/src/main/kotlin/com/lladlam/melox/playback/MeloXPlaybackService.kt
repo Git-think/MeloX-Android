@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
@@ -142,6 +141,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     private var systemLyricsLastIndex = Int.MIN_VALUE
     private var systemLyricsLastDispatchRealtimeMs = 0L
     private var systemLyricsLastPlaying = false
+    private val lyricsNotificationArtwork = LyricsNotificationArtwork()
 
     private var notificationLeftAction = MeloXNotificationAction.PlayMode
     private var notificationRightAction = MeloXNotificationAction.Favorite
@@ -190,6 +190,15 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     private var backgroundAnalysisJob: Job? = null
     private var backgroundAnalysisScheduledId: String? = null
     private var smartQueueJob: Job? = null
+    private var prefetchJob: Job? = null
+    private var notificationArtworkRevision = 0
+    private val notificationArtworkRefresh = Runnable {
+        if (notificationArtworkRevision <= 0) return@Runnable
+        lyricsNotificationSource?.let { (line, next, metadata) ->
+            postLyricsNotification(line, next, metadata)
+        }
+    }
+    @Volatile private var lyricsNotificationSource: Triple<String, String, MediaMetadata>? = null
     private var smartQueueJobGeneration = 0L
     private var smartQueueSourceId: String? = null
     private var smartQueueGeneration = -1L
@@ -518,11 +527,14 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     private fun prefetchFollowing(active: ExoPlayer) {
         val current = active.currentMediaItemIndex
         if (current !in 0 until active.mediaItemCount) return
+        // A new track invalidates the previous prefetch; otherwise every skip
+        // leaves an unpausable CacheWriter running in parallel.
+        prefetchJob?.cancel()
         // Cache the active item as well as the next three. The active item is
         // needed by Smart analysis when it examines the outgoing tail later.
         val following = (current until minOf(current + PREFETCH_TRACK_COUNT + 1, active.mediaItemCount))
             .map(active::getMediaItemAt)
-        serviceScope.launch(Dispatchers.IO) {
+        prefetchJob = serviceScope.launch(Dispatchers.IO) {
             following.forEach { item ->
                 runCatching { mediaPrefetcher.cache(item) }
                     .onSuccess { Log.i(TAG, "Playback cache ready: ${item.mediaId}") }
@@ -1282,8 +1294,22 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     }
 
     override fun currentTrack(): MeloXLanTrack? {
-        val active = player ?: return null
-        val item = active.currentMediaItem ?: return null
+        // LAN transfer calls this from IO; ExoPlayer is confined to this service's
+        // main looper, so read the immutable media snapshot there.
+        val player = player ?: return null
+        val snapshot = if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            runCatching { player.currentMediaItem to player.duration }.getOrNull()
+        } else {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var value: Pair<androidx.media3.common.MediaItem?, Long>? = null
+            handler.post {
+                value = runCatching { player.currentMediaItem to player.duration }.getOrNull()
+                latch.countDown()
+            }
+            if (!latch.await(2, java.util.concurrent.TimeUnit.SECONDS)) return null
+            value
+        } ?: return null
+        val item = snapshot.first ?: return null
         val metadata = item.mediaMetadata
         return com.lladlam.melox.lan.meloXLanTrackFromMediaItem(
             mediaId = item.mediaId,
@@ -1291,7 +1317,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             artist = metadata.artist?.toString().orEmpty(),
             album = metadata.albumTitle?.toString().orEmpty(),
             artworkUrl = metadata.artworkUri?.toString(),
-            durationMs = active.duration.takeIf { it > 0L && it != C.TIME_UNSET }
+            durationMs = snapshot.second.takeIf { it > 0L && it != C.TIME_UNSET }
                 ?: metadata.extras?.getLong(PlaybackTrackIdentity.DurationMsExtra, 0L)
                 ?: 0L,
         )
@@ -1613,7 +1639,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
                     emptyList()
                 }
                 val existing = (0 until active.mediaItemCount).map { active.getMediaItemAt(it).mediaId }.toSet()
-                val quality = MusicQualityPreferences.read(this@MeloXPlaybackService)
+                val quality = com.lladlam.melox.core.audio.MeloXNetworkQualityPolicy.effectiveQuality(this@MeloXPlaybackService)
                 val additions = recommendations
                     .filterNot { it.id.toString() in existing }
                     .take(20)
@@ -2011,6 +2037,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             ?: (mediaId.hashCode().toLong() and 0xffffffffL)
 
     private fun resetSystemLyrics(item: MediaItem?) {
+        lyricsNotificationArtwork.clear()
         VivoAtomicIslandBridge.clear(this)
         colorOsLyricsPublisher?.setLyrics(null, null)
         superLyricPublisher?.stop()
@@ -2071,6 +2098,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
     }
 
     private fun postLyricsNotification(line: String, nextLine: String, metadata: MediaMetadata) {
+        lyricsNotificationSource = Triple(line, nextLine, metadata)
         val intent = Intent(this, MainActivity::class.java).apply {
             action = MainActivity.ACTION_OPEN_NOW_PLAYING
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -2098,9 +2126,17 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             .setOngoing(player?.isPlaying == true)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
         if (MeloXSettingsRuntime.lyricNotificationShowArtwork) {
-            metadata.artworkData?.let { bytes ->
-                runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()?.let(builder::setLargeIcon)
+            lyricsNotificationArtwork.current()?.let(builder::setLargeIcon)
+            val bytes = metadata.artworkData
+            if (bytes != null && !lyricsNotificationArtwork.isCurrent(bytes)) {
+                lyricsNotificationArtwork.enqueue(bytes) { bitmap ->
+                    notificationArtworkRevision++
+                    handler.removeCallbacks(notificationArtworkRefresh)
+                    handler.postDelayed(notificationArtworkRefresh, 120L)
+                }
             }
+        } else {
+            lyricsNotificationArtwork.clear()
         }
         if (MeloXSettingsRuntime.lyricNotificationShowProgress) {
             val duration = player?.duration?.takeIf { it != C.TIME_UNSET && it > 0L } ?: 0L
@@ -2525,6 +2561,10 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
 
     override fun onDestroy() {
         com.lladlam.melox.usb.MeloXUsbAudioSession.release()
+        // Remote sinks outlive a cancelled service scope; release them before
+        // the local player disappears so their polling cannot target a dead session.
+        runCatching { com.lladlam.melox.miplay.MiPlaySession.disconnect() }
+        serviceScope.launch { runCatching { com.lladlam.melox.dlna.DlnaSession.disconnect(resumeLocal = false) } }
         MeloXLanRuntime.detach(this)
         handler.removeCallbacks(lanStateRunnable)
         lanCastReceiver?.stop()
@@ -2541,6 +2581,7 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
         playlistAnalysisJob?.cancel()
         backgroundAnalysisJob?.cancel()
         smartQueueJob?.cancel()
+        prefetchJob?.cancel()
         systemLyricsJob?.cancel()
         VivoAtomicIslandBridge.clear(this)
         getSystemService(NotificationManager::class.java).cancel(LYRICS_NOTIFICATION_ID)
@@ -2834,18 +2875,22 @@ class MeloXPlaybackService : MediaSessionService(), MeloXLanHost {
             val songId = item.mediaId.toLongOrNull()?.takeIf { it > 0L }
                 ?: return outcome("unresolvable identity")
             val cookie = { NeteaseSessionStore.readCookie(this) }
-            val session = NeteaseSessionStore(this)
-            if (session.profile == null) session.refreshProfile()
-            val userId = session.profile?.userId
-            val currentlyFavorite = userId != null && runCatching {
-                NeteaseLibraryClient(cookieProvider = cookie)
-                    .likedSongIdsBlocking(userId)
-                    .contains(songId)
-            }.getOrDefault(false)
-            val targetFavorite = !currentlyFavorite
+            val targetFavorite = withContext(Dispatchers.IO) {
+                val session = NeteaseSessionStore(this@MeloXPlaybackService)
+                if (session.profile == null) session.refreshProfile()
+                val userId = session.profile?.userId
+                val currentlyFavorite = userId != null && runCatching {
+                    NeteaseLibraryClient(cookieProvider = cookie)
+                        .likedSongIdsBlocking(userId)
+                        .contains(songId)
+                }.getOrDefault(false)
+                !currentlyFavorite
+            }
             runCatching {
-                NeteaseMusicOperationsClient(cookieProvider = cookie)
-                    .setSongLiked(songId, targetFavorite)
+                withContext(Dispatchers.IO) {
+                    NeteaseMusicOperationsClient(cookieProvider = cookie)
+                        .setSongLiked(songId, targetFavorite)
+                }
             }.onSuccess {
                 Log.i(TAG, "System favorite toggled for NetEase song $songId -> $targetFavorite")
                 outcome("favorited=$targetFavorite")

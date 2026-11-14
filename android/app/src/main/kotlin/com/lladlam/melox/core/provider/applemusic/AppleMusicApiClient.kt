@@ -99,11 +99,12 @@ class AppleMusicApiClient(
         }
 
     override suspend fun lyrics(track: MusicTrack): LyricsDocument = withContext(Dispatchers.IO) {
+        require(track.id.source == MusicSource.AppleMusic) { "只能读取 Apple Music 曲目的歌词" }
         val root = getJson(
             path = "v1/catalog/${sessionProvider().storefront}/songs/${track.id.value}",
             query = mapOf("include" to "lyrics"),
         )
-        val lyrics = root.optJSONObject("relationships")
+        val lyrics = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("relationships")
             ?.optJSONObject("lyrics")
             ?.optJSONArray("data")
             ?.optJSONObject(0)
@@ -179,9 +180,17 @@ class AppleMusicApiClient(
         page: Int,
         pageSize: Int,
     ): MusicPlaylistDetail = withContext(Dispatchers.IO) {
+        require(playlist.id.source == MusicSource.AppleMusic) { "只能读取 Apple Music 歌单" }
+        // userPlaylists() returns library IDs; those playlists are not catalog resources.
+        val libraryPlaylist = playlist.creatorName.isNullOrBlank()
         val root = getJson(
-            path = "v1/catalog/${sessionProvider().storefront}/playlists/${playlist.id.value}",
+            path = if (libraryPlaylist) {
+                "v1/me/library/playlists/${playlist.id.value}"
+            } else {
+                "v1/catalog/${sessionProvider().storefront}/playlists/${playlist.id.value}"
+            },
             query = mapOf("include" to "tracks"),
+            userRequired = libraryPlaylist,
         )
         val summary = root.optJSONArray("data")?.optJSONObject(0)?.let(::parsePlaylist) ?: playlist
         val tracks = root.relationshipData("tracks").mapNotNull(::parseTrack)
@@ -193,6 +202,7 @@ class AppleMusicApiClient(
         page: Int,
         pageSize: Int,
     ): MusicAlbumDetail = withContext(Dispatchers.IO) {
+        require(album.id.source == MusicSource.AppleMusic) { "只能读取 Apple Music 专辑" }
         val root = getJson(
             path = "v1/catalog/${sessionProvider().storefront}/albums/${album.id.value}",
             query = mapOf("include" to "tracks"),
@@ -207,6 +217,7 @@ class AppleMusicApiClient(
         page: Int,
         pageSize: Int,
     ): MusicArtistDetail = withContext(Dispatchers.IO) {
+        require(artist.id.source == MusicSource.AppleMusic) { "只能读取 Apple Music 歌手" }
         val root = getJson(
             path = "v1/catalog/${sessionProvider().storefront}/artists/${artist.id.value}",
             query = mapOf("include" to "albums"),
