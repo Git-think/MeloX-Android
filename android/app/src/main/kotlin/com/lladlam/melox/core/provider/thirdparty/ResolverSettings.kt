@@ -38,7 +38,7 @@ internal fun validResolverEndpoint(value: String): Boolean = value.trim().toHttp
     it.username.isEmpty() && it.password.isEmpty() && it.fragment == null
 } == true
 
-/** Read the old preference names so rebuilding the fork does not erase user settings. */
+/** Read legacy preference names so existing CHKSZ keys and settings are preserved. */
 internal object ResolverSettingsStore {
     fun read(context: Context, kind: ResolverKind): ResolverSettings {
         val prefs = context.applicationContext.getSharedPreferences(kind.preferencesName, Context.MODE_PRIVATE)

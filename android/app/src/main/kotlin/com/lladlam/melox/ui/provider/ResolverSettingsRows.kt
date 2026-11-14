@@ -45,7 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Fork-only settings; upstream's official account/source controls are unchanged. */
+/** User-configured fallback settings; official account/source controls are unchanged. */
 @Composable
 internal fun ResolverSettingsRows() {
     val context = LocalContext.current
@@ -55,7 +55,7 @@ internal fun ResolverSettingsRows() {
         val settings = remember(kind, revision) { ResolverSettingsStore.read(context, kind) }
         MeloXIosListRow(
             title = kind.label,
-            subtitle = stringResource(if (settings.configured) R.string.fork_resolver_configured else R.string.fork_resolver_unconfigured),
+            subtitle = stringResource(if (settings.configured) R.string.provider_resolver_configured else R.string.provider_resolver_unconfigured),
             onClick = { editing = kind },
         )
     }
@@ -87,18 +87,18 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
             Text(kind.label, style = MaterialTheme.typography.titleLarge)
             Text(
                 stringResource(when (kind) {
-                    ResolverKind.Meting -> R.string.fork_resolver_meting_help
-                    ResolverKind.Chksz -> R.string.fork_resolver_chksz_help
-                    ResolverKind.Unm -> R.string.fork_resolver_unm_help
+                    ResolverKind.Meting -> R.string.provider_resolver_meting_help
+                    ResolverKind.Chksz -> R.string.provider_resolver_chksz_help
+                    ResolverKind.Unm -> R.string.provider_resolver_unm_help
                 }),
                 Modifier.padding(top = 10.dp),
             )
-            Text(stringResource(R.string.fork_resolver_order), Modifier.padding(top = 8.dp))
+            Text(stringResource(R.string.provider_resolver_order), Modifier.padding(top = 8.dp))
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(stringResource(R.string.fork_resolver_enabled))
+                Text(stringResource(R.string.provider_resolver_enabled))
                 MeloXGlassToggle(checked = enabled, onCheckedChange = { if (!busy) enabled = it })
             }
-            Text(stringResource(R.string.fork_resolver_endpoint), Modifier.padding(top = 12.dp))
+            Text(stringResource(R.string.provider_resolver_endpoint), Modifier.padding(top = 12.dp))
             MeloXGlassTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), enabled = !busy,
                 placeholder = { Text(if (kind == ResolverKind.Meting) "https://example.com/api.php" else "https://example.com") })
             if (kind != ResolverKind.Unm) {
@@ -109,18 +109,18 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                     visualTransformation = PasswordVisualTransformation(),
                 )
             } else {
-                Text(stringResource(R.string.fork_resolver_servers), Modifier.padding(top = 12.dp))
+                Text(stringResource(R.string.provider_resolver_servers), Modifier.padding(top = 12.dp))
                 MeloXGlassTextField(servers, { servers = it }, Modifier.fillMaxWidth(), enabled = !busy)
             }
-            Text(stringResource(R.string.fork_resolver_test_help, ResolverTestSongId.toString()), Modifier.padding(top = 14.dp))
+            Text(stringResource(R.string.provider_resolver_test_help, ResolverTestSongId.toString()), Modifier.padding(top = 14.dp))
             MeloXGlassTextField(songId, { songId = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), enabled = !busy,
-                placeholder = { Text(stringResource(R.string.fork_resolver_song_id)) })
+                placeholder = { Text(stringResource(R.string.provider_resolver_song_id)) })
             MeloXGlassButton(
                 onClick = {
                     val id = songId.toLongOrNull()
                     if (!validResolverEndpoint(endpoint) || id == null || id <= 0 ||
                         (kind == ResolverKind.Chksz && credential.isBlank())) {
-                        status = context.getString(R.string.fork_resolver_invalid)
+                        status = context.getString(R.string.provider_resolver_invalid)
                         responseDetails = null
                     } else {
                         busy = true
@@ -134,15 +134,15 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                                     providerMetadata = ProviderTrackMetadata.Netease(id),
                                 ), AudioQualityTier.High)
                             }
-                            status = context.getString(if (result.url == null) R.string.fork_resolver_test_failed else R.string.fork_resolver_test_ok)
+                            status = context.getString(if (result.url == null) R.string.provider_resolver_test_failed else R.string.provider_resolver_test_ok)
                             responseDetails = if (result.url == null) {
                                 val body = result.requestError ?: when {
-                                    result.responseBody == null -> context.getString(R.string.fork_resolver_response_non_text, result.contentType.orEmpty())
-                                    result.responseBody.isBlank() -> context.getString(R.string.fork_resolver_response_empty)
+                                    result.responseBody == null -> context.getString(R.string.provider_resolver_response_non_text, result.contentType.orEmpty())
+                                    result.responseBody.isBlank() -> context.getString(R.string.provider_resolver_response_empty)
                                     else -> result.responseBody
                                 }
                                 listOfNotNull(result.httpStatus?.let { "HTTP $it${result.contentType?.let { mime -> " · $mime" }.orEmpty()}" },
-                                    body, context.getString(R.string.fork_resolver_response_truncated).takeIf { result.responseTruncated })
+                                    body, context.getString(R.string.provider_resolver_response_truncated).takeIf { result.responseTruncated })
                                     .joinToString("\n")
                             } else null
                             busy = false
@@ -151,10 +151,10 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                 },
                 enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 style = MeloXGlassButtonStyle.Plain,
-            ) { Text(stringResource(if (busy) R.string.fork_resolver_testing else R.string.fork_resolver_test)) }
+            ) { Text(stringResource(if (busy) R.string.provider_resolver_testing else R.string.provider_resolver_test)) }
             status?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary) }
             responseDetails?.let { details ->
-                Text(stringResource(R.string.fork_resolver_response_title), Modifier.padding(top = 8.dp))
+                Text(stringResource(R.string.provider_resolver_response_title), Modifier.padding(top = 8.dp))
                 SelectionContainer(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
                     Text(details, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
                 }
@@ -166,7 +166,7 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                     val settings = draft()
                     if ((settings.endpoint.isNotBlank() && !validResolverEndpoint(settings.endpoint)) ||
                         (enabled && !settings.configured)) {
-                        status = context.getString(R.string.fork_resolver_invalid)
+                        status = context.getString(R.string.provider_resolver_invalid)
                     } else {
                         ResolverSettingsStore.write(context, settings)
                         onSaved()

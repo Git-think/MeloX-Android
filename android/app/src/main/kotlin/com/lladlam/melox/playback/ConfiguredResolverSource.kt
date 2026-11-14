@@ -22,11 +22,11 @@ internal class ConfiguredResolverSource(context: Context, private val kind: Reso
     override fun cacheIdentity(): String = ResolverSettingsStore.read(app, kind).cacheIdentity()
 }
 
-/** Fork URL-cache policy stays outside the upstream-owned result model. */
+/** Bounded API URL-cache policy stays separate from LX quality metadata. */
 internal fun ThirdPartyTrack.configuredResolverExpiry(nowMs: Long = System.currentTimeMillis()): Long? =
     if (ResolverKind.entries.any { it.label == sourceLabel }) nowMs + ResolverUrlTtlMs else null
 
-/** Keep upstream's LX result mapping unchanged, including newly added quality fields. */
+/** Keep LX result mapping unchanged, including its reported quality fields. */
 internal fun withInstalledLxGuard(source: ThirdPartySource): ThirdPartySource = object : ThirdPartySource {
     override fun resolve(track: MusicTrack, quality: AudioQualityTier): ThirdPartyTrack? =
         if (source.cacheIdentity() == "lx:") null else source.resolve(track, quality)

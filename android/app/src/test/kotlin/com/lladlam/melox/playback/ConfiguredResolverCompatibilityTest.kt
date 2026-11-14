@@ -10,7 +10,7 @@ import org.junit.Test
 class ConfiguredResolverCompatibilityTest {
     private val track = MusicTrack(MusicResourceId(MusicSource.Netease, "123"), "Test", emptyList())
 
-    @Test fun forkApiExpiryDoesNotDependOnUpstreamQualityFields() {
+    @Test fun configuredApiExpiryDoesNotDependOnReportedQualityFields() {
         for (label in listOf("Meting", "CHKSZ", "UNM")) {
             val result = ThirdPartyTrack("https://audio.test/song", sourceLabel = label)
             assertEquals(130_000L, result.configuredResolverExpiry(10_000L))
