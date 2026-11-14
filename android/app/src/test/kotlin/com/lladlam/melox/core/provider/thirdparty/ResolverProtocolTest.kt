@@ -16,6 +16,17 @@ class ResolverProtocolTest {
     private fun track(source: MusicSource = MusicSource.Netease, id: String = "123") =
         MusicTrack(MusicResourceId(source, id), "", emptyList())
 
+    @Test fun presetTestSongWorksForEveryConfiguredResolver() {
+        assertTrue(ResolverTestSongId > 0)
+        val testTrack = track(id = ResolverTestSongId.toString()).copy(
+            providerMetadata = ProviderTrackMetadata.Netease(ResolverTestSongId),
+        )
+        for (kind in ResolverKind.entries) {
+            val url = resolverRequestUrl(settings(kind), testTrack, AudioQualityTier.High)!!
+            assertEquals(ResolverTestSongId.toString(), url.queryParameter("id"))
+        }
+    }
+
     @Test fun metingPreservesFullEndpointAndExistingQuery() {
         for (path in listOf("/", "/api.php", "/meting/", "/api")) {
             val url = resolverRequestUrl(settings(ResolverKind.Meting, "https://resolver.test$path?tenant=one"),

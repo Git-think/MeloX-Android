@@ -9,7 +9,7 @@
     <string name="fork_resolver_chksz_help">Enter a CHKSZ-compatible server root or /api endpoint and your personal API Key. Supports NetEase, QQ Music and Kugou. Credentials stay on this device.</string>
     <string name="fork_resolver_unm_help">Enter an HTTP /match API server compatible with UNM-Server. The original UNM HTTP proxy port is not a /match API. This resolver accepts NetEase song IDs only.</string>
     <string name="fork_resolver_servers">UNM source order (comma-separated)</string>
-    <string name="fork_resolver_test_help">Optional connection test using a NetEase song ID. Sends only that ID and the configured service credential, never your official music account cookies.</string>
+    <string name="fork_resolver_test_help">NetEase song ID %1$s is prefilled for testing; you can enter another song ID. Sends only that ID and the configured service credential, never your official music account cookies.</string>
     <string name="fork_resolver_song_id">NetEase song ID</string>
     <string name="fork_resolver_invalid">Check the service endpoint, required API Key and song ID.</string>
     <string name="fork_resolver_test">Test resolver</string>

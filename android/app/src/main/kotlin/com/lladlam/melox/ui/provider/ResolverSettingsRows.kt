@@ -30,6 +30,7 @@ import com.lladlam.melox.core.music.model.ProviderTrackMetadata
 import com.lladlam.melox.core.provider.thirdparty.ResolverApiClient
 import com.lladlam.melox.core.provider.thirdparty.ResolverKind
 import com.lladlam.melox.core.provider.thirdparty.ResolverSettingsStore
+import com.lladlam.melox.core.provider.thirdparty.ResolverTestSongId
 import com.lladlam.melox.core.provider.thirdparty.validResolverEndpoint
 import com.lladlam.melox.ui.glass.MeloXGlassButton
 import com.lladlam.melox.ui.glass.MeloXGlassButtonStyle
@@ -72,7 +73,7 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
     var credential by remember(kind) { mutableStateOf(original.credential) }
     var servers by remember(kind) { mutableStateOf(original.servers) }
     var enabled by remember(kind) { mutableStateOf(original.enabled) }
-    var songId by remember(kind) { mutableStateOf("") }
+    var songId by remember(kind) { mutableStateOf(ResolverTestSongId.toString()) }
     var status by remember(kind) { mutableStateOf<String?>(null) }
     var busy by remember(kind) { mutableStateOf(false) }
     fun draft() = original.copy(endpoint = endpoint.trim(), credential = credential.trim(), servers = servers.trim(), enabled = enabled)
@@ -107,7 +108,7 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                 Text(stringResource(R.string.fork_resolver_servers), Modifier.padding(top = 12.dp))
                 MeloXGlassTextField(servers, { servers = it }, Modifier.fillMaxWidth(), enabled = !busy)
             }
-            Text(stringResource(R.string.fork_resolver_test_help), Modifier.padding(top = 14.dp))
+            Text(stringResource(R.string.fork_resolver_test_help, ResolverTestSongId.toString()), Modifier.padding(top = 14.dp))
             MeloXGlassTextField(songId, { songId = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), enabled = !busy,
                 placeholder = { Text(stringResource(R.string.fork_resolver_song_id)) })
             MeloXGlassButton(

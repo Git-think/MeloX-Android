@@ -9,7 +9,7 @@
     <string name="fork_resolver_chksz_help">填写兼容 CHKSZ 的服务根地址或 /api 地址，以及个人 API Key。支持网易云、QQ 音乐、酷狗。凭据只保存在本机。</string>
     <string name="fork_resolver_unm_help">填写兼容 UNM-Server 的 HTTP /match 接口服务。原版 UNM 的 HTTP 代理端口不是 /match 接口。本解析器只接收网易云歌曲 ID。</string>
     <string name="fork_resolver_servers">UNM 音源顺序（英文逗号分隔）</string>
-    <string name="fork_resolver_test_help">可选：用网易云歌曲 ID 测试服务。只发送该 ID 和服务凭据，不发送官方音乐账号的 Cookie。</string>
+    <string name="fork_resolver_test_help">已预填网易云歌曲 ID %1$s，可直接测试或修改为其他歌曲。只发送该 ID 和服务凭据，不发送官方音乐账号的 Cookie。</string>
     <string name="fork_resolver_song_id">网易云歌曲 ID</string>
     <string name="fork_resolver_invalid">请检查服务地址、必填 API Key 及歌曲 ID。</string>
     <string name="fork_resolver_test">测试解析</string>

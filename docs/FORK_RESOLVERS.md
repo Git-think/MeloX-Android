@@ -27,8 +27,9 @@ Configuration uses the previous fork's local preference names, preserving saved
 addresses, API keys and explicit enabled flags. Nothing is uploaded to remote
 configuration. A new installation has no enabled service by default.
 
-The **Test resolver** action sends a NetEase song ID to just the selected
-service. A successful result means an audio URL was returned, **not** that the
+The **Test resolver** action prefills NetEase song ID `186016`, which remains
+editable, and sends the chosen ID to just the selected service. A successful
+result means an audio URL was returned, **not** that the
 URL was downloaded, decoded or played successfully. Do not infer on-device
 playback quality, battery use or temperature from a cloud build or this test.
 
