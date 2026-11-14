@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -19,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.lladlam.melox.R
@@ -75,6 +78,7 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
     var enabled by remember(kind) { mutableStateOf(original.enabled) }
     var songId by remember(kind) { mutableStateOf(ResolverTestSongId.toString()) }
     var status by remember(kind) { mutableStateOf<String?>(null) }
+    var responseDetails by remember(kind) { mutableStateOf<String?>(null) }
     var busy by remember(kind) { mutableStateOf(false) }
     fun draft() = original.copy(endpoint = endpoint.trim(), credential = credential.trim(), servers = servers.trim(), enabled = enabled)
 
@@ -117,20 +121,30 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                     if (!validResolverEndpoint(endpoint) || id == null || id <= 0 ||
                         (kind == ResolverKind.Chksz && credential.isBlank())) {
                         status = context.getString(R.string.fork_resolver_invalid)
+                        responseDetails = null
                     } else {
                         busy = true
                         status = null
+                        responseDetails = null
                         val settings = draft().copy(enabled = true)
                         scope.launch {
                             val result = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    ResolverApiClient().resolve(settings, MusicTrack(
-                                        MusicResourceId(MusicSource.Netease, id.toString()), "", emptyList(),
-                                        providerMetadata = ProviderTrackMetadata.Netease(id),
-                                    ), AudioQualityTier.High)
-                                }.getOrNull()
+                                ResolverApiClient().test(settings, MusicTrack(
+                                    MusicResourceId(MusicSource.Netease, id.toString()), "", emptyList(),
+                                    providerMetadata = ProviderTrackMetadata.Netease(id),
+                                ), AudioQualityTier.High)
                             }
-                            status = context.getString(if (result == null) R.string.fork_resolver_test_failed else R.string.fork_resolver_test_ok)
+                            status = context.getString(if (result.url == null) R.string.fork_resolver_test_failed else R.string.fork_resolver_test_ok)
+                            responseDetails = if (result.url == null) {
+                                val body = result.requestError ?: when {
+                                    result.responseBody == null -> context.getString(R.string.fork_resolver_response_non_text, result.contentType.orEmpty())
+                                    result.responseBody.isBlank() -> context.getString(R.string.fork_resolver_response_empty)
+                                    else -> result.responseBody
+                                }
+                                listOfNotNull(result.httpStatus?.let { "HTTP $it${result.contentType?.let { mime -> " · $mime" }.orEmpty()}" },
+                                    body, context.getString(R.string.fork_resolver_response_truncated).takeIf { result.responseTruncated })
+                                    .joinToString("\n")
+                            } else null
                             busy = false
                         }
                     }
@@ -139,6 +153,12 @@ private fun ResolverSettingsDialog(kind: ResolverKind, onDismiss: () -> Unit, on
                 style = MeloXGlassButtonStyle.Plain,
             ) { Text(stringResource(if (busy) R.string.fork_resolver_testing else R.string.fork_resolver_test)) }
             status?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary) }
+            responseDetails?.let { details ->
+                Text(stringResource(R.string.fork_resolver_response_title), Modifier.padding(top = 8.dp))
+                SelectionContainer(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                    Text(details, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                }
+            }
             Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MeloXGlassButton(onClick = { ResolverSettingsStore.clear(context, kind); onSaved() }, enabled = !busy,
                     modifier = Modifier.weight(1f), style = MeloXGlassButtonStyle.Plain) { Text(stringResource(R.string.provider_clear)) }
