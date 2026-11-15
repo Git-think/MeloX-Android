@@ -45,6 +45,12 @@ data class MeloXRemoteUpdatePatch(
     val patchBytes: Long,
 )
 
+/** Cloud-controlled gate for forced security releases. The release tag must end in `-security`. */
+data class MeloXRemoteSecurityUpdate(
+    val enabled: Boolean,
+    val message: String?,
+)
+
 data class MeloXRemoteScript(
     val name: String,
     val revision: Int,
@@ -72,6 +78,7 @@ data class MeloXRemoteConfig(
     val colorOverrides: Map<String, Int>,
     val rules: MeloXRemoteRules,
     val updatePatches: List<MeloXRemoteUpdatePatch>,
+    val securityUpdate: MeloXRemoteSecurityUpdate,
 ) {
     fun appliesTo(versionCode: Int): Boolean = versionCode in minVersionCode..maxVersionCode
 
@@ -93,14 +100,30 @@ data class MeloXRemoteConfig(
                 strategyJson.optString(name).takeIf { it in allowed } ?: default
             }
             val fallbackJson = root.getJSONObject("crossProviderFallback")
-            val order = fallbackJson.getJSONArray("order").strings()
+            // A control plane may only know a subset of the providers supported by
+            // an older/newer client. Keep the valid configured prefix and append
+            // every missing provider in the safe default order instead of throwing
+            // the whole custom order away.
+            val configuredOrder = fallbackJson.getJSONArray("order").strings()
                 .filter { it in MeloXRemoteConfigDefaults.AllowedProviders }
                 .distinct()
-                .takeIf { it.size == MeloXRemoteConfigDefaults.AllowedProviders.size }
-                ?: MeloXRemoteConfigDefaults.FallbackOrder
+            val order = if (configuredOrder.isEmpty()) {
+                MeloXRemoteConfigDefaults.FallbackOrder
+            } else {
+                configuredOrder + MeloXRemoteConfigDefaults.FallbackOrder
+                    .filterNot { it in configuredOrder }
+            }
             val disabledProviders = fallbackJson.getJSONArray("disabledProviders").strings()
                 .filterTo(linkedSetOf()) { it in MeloXRemoteConfigDefaults.AllowedProviders }
             val timeoutMs = fallbackJson.getInt("timeoutMs").coerceIn(3_000, 10_000)
+            val securityJson = root.optJSONObject("securityUpdate")
+            val securityUpdate = MeloXRemoteSecurityUpdate(
+                enabled = securityJson?.optBoolean("enabled", false) == true,
+                message = securityJson?.optString("message")
+                    ?.trim()
+                    ?.take(300)
+                    ?.takeIf(String::isNotBlank),
+            )
             val noticeJson = root.optJSONObject("notice")
             val notice = noticeJson?.let {
                 MeloXRemoteNotice(
@@ -133,6 +156,7 @@ data class MeloXRemoteConfig(
                 colorOverrides = parseColorOverrides(root.optJSONObject("colorOverrides")),
                 rules = parseRules(root.optJSONObject("rules")),
                 updatePatches = parseUpdatePatches(root.optJSONArray("updatePatches")),
+                securityUpdate = securityUpdate,
             )
         }
     }

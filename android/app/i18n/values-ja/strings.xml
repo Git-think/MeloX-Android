@@ -82,6 +82,7 @@
     <string name="player_share_netease_friends">NetEaseの友達に送る</string>
     <string name="player_listening_rank">再生履歴</string>
     <string name="player_wiki">曲のWiki</string>
+    <string name="player_album">アルバム</string>
     <string name="player_listen_together">一緒に聴く</string>
     <string name="player_play_next">次に再生</string>
     <string name="player_add_to_queue">キューに追加</string>
@@ -979,9 +980,9 @@
     <string name="settings_content_hq_playlists">探索におすすめプレイリストを表示</string>
     <string name="settings_content_play_count">プレイリストの再生回数を表示</string>
     <string name="settings_content_cross_provider">再生できない曲を他のサービスから取得</string>
-    <string name="settings_content_cross_provider_active">网易云が再生できる音声を明示的に返さないときだけ、QQ Music、Kugou、Bilibili で完全一致を探します。</string>
+    <string name="settings_content_cross_provider_active">网易云が再生できる音声を明示的に返さないときだけ、Bilibili、YouTube Music、QQ Music、Kugou、Kuwo、Qishui などのサービスと設定済みの Jellyfin サーバーで完全一致を探します。未ログイン時は各サービスの匿名 API を使います。</string>
     <string name="settings_content_cross_provider_title">サービス横断の照合をオンにしますか？</string>
-    <string name="settings_content_cross_provider_body">网易云が完全な再生可能な曲を明示的に返せないときだけ、MeloX は現在の曲名、アーティスト、長さを QQ Music、Kugou、Bilibili の検索 API に送ります。</string>
+    <string name="settings_content_cross_provider_body">网易云が完全な再生可能な曲を明示的に返せないときだけ、MeloX は現在の曲名、アーティスト、長さを Bilibili、YouTube Music、QQ Music、Kugou、Kuwo、Qishui などの検索 API に送ります。Jellyfin が設定されていれば、自分のサーバーも検索します。ログイン済みのサービスではそのアカウントの資格情報を使い、未ログインのサービスでは匿名 API のみを使います。</string>
     <string name="settings_content_cross_provider_match">曲名とメインアーティストが一致し、長さが厳密な範囲内の完全な音源だけを再生します。MeloX は試聴を使わず、有料、地域、著作権、DRM、アカウントの制限を回避しません。サービス、バージョン、音質は元の項目と異なることがあります。いいね、プレイリストの識別、歌詞は元の网易云項目のままです。</string>
     <string name="settings_content_cross_provider_terms">再生は、ソース側サービスの規約とプライバシーポリシーにも従います。いつでもオフにできます。</string>
     <string name="settings_content_cross_provider_enable">理解してオンにする</string>
@@ -1198,6 +1199,7 @@
     <string name="settings_about_sponsor_amount_50">CNY 50</string>
     <string name="settings_about_sponsor_amount_6">CNY 6</string>
     <string name="settings_about_sponsor_amount_5">CNY 5</string>
+    <string name="settings_about_sponsor_amount_18">CNY 18</string>
     <string name="settings_about_sponsors_note">MeloX Android を支援してくださる皆様に感謝します。</string>
     <string name="settings_about_exporting">ログを書き出し中…</string>
     <string name="settings_about_export">MeloX のログをすべて書き出す</string>
@@ -1232,6 +1234,7 @@
     <string name="settings_show_quality_tip">音質のヒントを表示</string>
     <string name="settings_show_quality_tip_note">進行バーの下にある音質のヒントを制御します。</string>
     <string name="settings_player_transition_duration">プレーヤーの展開と収納にかかる時間</string>
+    <string name="settings_section_transition">展開 / 収納アニメーション</string>
     <string name="settings_duration_ms">%1$d ms</string>
     <string name="settings_transition_duration_very_fast">とても速い</string>
     <string name="settings_transition_duration_fast">速い</string>
@@ -1491,11 +1494,13 @@
     <string name="settings_floating_requires_android_8">フローティング歌詞には Android 8.0 以降が必要です。この端末でも音楽の基本機能は利用できます。</string>
 
     <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
-    <string name="settings_lyrics_language">歌詞の翻訳言語</string>
+    <string name="settings_lyrics_language">歌詞の言語</string>
     <string name="settings_lyrics_language_system">システムに従う</string>
     <string name="settings_lyrics_language_zh_hans">簡体字中国語</string>
     <string name="settings_lyrics_language_zh_hant">繁体字中国語</string>
     <string name="settings_lyrics_language_en">English</string>
+    <string name="settings_lyrics_language_ja">日本語</string>
+    <string name="settings_lyrics_language_ko">한국어</string>
     <string name="settings_lyrics_language_tr">Türkçe</string>
     <string name="autosync_model_update">更新</string>
     <string name="autosync_model_update_available">更新があります · %1$s</string>
@@ -1576,6 +1581,7 @@
     <string name="settings_about_sponsor_amount_20">20 元</string>
     <string name="settings_about_sponsor_amount_8_88">8.88 元</string>
     <string name="settings_about_sponsor_f8b67">Afdian ユーザー_f8b67</string>
+    <string name="settings_about_sponsor_qingfeng">清风与黑糖C</string>
     <string name="settings_about_sponsor_zhongmo">中末</string>
     <string name="settings_artwork_swipe_tracks">アートワークを左右にスワイプして曲を切り替え</string>
     <string name="settings_artwork_tap_lyrics">アートワークをタップして歌詞に切り替え</string>

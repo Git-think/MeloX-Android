@@ -17,10 +17,12 @@ import com.lladlam.melox.core.music.provider.TrackAggregation
 import com.lladlam.melox.core.provider.spotify.SpotifyTrackMatcher
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigDefaults
 import com.lladlam.melox.core.remoteconfig.MeloXRemoteFallbackConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
 
 object CrossProviderPlaybackPreferences {
     private const val PreferencesName = "melox_playback"
@@ -81,6 +83,13 @@ class CrossProviderPlaybackFallbackResolver(
     private val fallbackConfigProvider: () -> MeloXRemoteFallbackConfig = {
         MeloXRemoteConfigDefaults.Config.fallback
     },
+    /**
+     * A single slow provider must not consume the whole fallback budget.
+     * YouTube Music, for example, can take almost the complete 6 s budget to
+     * fail; the next provider then resolves just as the outer timeout expires
+     * and the successful URL is discarded.
+     */
+    private val perProviderTimeoutMs: Long = 2_000L,
 ) {
     fun cacheIdentity(): String = if (enabledProvider()) {
         val fallback = fallbackConfigProvider()
@@ -128,31 +137,85 @@ class CrossProviderPlaybackFallbackResolver(
                 // Sequential by design: the configured order is the priority.
                 // Searching every provider in parallel would let a lower-priority
                 // source win on a tie and would waste mobile data.
+                val providerTimeout = perProviderTimeoutMs.coerceAtLeast(1L)
                 for (provider in providers) {
                     val search = provider as SearchCapability
-                    val candidates = runCatching { search.searchSongs(query, page = 1, pageSize = 10).items }
-                        .onSuccess { eventLogger("search ${provider.source.storageValue}: ${it.size} candidates") }
-                        .onFailure { eventLogger("search ${provider.source.storageValue} failed: ${it.javaClass.simpleName}") }
-                        .getOrDefault(emptyList())
-                    val ranked = SpotifyTrackMatcher.rank(sourceTrack, candidates).let { matches ->
-                        if (sourceTrack.durationMs != null) {
-                            matches
-                        } else {
-                            // 没有时长时不能靠时长消歧，只接受歌手名单完全一致的结果。
-                            matches.filter { artistSet(sourceTrack) == artistSet(it.candidate) }
+                    val candidates = try {
+                        withTimeoutOrNull(providerTimeout) {
+                            search.searchSongs(query, page = 1, pageSize = 10).items
                         }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        eventLogger(
+                            "search ${provider.source.storageValue} failed: ${errorLabel(error)}",
+                        )
+                        continue
+                    }
+                    if (candidates == null) {
+                        eventLogger(
+                            "search ${provider.source.storageValue} timed out after ${providerTimeout}ms",
+                        )
+                        continue
+                    }
+                    eventLogger("search ${provider.source.storageValue}: ${candidates.size} candidates")
+                    val ranked: List<MusicTrack> = if (provider.source == MusicSource.Bilibili) {
+                        // Bilibili titles are often uploader-formatted
+                        // ("尽情享受吧！因为『今天不是明天』…"). Exact title
+                        // matching rejects the official video, so use a
+                        // contained-title plus uploader/duration gate.
+                        rankBilibiliMatches(sourceTrack, candidates)
+                    } else {
+                        SpotifyTrackMatcher.rank(sourceTrack, candidates).let { matches ->
+                            if (sourceTrack.durationMs != null) {
+                                matches
+                            } else {
+                                // 没有时长时不能靠时长消歧，只接受歌手名单完全一致的结果。
+                                matches.filter { artistSet(sourceTrack) == artistSet(it.candidate) }
+                            }
+                        }.map { it.candidate }
                     }
                     eventLogger("strict matches ${provider.source.storageValue} song=${request.songId}: ${ranked.size}")
                     for (match in ranked) {
                         val playback = provider as PlaybackCapability
-                        val resolution = runCatching {
-                            playback.resolvePlayback(match.candidate, request.quality)
-                        }.getOrNull()
+                        val qualities = playbackQualityCandidates(request.quality)
+                        var lastQuality: AudioQualityTier? = null
+                        var lastResolution: PlaybackResolution? = null
+                        val resolution = try {
+                            // A provider may have no full URL at the requested
+                            // lossless/master tier but still have a complete
+                            // standard track. Try lower tiers before declaring
+                            // the match unusable; previews are never accepted.
+                            withTimeoutOrNull(providerTimeout * 2) {
+                                for (candidateQuality in qualities) {
+                                    lastQuality = candidateQuality
+                                    val attempt = playback.resolvePlayback(match, candidateQuality)
+                                    if (attempt is PlaybackResolution.Playable) {
+                                        return@withTimeoutOrNull attempt
+                                    }
+                                    lastResolution = attempt
+                                }
+                                lastResolution
+                            }
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Throwable) {
+                            eventLogger(
+                                "playback ${provider.source.storageValue} failed: ${errorLabel(error)}",
+                            )
+                            continue
+                        }
+                        if (resolution == null) {
+                            eventLogger(
+                                "playback ${provider.source.storageValue} timed out after ${providerTimeout * 2}ms",
+                            )
+                            continue
+                        }
                         if (resolution is PlaybackResolution.Playable) {
                             eventLogger("resolved song=${request.songId} via ${provider.source.storageValue}")
                             return@withTimeoutOrNull CrossProviderFallbackResult(
                                 source = provider.source,
-                                resourceId = match.candidate.id.value,
+                                resourceId = match.id.value,
                                 url = resolution.url,
                                 requestHeaders = resolution.requestHeaders,
                                 actualQuality = resolution.actualQuality ?: resolution.requestedQuality,
@@ -161,7 +224,8 @@ class CrossProviderPlaybackFallbackResolver(
                         }
                         eventLogger(
                             "playback ${provider.source.storageValue} rejected: " +
-                                "${resolution?.javaClass?.simpleName ?: "error"}",
+                                resolution.javaClass.simpleName +
+                                (lastQuality?.let { " at ${it.name}" } ?: ""),
                         )
                     }
                 }
@@ -170,6 +234,30 @@ class CrossProviderPlaybackFallbackResolver(
             if (resolved == null) eventLogger("unresolved or timed out song=${request.songId}")
             resolved
         }
+    }
+
+    private fun playbackQualityCandidates(requested: AudioQualityTier): List<AudioQualityTier> =
+        when (requested) {
+            AudioQualityTier.Standard -> listOf(AudioQualityTier.Standard)
+            AudioQualityTier.High -> listOf(AudioQualityTier.High, AudioQualityTier.Standard)
+            AudioQualityTier.Lossless -> listOf(
+                AudioQualityTier.Lossless,
+                AudioQualityTier.High,
+                AudioQualityTier.Standard,
+            )
+            AudioQualityTier.HiResolution,
+            AudioQualityTier.Immersive,
+            AudioQualityTier.Master,
+            -> listOf(requested, AudioQualityTier.High, AudioQualityTier.Standard)
+        }.distinct()
+
+    private fun errorLabel(error: Throwable): String {
+        val detail = error.message
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?.take(160)
+            ?.takeIf(String::isNotBlank)
+        return error.javaClass.simpleName + (detail?.let { ": $it" } ?: "")
     }
 
     private fun isEligibleFallbackProvider(provider: MusicProvider): Boolean =
@@ -183,12 +271,62 @@ class CrossProviderPlaybackFallbackResolver(
         else -> ProviderTrackMetadata.Empty
     }
 
+    private fun rankBilibiliMatches(
+        source: MusicTrack,
+        candidates: List<MusicTrack>,
+    ): List<MusicTrack> {
+        val titleKeys = bilibiliTitleKeys(source.title)
+        if (titleKeys.isEmpty()) return emptyList()
+        val sourceArtists = source.artists
+            .map { TrackAggregation.normalizeArtist(it.name) }
+            .filter(String::isNotBlank)
+        return candidates.filter { candidate ->
+            val candidateTitle = TrackAggregation.normalize(candidate.title)
+            val titleMatches = titleKeys.any { key ->
+                key.length >= 3 && candidateTitle.contains(key)
+            }
+            if (!titleMatches) return@filter false
+            val candidateArtists = candidate.artists
+                .map { TrackAggregation.normalizeArtist(it.name) }
+                .filter(String::isNotBlank)
+            val artistMatches = sourceArtists.any { sourceArtist ->
+                candidateArtists.any { candidateArtist ->
+                    candidateArtist == sourceArtist ||
+                        candidateArtist.contains(sourceArtist) ||
+                        sourceArtist.contains(candidateArtist)
+                }
+            }
+            val durationMatches = source.durationMs != null && candidate.durationMs != null &&
+                abs(source.durationMs - candidate.durationMs) <= BilibiliDurationToleranceMs
+            artistMatches || durationMatches
+        }
+    }
+
+    private fun bilibiliTitleKeys(value: String): Set<String> = buildList {
+        add(value)
+        for (delimiter in listOf('(', '（', '[', '【', '『')) {
+            add(value.substringBefore(delimiter))
+        }
+    }.map(TrackAggregation::normalize)
+        .filter { it.length >= 3 }
+        .toSet()
+
     private fun artistSet(track: MusicTrack): Set<String> = track.artists
         .map { TrackAggregation.normalizeArtist(it.name) }
         .filter(String::isNotBlank)
         .toSet()
 
     companion object {
+        private const val BilibiliDurationToleranceMs = 10_000L
+
+        /**
+         * Sources that can return a complete, directly playable audio URL.
+         *
+         * Public providers decide internally whether to use the signed-in session
+         * or the anonymous endpoint; inclusion here never requires the user to be
+         * logged in. Jellyfin is the exception: it only participates when the user
+         * has configured their own server, and is ordered last.
+         */
         val EligibleSources = setOf(
             MusicSource.Netease,
             MusicSource.QQMusic,
@@ -196,6 +334,8 @@ class CrossProviderPlaybackFallbackResolver(
             MusicSource.Qishui,
             MusicSource.Kuwo,
             MusicSource.Bilibili,
+            MusicSource.YouTubeMusic,
+            MusicSource.Jellyfin,
         )
 
         internal fun splitArtists(value: String): List<String> = value

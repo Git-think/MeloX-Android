@@ -82,6 +82,7 @@
     <string name="player_share_netease_friends">Send to NetEase friends</string>
     <string name="player_listening_rank">My listening history</string>
     <string name="player_wiki">Song wiki</string>
+    <string name="player_album">Album</string>
     <string name="player_listen_together">Listen Together</string>
     <string name="player_play_next">Play next</string>
     <string name="player_add_to_queue">Add to queue</string>
@@ -1038,9 +1039,9 @@
     <string name="settings_content_hq_playlists">Show featured playlists on Discover</string>
     <string name="settings_content_play_count">Show playlist play counts</string>
     <string name="settings_content_cross_provider">Get unavailable tracks from other services</string>
-    <string name="settings_content_cross_provider_active">Only when NetEase explicitly returns no playable audio, MeloX looks for a full match on QQ Music, Kugou, or Bilibili.</string>
+    <string name="settings_content_cross_provider_active">Only when NetEase explicitly returns no playable audio does MeloX look for a full match on Bilibili, YouTube Music, QQ Music, Kugou, Kuwo, Qishui, other services, and a configured Jellyfin server. Signed-out services are tried anonymously.</string>
     <string name="settings_content_cross_provider_title">Turn on cross-service matching?</string>
-    <string name="settings_content_cross_provider_body">Only when NetEase explicitly can\'t return a full playable track, MeloX sends the current title, artist, and duration to the search APIs of QQ Music, Kugou, and Bilibili.</string>
+    <string name="settings_content_cross_provider_body">Only when NetEase explicitly can\'t return a full playable track does MeloX send the current title, artist, and duration to the search APIs of Bilibili, YouTube Music, QQ Music, Kugou, Kuwo, Qishui, and other services. If Jellyfin is configured, your own server is searched too. Signed-in services use their own account credentials; signed-out services use anonymous endpoints only.</string>
     <string name="settings_content_cross_provider_match">Only a full track whose title and main artist match, and whose duration is within a strict range, will play. MeloX does not use previews and does not bypass paid, region, copyright, DRM, or account limits. The service, version, and quality may differ from the original entry. Likes, playlist identity, and lyrics stay on the original NetEase item.</string>
     <string name="settings_content_cross_provider_terms">Playback is also covered by the source service\'s terms and privacy policy. You can turn this off at any time.</string>
     <string name="settings_content_cross_provider_enable">I understand, turn on</string>
@@ -1257,12 +1258,14 @@
     <string name="settings_about_sponsor_zhongmo">中末</string>
     <string name="settings_about_sponsor_361ef">Afdian user_361ef</string>
     <string name="settings_about_sponsor_f8b67">Afdian user_f8b67</string>
+    <string name="settings_about_sponsor_qingfeng">清风与黑糖C</string>
     <string name="settings_about_sponsor_amount_20">CNY 20</string>
     <string name="settings_about_sponsor_amount_12_24">CNY 12.24</string>
     <string name="settings_about_sponsor_amount_8_88">CNY 8.88</string>
     <string name="settings_about_sponsor_amount_50">CNY 50</string>
     <string name="settings_about_sponsor_amount_6">CNY 6</string>
     <string name="settings_about_sponsor_amount_5">CNY 5</string>
+    <string name="settings_about_sponsor_amount_18">CNY 18</string>
     <string name="settings_about_sponsors_note">Thank you to everyone supporting MeloX Android.</string>
     <string name="settings_about_exporting">Exporting logs…</string>
     <string name="settings_about_export">Export all MeloX logs</string>
@@ -1299,6 +1302,7 @@
     <string name="settings_show_quality_tip">Show the quality hint</string>
     <string name="settings_show_quality_tip_note">Controls the quality hint under the progress bar.</string>
     <string name="settings_player_transition_duration">Player expand and collapse duration</string>
+    <string name="settings_section_transition">Expand / collapse animation</string>
     <string name="settings_duration_ms">%1$d ms</string>
     <!-- 播放器展开/收回时长的五档文字标签（2026-10-29）。
          档位值与标签的对应关系见 MeloXPlayerTransitionDurationTier（单一真源）：
@@ -1577,11 +1581,13 @@
     <string name="settings_floating_requires_android_8">Floating lyrics require Android 8.0 or later. Core music features remain available on this device.</string>
 
     <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
-    <string name="settings_lyrics_language">Lyric translation language</string>
+    <string name="settings_lyrics_language">Lyrics language</string>
     <string name="settings_lyrics_language_system">Follow system</string>
     <string name="settings_lyrics_language_zh_hans">简体中文</string>
     <string name="settings_lyrics_language_zh_hant">繁體中文</string>
     <string name="settings_lyrics_language_en">English</string>
+    <string name="settings_lyrics_language_ja">日本語</string>
+    <string name="settings_lyrics_language_ko">한국어</string>
     <string name="settings_lyrics_language_tr">Türkçe</string>
     <string name="autosync_model_update">Update</string>
     <string name="autosync_model_update_available">Update available · %1$s</string>

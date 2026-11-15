@@ -2,6 +2,7 @@ package com.lladlam.melox.core.provider.bilibili
 
 import com.lladlam.melox.core.music.model.*
 import com.lladlam.melox.core.music.provider.*
+import com.lladlam.melox.core.network.readBoundedBytes
 import java.io.IOException
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -9,6 +10,9 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.CancellationException
+
+private const val MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+private const val MAX_JSON_DEPTH = 48
 
 class BilibiliProvider(
     private val sessionProvider: () -> BilibiliSession,
@@ -219,7 +223,16 @@ class BilibiliProvider(
             apiCache?.invalidateMixin(sessionScope())
             response = wbiGet("/x/player/wbi/playurl", params, retry403 = false)
         }
-        val data = response.data()
+        val responseCode = response.optInt("code")
+        if (responseCode != 0) {
+            return when (responseCode) {
+                -101, -403 -> PlaybackResolution.LoginRequired
+                else -> PlaybackResolution.Unavailable(
+                    response.optString("message").ifBlank { "Bilibili API $responseCode" },
+                )
+            }
+        }
+        val data = response.optJSONObject("data") ?: JSONObject()
         val directedTrafficActive = directedTrafficProvider()
         val candidates = buildList {
             addAudio(data.optJSONObject("dash")?.optJSONArray("audio"))
@@ -239,9 +252,9 @@ class BilibiliProvider(
                 }
             }
             ?: candidates.firstOrNull()
-            ?: return PlaybackResolution.Unavailable("Bilibili 没有返回 DASH 音频")
+            ?: return PlaybackResolution.LoginRequired
         val mediaUrl = BilibiliDirectedTrafficPolicy.selectMediaUrl(selected.urls, directedTrafficActive)
-            ?: return PlaybackResolution.Unavailable("Bilibili 没有返回 DASH 音频")
+            ?: return PlaybackResolution.LoginRequired
         android.util.Log.i(
             "MeloXBilibiliPlayback",
             "selected bvid=$physicalBvid cid=$physicalCid requested=$quality " +
@@ -249,14 +262,14 @@ class BilibiliProvider(
                 "directedTraffic=$directedTrafficActive",
         )
         val cookie = sessionProvider().cookie
-        if (cookie.isBlank()) return PlaybackResolution.LoginRequired
+        val requestHeaders = buildMap {
+            put("Referer", "https://www.bilibili.com/video/$physicalBvid")
+            put("User-Agent", UserAgent)
+            if (cookie.isNotBlank()) put("Cookie", cookie)
+        }
         return PlaybackResolution.Playable(
             url = mediaUrl,
-            requestHeaders = mapOf(
-                "Referer" to "https://www.bilibili.com/video/$physicalBvid",
-                "User-Agent" to UserAgent,
-                "Cookie" to cookie,
-            ),
+            requestHeaders = requestHeaders,
             requestedQuality = quality,
             actualQuality = selected.id.bilibiliTier(),
             bitrate = selected.bandwidth,
@@ -326,10 +339,14 @@ class BilibiliProvider(
 
     private fun currentMixinKey(): String {
         val loader = {
-            cachedGet("nav", "/x/web-interface/nav", emptyMap(), BilibiliApiCache.Account)
-                .data().optJSONObject("wbi_img")?.let {
-                    BilibiliWbiSigner.mixinKey(it.optString("img_url"), it.optString("sub_url"))
-                }?.takeIf(String::isNotBlank) ?: throw IOException("无法获取 Bilibili WBI key")
+            // The anonymous nav response is `code=-101` (not logged in), but it
+            // still contains the public wbi_img keys. Do not run it through the
+            // success-only API cache or every anonymous Bilibili search fails
+            // before WBI signing.
+            val nav = request("/x/web-interface/nav", emptyMap())
+            nav.optJSONObject("data")?.optJSONObject("wbi_img")?.let {
+                BilibiliWbiSigner.mixinKey(it.optString("img_url"), it.optString("sub_url"))
+            }?.takeIf(String::isNotBlank) ?: throw IOException("无法获取 Bilibili WBI key")
         }
         return apiCache?.mixinKey(sessionScope(), loader) ?: loader()
     }
@@ -347,8 +364,35 @@ class BilibiliProvider(
         }.build()
         return httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("Bilibili HTTP ${response.code}")
-            JSONObject(response.body?.string().orEmpty())
+            val body = response.body
+            if (body.contentLength() > MAX_RESPONSE_BYTES) {
+                throw IOException("Bilibili response is too large")
+            }
+            val text = body.byteStream()
+                .readBoundedBytes(MAX_RESPONSE_BYTES)
+                .toString(Charsets.UTF_8)
+            requireBoundedJsonDepth(text)
+            JSONObject(text)
         }
+    }
+
+    /** Reject hostile/deep JSON before org.json's recursive parser can exhaust the stack/heap. */
+    private fun requireBoundedJsonDepth(text: String) {
+        var depth = 0
+        var quoted = false
+        var escaped = false
+        for (character in text) {
+            if (quoted) {
+                if (escaped) escaped = false
+                else if (character == '\\') escaped = true
+                else if (character == '"') quoted = false
+            } else when (character) {
+                '"' -> quoted = true
+                '{', '[' -> if (++depth > MAX_JSON_DEPTH) throw IOException("Bilibili JSON is too deeply nested")
+                '}', ']' -> if (--depth < 0) throw IOException("Bilibili JSON is malformed")
+            }
+        }
+        if (quoted || depth != 0) throw IOException("Bilibili JSON is incomplete")
     }
 
     private fun JSONObject.data(): JSONObject {

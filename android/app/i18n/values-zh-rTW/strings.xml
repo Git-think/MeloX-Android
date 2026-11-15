@@ -82,6 +82,7 @@
     <string name="player_share_netease_friends">傳送給網易雲好友</string>
     <string name="player_listening_rank">我的聽歌排行</string>
     <string name="player_wiki">歌曲百科</string>
+    <string name="player_album">專輯</string>
     <string name="player_listen_together">一起聽</string>
     <string name="player_play_next">下一首播放</string>
     <string name="player_add_to_queue">新增到播放佇列</string>
@@ -974,9 +975,9 @@
     <string name="settings_content_hq_playlists">發現頁顯示精品歌單</string>
     <string name="settings_content_play_count">顯示歌單播放量</string>
     <string name="settings_content_cross_provider">不可用資源從其他平台取得</string>
-    <string name="settings_content_cross_provider_active">僅當網易雲明確未返回可播放音訊時，才會嚴格比對 QQ音樂、酷狗音樂或 Bilibili 的完整音源。</string>
+    <string name="settings_content_cross_provider_active">僅當網易雲明確未返回可播放音訊時，才會嚴格比對 Bilibili、YouTube Music、QQ音樂、酷狗、酷我、汽水等平台以及已設定的 Jellyfin 自建伺服器的完整音源；未登入時嘗試各平台的匿名介面。</string>
     <string name="settings_content_cross_provider_title">要啟用跨平台資源比對嗎？</string>
-    <string name="settings_content_cross_provider_body">僅當網易雲明確無法返回完整可播放音訊時，MeloX 才會將目前曲目的標題、歌手和時長傳給 QQ音樂、酷狗音樂和 Bilibili 的搜尋介面。</string>
+    <string name="settings_content_cross_provider_body">僅當網易雲明確無法返回完整可播放音訊時，MeloX 才會將目前曲目的標題、歌手和時長傳給 Bilibili、YouTube Music、QQ音樂、酷狗、酷我、汽水等平台的搜尋介面；若已設定 Jellyfin，也會查詢你的自建伺服器。已登入的目標平台使用該平台自己的帳號憑證，未登入的平台僅使用匿名介面。</string>
     <string name="settings_content_cross_provider_match">只有標題與主藝人一致、且時長在嚴格範圍內的完整音源才會播放。MeloX 不使用試聽片段，也不會繞過付費、地區、版權、DRM 或帳號權限限制。實際平台、歌曲版本和音質可能與原條目不同；收藏、歌單身份和歌詞仍保留原網易雲條目。</string>
     <string name="settings_content_cross_provider_terms">播放行為同時受實際音源平台的服務條款和隱私政策約束，你可以隨時關閉此功能。</string>
     <string name="settings_content_cross_provider_enable">瞭解並開啟</string>
@@ -1192,9 +1193,11 @@
     <string name="settings_about_sponsor_bai">Bai</string>
     <string name="settings_about_sponsor_361ef">愛發電使用者_361ef</string>
     <string name="settings_about_sponsor_f8b67">愛發電使用者_f8b67</string>
+    <string name="settings_about_sponsor_qingfeng">清风与黑糖C</string>
     <string name="settings_about_sponsor_amount_50">CNY 50</string>
     <string name="settings_about_sponsor_amount_6">CNY 6</string>
     <string name="settings_about_sponsor_amount_5">CNY 5</string>
+    <string name="settings_about_sponsor_amount_18">CNY 18</string>
     <string name="settings_about_sponsors_note">感謝每一位支持彌樂的朋友。</string>
     <string name="settings_about_exporting">正在匯出日誌…</string>
     <string name="settings_about_export">匯出 MeloX 全部日誌</string>
@@ -1229,6 +1232,7 @@
     <string name="settings_show_quality_tip">顯示播放音質提示</string>
     <string name="settings_show_quality_tip_note">控制進度條下方的音質提示。</string>
     <string name="settings_player_transition_duration">播放器展開/收回時長</string>
+    <string name="settings_section_transition">展開 / 收回動畫</string>
     <string name="settings_duration_ms">%1$d ms</string>
     <string name="settings_transition_duration_very_fast">很快</string>
     <string name="settings_transition_duration_fast">快</string>
@@ -1487,11 +1491,13 @@
     <string name="settings_floating_requires_android_8">懸浮歌詞需要 Android 8.0 或更新版本。此裝置仍可使用音樂核心功能。</string>
 
     <!-- 0.6.3+ 新增（贡献者分支与 AutoSync） -->
-    <string name="settings_lyrics_language">歌詞翻譯語言</string>
+    <string name="settings_lyrics_language">歌詞語言</string>
     <string name="settings_lyrics_language_system">跟隨系統</string>
     <string name="settings_lyrics_language_zh_hans">简体中文</string>
     <string name="settings_lyrics_language_zh_hant">繁體中文</string>
     <string name="settings_lyrics_language_en">English</string>
+    <string name="settings_lyrics_language_ja">日本語</string>
+    <string name="settings_lyrics_language_ko">한국어</string>
     <string name="settings_lyrics_language_tr">Türkçe</string>
     <string name="autosync_model_update">更新</string>
     <string name="autosync_model_update_available">有可用更新 · %1$s</string>

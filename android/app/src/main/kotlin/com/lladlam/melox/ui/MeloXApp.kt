@@ -234,6 +234,7 @@ import com.lladlam.melox.core.network.MeloXSearchKind
 import com.lladlam.melox.core.network.NeteaseClipboardLink
 import com.lladlam.melox.core.network.NeteaseClipboardTarget
 import com.lladlam.melox.core.library.NeteaseLibraryClient
+import com.lladlam.melox.core.update.MeloXForcedUpdate
 import com.lladlam.melox.core.update.MeloXRelease
 import com.lladlam.melox.core.update.MeloXUpdateClient
 import com.lladlam.melox.playback.PlaybackCommands
@@ -243,6 +244,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.roundToInt
@@ -330,7 +332,11 @@ fun MeloXApp(
         mutableStateOf(if (MeloXSettingsPreferences.boolean(context, "onboarding_completed", false)) -1 else 0)
     }
     var availableUpdate by remember { mutableStateOf<MeloXRelease?>(null) }
+    val forcedUpdate by MeloXForcedUpdate.release.collectAsState()
     val remoteConfigStatus by MeloXRemoteConfigRuntime.status.collectAsState()
+    val forceSecurityUpdates = remoteConfigStatus.source == MeloXRemoteConfigSource.VerifiedRemote &&
+        MeloXRemoteConfigConsent.enabled(context) &&
+        remoteConfigStatus.config.securityUpdate.enabled
     var pendingRemoteNotice by remember { mutableStateOf<MeloXRemoteNotice?>(null) }
     var cloudControlChoicePending by remember {
         mutableStateOf(!MeloXRemoteConfigConsent.choiceMade(context))
@@ -345,6 +351,10 @@ fun MeloXApp(
     }
     LaunchedEffect(Unit) {
         if (MeloXSettingsPreferences.boolean(context, "onboarding_completed", false)) {
+            // Daily reward/VIP refresh is not needed for the first frame. Move it
+            // past the cold-start window so it cannot compete with composition
+            // and the first network requests.
+            delay(1_500L)
             withContext(Dispatchers.IO) {
                 runCatching { KugouLiteDailyCheckIn.run(context) }
             }
@@ -623,16 +633,23 @@ fun MeloXApp(
     //   消除关闭末帧「封面色 → 液态玻璃」硬切。详见 MeloXIOSMiniPlayer。
     val playerControlBackdrop = rememberLayerBackdrop()
 
-    LaunchedEffect(playbackConnectionEnabled) {
+    LaunchedEffect(playbackConnectionEnabled, forceSecurityUpdates) {
         if (!playbackConnectionEnabled) return@LaunchedEffect
-        if (MeloXSettingsPreferences.boolean(context, "update_auto_check", true)) {
-            val now = System.currentTimeMillis()
-            val last = MeloXSettingsPreferences.string(context, "update_last_check_ms", "0").toLongOrNull() ?: 0L
-            if (now - last >= 24L * 60L * 60L * 1000L) {
-                val client = MeloXUpdateClient(context)
-                runCatching { client.latestStableRelease() }.getOrNull()?.let { release ->
-                    MeloXSettingsPreferences.setString(context, "update_last_check_ms", now.toString())
-                    if (client.isNewer(release.version, BuildConfig.VERSION_NAME)) availableUpdate = release
+        if (!forceSecurityUpdates) MeloXForcedUpdate.clear()
+        val autoCheck = MeloXSettingsPreferences.boolean(context, "update_auto_check", true)
+        if (!forceSecurityUpdates && !autoCheck) return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        val last = MeloXSettingsPreferences.string(context, "update_last_check_ms", "0").toLongOrNull() ?: 0L
+        if (!forceSecurityUpdates && now - last < 24L * 60L * 60L * 1000L) return@LaunchedEffect
+        val client = MeloXUpdateClient(context)
+        runCatching { client.latestStableRelease() }.getOrNull()?.let { release ->
+            MeloXSettingsPreferences.setString(context, "update_last_check_ms", now.toString())
+            if (client.isNewer(release.version, BuildConfig.VERSION_NAME)) {
+                if (forceSecurityUpdates && release.securityCritical) {
+                    availableUpdate = null
+                    MeloXForcedUpdate.require(release)
+                } else {
+                    availableUpdate = release
                 }
             }
         }
@@ -1096,10 +1113,13 @@ fun MeloXApp(
                     // 上的覆盖层第一次返回被「切回主页」吞掉、第二次才关 —— 用户感知即「退两次、
                     // 且直接跳了两级（tab + 覆盖层）」。改为先关覆盖层，再处理切 tab / 退出确认。
                     val anyOverlayVisible = recognitionVisible ||
-                        cloudControlChoicePending || availableUpdate != null || clipboardTarget != null
+                        cloudControlChoicePending || availableUpdate != null || forcedUpdate != null ||
+                        clipboardTarget != null
                     val exitConfirmThresholdMs = 2_000L
                     var pendingExitAtMs by remember { mutableStateOf(0L) }
                     BackHandler {
+                        // A critical security update cannot be dismissed with Back.
+                        if (forcedUpdate != null) return@BackHandler
                         if (anyOverlayVisible) {
                             // 覆盖层优先关闭，不被切 tab 抢走返回事件。
                             when {
@@ -1703,18 +1723,35 @@ fun MeloXApp(
             )
         }
         availableUpdate?.takeIf {
+            forcedUpdate == null && onboardingPage < 0 && !cloudControlChoicePending && pendingRemoteNotice == null
+        }?.let { release ->
+            MeloXUpdateDialog(
+                release = release,
+                downloadAvailable = release.apkUrl != null,
+                forced = false,
+                securityMessage = null,
+                onLater = { availableUpdate = null },
+                onConfirm = {
+                    availableUpdate = null
+                    playerScope.launch {
+                        openUpdateTarget(context, release)
+                    }
+                },
+            )
+        }
+        forcedUpdate?.takeIf {
             onboardingPage < 0 && !cloudControlChoicePending && pendingRemoteNotice == null
         }?.let { release ->
             MeloXUpdateDialog(
                 release = release,
                 downloadAvailable = release.apkUrl != null,
-                onLater = { availableUpdate = null },
+                forced = true,
+                securityMessage = remoteConfigStatus.config.securityUpdate.message,
+                onLater = {},
                 onConfirm = {
-                    availableUpdate = null
                     playerScope.launch {
-                        val target = runCatching { MeloXUpdateClient(context).downloadUrl(release) }.getOrNull()
-                            ?: release.pageUrl
-                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target))) }
+                        // Forced updates always use the complete APK, never a delta patch.
+                        openUpdateTarget(context, release)
                     }
                 },
             )
@@ -1801,20 +1838,59 @@ private fun MeloXAppDialog(
     }
 }
 
+/**
+ * Resolve the preferred GitHub route, then open it with an explicit
+ * NEW_TASK. The old code swallowed ActivityNotFoundException, which looked
+ * exactly like "the button does nothing" on some OEM launchers.
+ */
+private suspend fun openUpdateTarget(context: android.content.Context, release: MeloXRelease) {
+    val target = withTimeoutOrNull(10_000) {
+        runCatching { MeloXUpdateClient(context).downloadUrl(release) }.getOrNull()
+    } ?: release.apkUrl ?: release.pageUrl
+    fun launch(url: String): Boolean = runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    }.getOrDefault(false)
+    var launched = launch(target)
+    if (!launched && target != release.pageUrl) {
+        launched = launch(release.pageUrl)
+    }
+    if (!launched) {
+        Toast.makeText(context, "无法打开下载链接，请在浏览器访问 ${release.pageUrl}", Toast.LENGTH_LONG).show()
+    }
+}
+
 @Composable
 private fun MeloXUpdateDialog(
     release: MeloXRelease,
     downloadAvailable: Boolean,
+    forced: Boolean,
+    securityMessage: String?,
     onLater: () -> Unit,
     onConfirm: () -> Unit,
 ) {
     // Capped to the safe drawing area: a long release note scrolls inside the
     // panel instead of pushing the buttons off screen.
-    MeloXGlassDialog(visible = true, onDismiss = onLater, maxHeightFraction = 0.92f) {
+    MeloXGlassDialog(
+        visible = true,
+        onDismiss = if (forced) ({}) else onLater,
+        maxHeightFraction = 0.92f,
+    ) {
         Text(
-            stringResource(R.string.app_update_found, release.version),
+            if (forced) "必须更新" else stringResource(R.string.app_update_found, release.version),
             style = MaterialTheme.typography.titleLarge,
         )
+        if (forced) {
+            Text(
+                securityMessage?.takeIf(String::isNotBlank)
+                    ?: "此版本包含严重安全问题，必须更新后才能继续使用。",
+                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Column(
             modifier = Modifier
                 .weight(1f, fill = false)
@@ -1843,13 +1919,15 @@ private fun MeloXUpdateDialog(
                 .padding(top = 16.dp),
             horizontalArrangement = Arrangement.Center,
         ) {
-            MeloXGlassButton(
-                onClick = onLater,
-                modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
-                style = MeloXGlassButtonStyle.Plain,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            ) { Text(stringResource(R.string.app_update_later), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            Spacer(Modifier.width(10.dp))
+            if (!forced) {
+                MeloXGlassButton(
+                    onClick = onLater,
+                    modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
+                    style = MeloXGlassButtonStyle.Plain,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                ) { Text(stringResource(R.string.app_update_later), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                Spacer(Modifier.width(10.dp))
+            }
             MeloXGlassButton(
                 onClick = onConfirm,
                 modifier = Modifier.widthIn(min = DialogActionButtonMinWidth),
@@ -1857,7 +1935,9 @@ private fun MeloXUpdateDialog(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text(
-                    if (downloadAvailable) stringResource(R.string.app_update_download) else stringResource(R.string.app_update_view),
+                    if (downloadAvailable) {
+                        if (forced) "下载完整 APK" else stringResource(R.string.app_update_download)
+                    } else stringResource(R.string.app_update_view),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

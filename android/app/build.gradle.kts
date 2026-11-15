@@ -168,8 +168,8 @@ android {
         applicationId = "com.lladlam.melox.android"
         minSdk = 24
         targetSdk = 37
-        versionCode = 27
-        versionName = "0.7.2"
+        versionCode = 29
+        versionName = "0.7.4"
         testInstrumentationRunner = providers.gradleProperty("meloxTestInstrumentationRunner")
             .getOrElse("com.lladlam.melox.core.autosync.AutoSyncDeviceRunner")
         externalNativeBuild {
@@ -193,6 +193,13 @@ android {
         //   · MeloXApp 里那段「按播放页可见性切 SENSOR/PORTRAIT」的代码整个跳过
         // ⚠ 改这里会让 release/debug 跟着解锁 ⇒ 只允许在 buildType 里覆写，不要动这一行。
         buildConfigField("boolean", "UNLOCK_ORIENTATION", "false")
+    }
+
+    androidResources {
+        // Keep only the locales declared in res/xml/locales_config.xml. AndroidX
+        // and Material ship dozens of unused translations; filtering them trims
+        // resources.arsc and the per-locale configuration set.
+        localeFilters += listOf("en", "zh-rCN", "zh-rTW", "ja", "tr")
     }
 
     // ── Release signing ─────────────────────────────────────────────────────
@@ -333,6 +340,10 @@ android {
         jniLibs.excludes += setOf("**/x86/**", "**/x86_64/**")
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/google/protobuf/**"
+        // Build-time profile source. ART consumes the compiled
+        // assets/dexopt/baseline.prof; shipping the 1.3 MB text copy only
+        // bloats the APK.
+        resources.excludes += "/baseline-prof.txt"
     }
 
     testOptions {

@@ -7,6 +7,8 @@ import com.lladlam.melox.core.account.NeteaseSessionStore
 import com.lladlam.melox.core.autosync.AutoSyncCoordinator
 import com.lladlam.melox.core.download.MeloXDownloadStore
 import com.lladlam.melox.core.lyrics.LyricSource
+import com.lladlam.melox.core.lyrics.LyricTranslationDecision
+import com.lladlam.melox.core.lyrics.LyricTranslationPolicy
 import com.lladlam.melox.core.lyrics.LyricsDocument
 import com.lladlam.melox.core.lyrics.MeloXLyricPreference
 import com.lladlam.melox.core.lyrics.withoutPlaceholderLyrics
@@ -72,7 +74,14 @@ internal object MeloXProviderLyricsLoader {
      * lookups usually answer in well under a second, so this only covers the
      * common case while keeping playback snappy.
      */
-    private const val AmllWordTimingWindowMs = 2_000L
+    private const val AmllWordTimingWindowMs = 5_000L
+
+    /**
+     * How long a slow, already-running source may still deliver word timing
+     * after the first line-timed lyric was shown. QQ QRC routinely needs more
+     * than the first-paint window, so the result is applied as a live upgrade.
+     */
+    private const val LateWordTimingWindowMs = 12_000L
 
     /**
      * Background budget for upgrading a line-timed document to an authored
@@ -152,19 +161,9 @@ internal object MeloXProviderLyricsLoader {
             ?: return LyricsDocument(emptyList())
         val resourceId = PlaybackTrackIdentity.decode(resolvedMediaId)
             ?: return LyricsDocument(emptyList())
-        if (resourceId.sourceId.builtIn == null) {
-            val registry = MeloXMusicProviders.create(appContext)
-            val generation = registry.generation
-            val provider = registry[resourceId.sourceId] ?: return LyricsDocument(emptyList())
-            if (!provider.supports(com.lladlam.melox.core.music.provider.MusicCapability.Lyrics)) return LyricsDocument(emptyList())
-            val capability = provider as? com.lladlam.melox.core.music.provider.LyricsCapability
-                ?: return LyricsDocument(emptyList())
-            val track = com.lladlam.melox.core.music.model.MusicTrack(resourceId, title,
-                listOf(com.lladlam.melox.core.music.model.MusicArtistRef(name = artist)), durationMs = durationMs)
-            val document = capability.lyrics(track)
-            return if (generation == registry.generation && registry[resourceId.sourceId] === provider) document
-                else LyricsDocument(emptyList())
-        }
+        // Every source — built-in or plugin — now flows through the same cached
+        // pipeline below, so translation policy, script conversion and AutoSync
+        // scheduling apply uniformly.
         val localRecord = if (resourceId.sourceId.builtIn == MusicSource.Local) {
             LocalMusicRepository(appContext).track(resourceId.value)
         } else null
@@ -284,7 +283,7 @@ internal object MeloXProviderLyricsLoader {
         val deferred = synchronized(lock) {
             cache[cacheKey]?.let { return scripted(it) }
             inFlight[cacheKey] ?: workerScope.async {
-                LyricTimelineProcessor.process(loadDocument(appContext, snapshot).withoutPlaceholderLyrics()).also { document ->
+                LyricTimelineProcessor.process(loadDocument(appContext, snapshot, onUpgrade).withoutPlaceholderLyrics()).also { document ->
                     if (document.lines.isNotEmpty()) remember(cacheKey, document)
                 }
             }.also { created ->
@@ -389,6 +388,15 @@ internal object MeloXProviderLyricsLoader {
         }
         val amllJob = scheduleWordTimingUpgrade(appContext, cacheKey, snapshot, document, onUpgrade)
         scheduleAutoSyncUpgrade(appContext, cacheKey, trackKey, document, amllJob, onUpgrade)
+        // A cached document may be line-timed simply because the first fetch
+        // arrived before QQ QRC did. Re-resolve once in the background so the
+        // word-by-word timeline can still replace it.
+        if (!hasWordTiming(document) && snapshot.automaticSelection) {
+            workerScope.launch {
+                runCatching { loadAutomatic(appContext, snapshot, onUpgrade) }
+                    .onFailure { Log.d("MeloXLyricsAuto", "cached word-timing chase failed: ${it.message}") }
+            }
+        }
     }
 
     private fun scheduleAutoSyncIfNeeded(
@@ -482,6 +490,7 @@ internal object MeloXProviderLyricsLoader {
     private suspend fun loadDocument(
         appContext: Context,
         snapshot: LyricTrackSnapshot,
+        onUpgrade: ((LyricsDocument) -> Unit)? = null,
     ): LyricsDocument {
         if (snapshot.resourceId.sourceId.builtIn == MusicSource.Bilibili) {
             val policy = bilibiliLyricLoadPolicy(
@@ -500,7 +509,7 @@ internal object MeloXProviderLyricsLoader {
                 // binding suppress a newly available QRC/YRC word timeline.
                 if (hasWordTiming(bound)) return bound
             }
-            return loadAutomatic(appContext, snapshot)
+            return loadAutomatic(appContext, snapshot, onUpgrade)
         }
         return loadCurrentProvider(appContext, snapshot)
     }
@@ -699,6 +708,7 @@ internal object MeloXProviderLyricsLoader {
     private suspend fun loadAutomatic(
         appContext: Context,
         snapshot: LyricTrackSnapshot,
+        onUpgrade: ((LyricsDocument) -> Unit)? = null,
     ): LyricsDocument {
         val orderedSources = snapshot.resourceId.sourceId.builtIn?.let(::automaticLyricSourcesFor) ?: listOf(LyricAutoSource.Current)
         // Every source is started together. The current provider still supplies
@@ -737,10 +747,19 @@ internal object MeloXProviderLyricsLoader {
                     document = currentResolved.document,
                     binding = currentResolved.binding,
                 )
-                jobs.forEach { (source, job) ->
-                    if (source != selectedSource) job.cancel()
+                // A line-timed current lyric paints immediately, but a slower
+                // source may still deliver the real word-by-word (QRC) timeline.
+                // Keep those jobs alive and upgrade in place instead of waiting
+                // 2s and then discarding them.
+                val canUpgradeLater = onUpgrade != null && !hasWordTiming(selected.document)
+                if (canUpgradeLater) {
+                    scheduleLateWordTimingUpgrade(appContext, snapshot, jobs, selectedSource, selected.document, onUpgrade!!)
+                } else {
+                    jobs.forEach { (source, job) ->
+                        if (source != selectedSource) job.cancel()
+                    }
                 }
-                Log.d(
+                Log.i(
                     "MeloXLyricsAuto",
                     "selectedAutomatic source=${selected.document.source} " +
                         "lines=${selected.document.lines.size} " +
@@ -751,7 +770,12 @@ internal object MeloXProviderLyricsLoader {
                     appContext,
                     snapshot,
                     selected.binding,
-                    selected.document,
+                    combineAvailableTranslations(
+                        selected = selected.document,
+                        jobs = jobs,
+                        skipped = selectedSource,
+                        preference = snapshot.preference,
+                    ),
                 )
             }
         }
@@ -765,13 +789,124 @@ internal object MeloXProviderLyricsLoader {
                     }
                 },
         )
-        Log.d(
+        Log.i(
             "MeloXLyricsAuto",
             "selectedPriority=${selected?.priority} lines=${selected?.document?.lines?.size ?: 0} " +
                 "wordLines=${selected?.document?.lines?.count { it.syllables.isNotEmpty() } ?: 0}",
         )
-        return selected?.let { rememberBinding(appContext, snapshot, it.binding, it.document) }
-            ?: LyricsDocument(emptyList())
+        return selected?.let {
+            rememberBinding(
+                appContext,
+                snapshot,
+                it.binding,
+                combineAvailableTranslations(
+                    selected = it.document,
+                    jobs = jobs,
+                    skipped = null,
+                    preference = snapshot.preference,
+                ),
+            )
+        } ?: LyricsDocument(emptyList())
+    }
+
+    /**
+     * Cross-source translation merge: when the selected document is in another
+     * language and carries no translation, borrow the translation track from an
+     * already-finished candidate whose timeline matches.
+     *
+     * Word-level timing always wins: candidates that carry per-syllable timing
+     * are preferred as the merge source, and the merge itself only copies
+     * `translation` strings — it never replaces the selected document's lines,
+     * timings or syllables. A line-timed alternative can therefore never
+     * downgrade a word-timed main lyric.
+     *
+     * Only completed jobs are consulted, so this never adds a request or delays
+     * the first paint for a translation that may not exist.
+     */
+    /**
+     * Delivers a word-by-word timeline that arrives after the first (line-timed)
+     * lyric was already shown. This is what makes QQ QRC usable: its request does
+     * a cross-provider search plus several profile attempts and routinely exceeds
+     * the 2 s first-paint window.
+     */
+    private fun scheduleLateWordTimingUpgrade(
+        appContext: Context,
+        snapshot: LyricTrackSnapshot,
+        jobs: Map<LyricAutoSource, Deferred<ResolvedLyrics>>,
+        selectedSource: LyricAutoSource,
+        selected: LyricsDocument,
+        onUpgrade: (LyricsDocument) -> Unit,
+    ) {
+        val watchers = jobs.filterKeys { it != selectedSource }.values
+        if (watchers.isEmpty()) return
+        workerScope.launch {
+            val resolved = withTimeoutOrNull(LateWordTimingWindowMs) {
+                // They already run in parallel; awaiting in order waits for the
+                // slowest one, not the sum.
+                watchers.map { job -> runCatching { job.await() }.getOrNull() }
+            }.orEmpty()
+            val best = selectAutomaticLyricCandidate(
+                resolved.mapIndexedNotNull { index, value ->
+                    val document = value?.document ?: return@mapIndexedNotNull null
+                    if (document.lines.isEmpty() || !hasWordTiming(document)) return@mapIndexedNotNull null
+                    AutoLyricCandidate(index, document, value.binding)
+                },
+            ) ?: return@launch
+            if (!hasWordTiming(best.document) || best.document == selected) return@launch
+            remember(snapshot.cacheKey(), best.document)
+            Log.i(
+                "MeloXLyricsAuto",
+                "lateWordTimingUpgrade source=${best.document.source} " +
+                    "wordLines=${best.document.lines.count { it.syllables.isNotEmpty() }}",
+            )
+            withContext(Dispatchers.Main.immediate) { onUpgrade(scripted(best.document)) }
+        }
+    }
+
+    private suspend fun combineAvailableTranslations(
+        selected: LyricsDocument,
+        jobs: Map<LyricAutoSource, Deferred<ResolvedLyrics>>,
+        skipped: LyricAutoSource?,
+        preference: MeloXLyricPreference,
+    ): LyricsDocument {
+        if (selected.lines.isEmpty()) return selected
+        if (selected.lines.any { !it.translation.isNullOrBlank() }) return selected
+        val decision = LyricTranslationPolicy.decide(
+            LyricTranslationPolicy.detectLanguage(selected),
+            preference,
+        )
+        if (decision != LyricTranslationDecision.NeedTranslation) return selected
+
+        // Word-timed candidates first, then source priority.
+        val ordered = jobs.entries
+            .filter { (_, job) -> job.isCompleted }
+            .mapNotNull { entry ->
+                val document = runCatching { entry.value.await().document }.getOrNull()
+                    ?: return@mapNotNull null
+                if (document.lines.isEmpty()) return@mapNotNull null
+                Triple(entry.key, document, hasWordTiming(document))
+            }
+            .filterNot { it.first == skipped }
+            .sortedWith(compareByDescending<Triple<LyricAutoSource, LyricsDocument, Boolean>> { it.third })
+
+        var merged: LyricsDocument? = null
+        ordered.forEach { (_, document, _) ->
+            val translations = document.lines.mapNotNull { it.translation?.takeIf(String::isNotBlank) }
+            if (translations.isEmpty()) return@forEach
+            if (!LyricTranslationPolicy.translationMatches(translations, preference)) return@forEach
+            merged = LyricTranslationPolicy.combineTranslations(selected, document) ?: merged
+        }
+        if (merged != null) {
+            Log.i("MeloXLyricsAuto", "combined translation lines=${merged!!.lines.count { !it.translation.isNullOrBlank() }}")
+            return merged!!
+        }
+        if (ordered.isNotEmpty()) {
+            Log.i(
+                "MeloXLyricsAuto",
+                "translation merge skipped selectedLines=${selected.lines.size} alternatives=${ordered.size}",
+            )
+        }
+        return selected
     }
 
     /**
@@ -832,7 +967,7 @@ internal object MeloXProviderLyricsLoader {
             withTimeoutOrNull(timeoutMs) { loadMatchedSource(appContext, snapshot, source) }
         }.getOrNull()?.let { it.copy(document = it.document.withoutPlaceholderLyrics()) }
             ?: ResolvedLyrics(LyricsDocument(emptyList()), null)
-        Log.d(
+        Log.i(
             "MeloXLyricsAuto",
             "track=${snapshot.resourceId.sourceId.value}:${snapshot.resourceId.value} " +
                 "source=$source elapsed=${SystemClock.elapsedRealtime() - startedAt}ms " +
@@ -1105,13 +1240,36 @@ internal fun requestedLyricPreference(): MeloXLyricPreference =
     MeloXLyricPreference.fromSetting(MeloXSettingsRuntime.lyricLanguage)
 
 internal fun applyLyricTranslationPreference(document: LyricsDocument, preference: MeloXLyricPreference): LyricsDocument {
-    // These endpoints supply Chinese translations, with no target-language API.
-    val chineseOnly = document.source in setOf(LyricSource.Netease, LyricSource.QQMusic, LyricSource.Kugou)
-    val selected = if (preference.languageTag != null && chineseOnly) document.copy(
-        lines = document.lines.map { line ->
-            line.copy(translation = null, accompaniment = line.accompaniment.map { it.copy(translation = null) })
-        },
-    ) else document
+    if (document.lines.isEmpty()) return MeloXLyricScriptConverter.convert(document, preference.script)
+
+    val mainLanguage = LyricTranslationPolicy.detectLanguage(document)
+    val decision = LyricTranslationPolicy.decide(mainLanguage, preference)
+    val selected = when (decision) {
+        // Same language as the listener: a translation would only repeat the
+        // lyric, so neither fetch nor display one.
+        LyricTranslationDecision.KeepMainOnly,
+        LyricTranslationDecision.ConvertScriptOnly,
+        -> LyricTranslationPolicy.withoutTranslations(document)
+        // Different language: keep only translations that really are in the
+        // requested language. Unknown/unverifiable text is kept (best effort).
+        LyricTranslationDecision.NeedTranslation -> {
+            val translations = buildList {
+                document.lines.forEach { line ->
+                    line.translation?.takeIf(String::isNotBlank)?.let(::add)
+                    line.accompaniment.forEach { vocal ->
+                        vocal.translation?.takeIf(String::isNotBlank)?.let(::add)
+                    }
+                }
+            }
+            if (translations.isEmpty() ||
+                LyricTranslationPolicy.translationMatches(translations, preference)
+            ) {
+                document
+            } else {
+                LyricTranslationPolicy.withoutTranslations(document)
+            }
+        }
+    }
     return MeloXLyricScriptConverter.convert(selected, preference.script)
 }
 

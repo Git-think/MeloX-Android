@@ -35,7 +35,19 @@ class MeloXRemoteConfigModelsTest {
         assertEquals(setOf("qq_playback"), config.disabledCapabilities)
         assertEquals("v1", config.strategies["netease_playback"])
         assertEquals("v1", config.strategies["qq_playback"])
-        assertEquals(MeloXRemoteConfigDefaults.FallbackOrder, config.fallback.order)
+        assertEquals(
+            listOf(
+                "qq_music",
+                "bilibili",
+                "youtube_music",
+                "netease",
+                "kugou_lite",
+                "qishui",
+                "kuwo",
+                "jellyfin",
+            ),
+            config.fallback.order,
+        )
         assertEquals(setOf("bilibili"), config.fallback.disabledProviders)
         assertEquals(10_000, config.fallback.timeoutMs)
         assertTrue(config.appliesTo(11))
@@ -170,6 +182,21 @@ class MeloXRemoteConfigModelsTest {
             defaultPayload().replace("\"netease_playback\": \"v1\"", "\"netease_playback\": \"v9\"").toByteArray(),
         )
         assertEquals("v1", bogus.strategies["netease_playback"])
+    }
+
+
+    @Test
+    fun securityUpdateGateIsParsedAndDefaultsOff() {
+        val enabled = MeloXRemoteConfig.parse(
+            org.json.JSONObject(defaultPayload())
+                .put("securityUpdate", org.json.JSONObject().put("enabled", true).put("message", "critical"))
+                .toString().toByteArray(),
+        )
+        assertTrue(enabled.securityUpdate.enabled)
+        assertEquals("critical", enabled.securityUpdate.message)
+
+        val missing = MeloXRemoteConfig.parse(defaultPayload().toByteArray())
+        org.junit.Assert.assertFalse(missing.securityUpdate.enabled)
     }
 
     private fun defaultPayload(): String = """

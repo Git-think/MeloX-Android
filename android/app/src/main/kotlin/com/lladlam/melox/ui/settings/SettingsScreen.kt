@@ -129,6 +129,7 @@ import com.lladlam.melox.core.recommendation.LocalRecommendationEngine
 import com.lladlam.melox.core.recommendation.LocalRecommendationStore
 import com.lladlam.melox.core.recognition.SongRecognitionClient
 import com.lladlam.melox.core.recognition.SongRecognitionResult
+import com.lladlam.melox.core.update.MeloXForcedUpdate
 import com.lladlam.melox.core.update.MeloXRelease
 import com.lladlam.melox.core.update.MeloXDevCommit
 import com.lladlam.melox.core.update.MeloXUpdateClient
@@ -238,7 +239,7 @@ private data class SettingsSection(val title: String, val items: List<SettingsIt
 
 private val SettingsSections = listOf(
     SettingsSection("应用", listOf(
-        SettingsItem(SettingsRoute.General, "语言、主题、启动行为与链接处理", "⚙", "语言 language 简体 繁體 English 日本語 Türkçe 主题 浅色 深色 跟随系统 默认页面 剪贴板 分屏 split screen 双栏 底部栏 导航栏 迷你播放器 miniplayer 左下 右下 左边 右边 左上 右上"),
+        SettingsItem(SettingsRoute.General, "语言、主题、启动行为与链接处理", "⚙", "语言 language 歌词语言 lyrics language 简体 繁體 English 日本語 한국어 Türkçe 主题 浅色 深色 跟随系统 默认页面 剪贴板 分屏 split screen 双栏 底部栏 导航栏 迷你播放器 miniplayer 左下 右下 左边 右边 左上 右上"),
         SettingsItem(SettingsRoute.PlayerAppearance, "背景、封面动画与屏幕常亮", "✦", "模糊 色彩 饱和度 封面 自动锁屏"),
         SettingsItem(SettingsRoute.Content, "地区、歌单信息和发现内容", "▦", "华语 欧美 韩国 日本 播放量 内容"),
         SettingsItem(SettingsRoute.Playback, "音质、播放行为与自动混音", "♫", "高品质 无损 上一首 页面记忆 心动模式 交叉淡化 播放"),
@@ -1561,26 +1562,6 @@ private fun PlaybackSettings(context: android.content.Context) {
             stringResource(R.string.settings_show_quality_tip_note),
             grouped = true,
         )
-        // ⚠⚠ 2026-10-29：档位表重划（240/300/360/460/600 → 270/360/460/600/780），
-        //   且**不再显示 ms 数值**，改用**文字档位**（Very fast / Fast / Standard / Slow / Very slow）。
-        //   ⚠ 档位值与文案都取自 `MeloXPlayerTransitionDurationTier`（**单一真源**）——
-        //     枚举把 millis 和 labelRes 绑在一起 ⇒ 文案与数值不可能错位。
-        //   ⚠ 标签必须先在 **Composable 作用域**取好：`stringResource` 只能在 Composable 里
-        //     调用，而 `LyricsChoiceSetting` 的 `label` 是普通 `(Int) -> String`。
-        val transitionDurationLabels = meloXTransitionDurationLabels()
-        LyricsChoiceSetting(
-            context,
-            stringResource(R.string.settings_player_transition_duration),
-            // ⚠⚠ 2026-10-03：这一项不能直接用 `MeloXSettingsPreferences.int(context, key, default)`
-            //   —— 那是裸 `getInt`，**不做旧默认迁移**，而运行时的迁移在
-            //   `playerTransitionDurationMs()` 里 ⇒ 两条路径不同源。
-            //   正好会复现用户报障的「**不要实际变，设置显示没变**」（显示 360 / 实际 240）。
-            //   ⇒ 走专用读取函数：读 + 迁移 + 写回同一处，保证「显示 == 实际」。
-            key = MeloXSettingsPreferences.KEY_PLAYER_TRANSITION_DURATION_MS,
-            selectedProvider = { MeloXSettingsPreferences.playerTransitionDurationMs(context) },
-            values = MeloXPlayerTransitionDurationTier.allMillis,
-            grouped = true,
-        ) { ms -> transitionDurationLabels[ms] ?: ms.toString() }
     }
     Spacer(Modifier.height(10.dp))
     EqualizerSettings(context)
@@ -1913,6 +1894,31 @@ private fun PlayerAppearanceSettings(context: android.content.Context) {
         false,
         stringResource(R.string.settings_frosted_glass_note),
     )
+    Spacer(Modifier.height(18.dp))
+    // 独立的「展开 / 收起动画」分类：与背景、玻璃等外观项并列，
+    // 不再混在「播放」页里。
+    Text(
+        stringResource(R.string.settings_section_transition),
+        fontSize = 13.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .48f),
+        modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
+    )
+    SettingsGlassGroup {
+        // ⚠ 档位值与文案都取自 `MeloXPlayerTransitionDurationTier`（单一真源），
+        //   标签必须先在 Composable 作用域取好（label 是普通 (Int) -> String）。
+        val transitionDurationLabels = meloXTransitionDurationLabels()
+        LyricsChoiceSetting(
+            context,
+            stringResource(R.string.settings_player_transition_duration),
+            // ⚠ 不能直接用裸 getInt：运行时的旧默认迁移在
+            //   `playerTransitionDurationMs()` 里，两条路径不同源会导致
+            //   「设置显示没变、实际已变」。
+            key = MeloXSettingsPreferences.KEY_PLAYER_TRANSITION_DURATION_MS,
+            selectedProvider = { MeloXSettingsPreferences.playerTransitionDurationMs(context) },
+            values = MeloXPlayerTransitionDurationTier.allMillis,
+            grouped = true,
+        ) { ms -> transitionDurationLabels[ms] ?: ms.toString() }
+    }
     Spacer(Modifier.height(10.dp))
     SettingsGlassGroup {
         MeloXSettingsDropdown(
@@ -2126,23 +2132,6 @@ private fun LyricsSettings(context: android.content.Context) {
                 MeloXLyricsRenderingQuality.High to stringResource(R.string.settings_lyrics_quality_high),
             ),
             onSelected = { MeloXSettingsPreferences.setString(context, "lyrics_rendering_quality", it.name) },
-            grouped = true,
-        )
-        var lyricLanguage by remember { mutableStateOf(MeloXSettingsRuntime.lyricLanguage) }
-        MeloXSettingsDropdown(
-            title = stringResource(R.string.settings_lyrics_language),
-            selected = lyricLanguage,
-            items = listOf(
-                "system" to stringResource(R.string.settings_lyrics_language_system),
-                "zh-Hans" to stringResource(R.string.settings_lyrics_language_zh_hans),
-                "zh-Hant" to stringResource(R.string.settings_lyrics_language_zh_hant),
-                "en" to stringResource(R.string.settings_lyrics_language_en),
-                "tr" to stringResource(R.string.settings_lyrics_language_tr),
-            ),
-            onSelected = {
-                lyricLanguage = it
-                MeloXSettingsPreferences.setString(context, "lyric_language", it)
-            },
             grouped = true,
         )
         SettingsToggleRow(context, stringResource(R.string.settings_lyrics_auto_select), "lyrics_auto_select", true, grouped = true)
@@ -3322,6 +3311,7 @@ private fun GeneralSettings(context: android.content.Context) {
     var theme by remember { mutableStateOf(MeloXSettingsRuntime.themeMode) }
     var swipeFullAction by remember { mutableStateOf(MeloXSettingsRuntime.swipeFullAction) }
     var fontScope by remember { mutableStateOf(MeloXSettingsRuntime.systemFontScope) }
+    var lyricLanguage by remember { mutableStateOf(MeloXSettingsRuntime.lyricLanguage) }
     var miSansInstalled by remember { mutableStateOf(MeloXOnDemandFont.fontFile(context) != null) }
     var miSansDownloading by remember { mutableStateOf(false) }
     var miSansError by remember { mutableStateOf<String?>(null) }
@@ -3369,6 +3359,24 @@ private fun GeneralSettings(context: android.content.Context) {
                 showTopSeparator = false,
             )
         }
+        MeloXSettingsDropdown(
+            title = stringResource(R.string.settings_lyrics_language),
+            selected = lyricLanguage,
+            items = listOf(
+                "system" to stringResource(R.string.settings_lyrics_language_system),
+                "zh-Hans" to stringResource(R.string.settings_lyrics_language_zh_hans),
+                "zh-Hant" to stringResource(R.string.settings_lyrics_language_zh_hant),
+                "en" to stringResource(R.string.settings_lyrics_language_en),
+                "ja" to stringResource(R.string.settings_lyrics_language_ja),
+                "ko" to stringResource(R.string.settings_lyrics_language_ko),
+                "tr" to stringResource(R.string.settings_lyrics_language_tr),
+            ),
+            onSelected = {
+                lyricLanguage = it
+                MeloXSettingsPreferences.setString(context, "lyric_language", it)
+            },
+            grouped = true,
+        )
         MeloXSettingsDropdown(
             title = stringResource(R.string.settings_general_theme),
             selected = theme,
@@ -3746,6 +3754,10 @@ private fun formatRemoteConfigTime(value: Long): String = if (value <= 0L) {
 private fun AboutSettings(context: android.content.Context) {
     val githubRouting = remember { MeloXGitHubRouting(context) }
     val updateClient = remember { MeloXUpdateClient(context, routing = githubRouting) }
+    val remoteConfigStatus by MeloXRemoteConfigRuntime.status.collectAsState()
+    val forceSecurityUpdates = remoteConfigStatus.source == MeloXRemoteConfigSource.VerifiedRemote &&
+        MeloXRemoteConfigConsent.enabled(context) &&
+        remoteConfigStatus.config.securityUpdate.enabled
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
     var exportingLogs by remember { mutableStateOf(false) }
@@ -3831,6 +3843,7 @@ private fun AboutSettings(context: android.content.Context) {
                 stringResource(R.string.settings_about_sponsor_zhongmo) to stringResource(R.string.settings_about_sponsor_amount_8_88),
                 stringResource(R.string.settings_about_sponsor_361ef) to stringResource(R.string.settings_about_sponsor_amount_20),
                 stringResource(R.string.settings_about_sponsor_f8b67) to stringResource(R.string.settings_about_sponsor_amount_12_24),
+                stringResource(R.string.settings_about_sponsor_qingfeng) to stringResource(R.string.settings_about_sponsor_amount_18),
             ).forEach { (name, amount) ->
                 Row(
                     Modifier.fillMaxWidth().padding(top = 9.dp),
@@ -3895,11 +3908,19 @@ private fun AboutSettings(context: android.content.Context) {
             checking = true
             runCatching { updateClient.latestStableRelease(forceSourceBenchmark = true) }
                 .onSuccess {
-                    release = it
-                    updateStatus = if (updateClient.isNewer(it.version, BuildConfig.VERSION_NAME)) {
-                        "发现新版本 ${it.version}：${it.name}"
+                    if (updateClient.isNewer(it.version, BuildConfig.VERSION_NAME) &&
+                        forceSecurityUpdates && it.securityCritical
+                    ) {
+                        release = null
+                        MeloXForcedUpdate.require(it)
+                        updateStatus = "发现安全更新 ${it.version}，必须安装完整 APK"
                     } else {
-                        "当前已是最新版本（${BuildConfig.VERSION_NAME}）"
+                        release = it
+                        updateStatus = if (updateClient.isNewer(it.version, BuildConfig.VERSION_NAME)) {
+                            "发现新版本 ${it.version}：${it.name}"
+                        } else {
+                            "当前已是最新版本（${BuildConfig.VERSION_NAME}）"
+                        }
                     }
                 }
                 .onFailure { updateStatus = it.message ?: "更新检查失败" }
@@ -3957,10 +3978,14 @@ private fun AboutSettings(context: android.content.Context) {
     }
     release?.takeIf { updateClient.isNewer(it.version, BuildConfig.VERSION_NAME) }?.let { available ->
         Spacer(Modifier.height(10.dp))
-        var deltaPatch by remember(available.version) {
+        var deltaPatch by remember(available.version, forceSecurityUpdates) {
             mutableStateOf<com.lladlam.melox.core.remoteconfig.MeloXRemoteUpdatePatch?>(null)
         }
-        LaunchedEffect(available.version) {
+        LaunchedEffect(available.version, forceSecurityUpdates) {
+            if (forceSecurityUpdates && available.securityCritical) {
+                deltaPatch = null
+                return@LaunchedEffect
+            }
             deltaPatch = withContext(Dispatchers.IO) {
                 val patch = com.lladlam.melox.core.remoteconfig.MeloXRemoteConfigRuntime.status.value
                     .config.updatePatches.firstOrNull { it.toVersion == available.version }

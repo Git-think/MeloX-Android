@@ -393,6 +393,22 @@ fun MeloXSongActionsOverlay(
                                         MeloXSongDetailActivity.launch(context, song)
                                         onDismiss()
                                     },
+                                    MeloXMoreAction(stringResource(R.string.player_album), MeloXSymbol.MusicNote) {
+                                        // Jump straight to the album this song belongs to.
+                                        song.albumId?.takeIf { it > 0L }?.let { albumId ->
+                                            com.lladlam.melox.ui.collection.MeloXCollectionDetailActivity.launchAlbum(
+                                                context,
+                                                com.lladlam.melox.core.network.MeloXAlbumSummary(
+                                                    id = albumId,
+                                                    name = song.album.ifBlank { song.name },
+                                                    artworkUrl = song.artworkUrl,
+                                                    artistText = song.artists,
+                                                    type = null,
+                                                ),
+                                            )
+                                        }
+                                        onDismiss()
+                                    },
                                     MeloXMoreAction(stringResource(R.string.player_wiki), MeloXSymbol.Book) {
                                         MeloXSongWikiActivity.launch(context, song)
                                         onDismiss()
@@ -467,7 +483,24 @@ fun MeloXSongActionsOverlay(
                                         Modifier.fillMaxWidth().height(58.dp).clickable(enabled = !busy) {
                                             busy = true
                                             scope.launch {
-                                                runCatching { ops.addSongToPlaylist(song.id, playlist.id) }
+                                                runCatching {
+                                                    if (playlist.specialType == 5) {
+                                                        // 「我喜欢的音乐」必须走 song/like：
+                                                        // playlist/manipulate/tracks 写进去的歌，
+                                                        // 服务端 like/get 可能读不到（用户实测
+                                                        // 660 vs 659，缺的正是这样加的一首）。
+                                                        ops.setSongLiked(song.id, true)
+                                                        if (unifiedFavoritesEnabled) {
+                                                            MeloXUnifiedFavorites.set(
+                                                                app,
+                                                                MeloXUnifiedFavorites.fromNetease(song),
+                                                                true,
+                                                            )
+                                                        }
+                                                    } else {
+                                                        ops.addSongToPlaylist(song.id, playlist.id)
+                                                    }
+                                                }
                                                     .onSuccess { onDismiss() }
                                                     .onFailure { message = it.message }
                                                 busy = false
