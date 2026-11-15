@@ -94,7 +94,7 @@ class MeloXUpdateClientTest {
     @Test
     fun releasesSelectTheSecurityTagAsARelease() {
         val release = client.parseReleases(
-            """[{"tag_name":"0.7.4-security","draft":false,"html_url":"https://github.com/lladlam/MeloX-Android/releases/tag/0.7.4-security","assets":[{"name":"MeloX-Android-0.7.4-security-arm64-v8a.apk","browser_download_url":"https://github.com/lladlam/MeloX-Android/releases/download/0.7.4-security/MeloX-Android-0.7.4-security-arm64-v8a.apk"}]}]""",
+            """[{"tag_name":"0.7.4-security","draft":false,"html_url":"https://github.com/Git-think/MeloX-Android/releases/tag/0.7.4-security","assets":[{"name":"MeloX-Android-0.7.4-security-arm64-v8a.apk","browser_download_url":"https://github.com/Git-think/MeloX-Android/releases/download/0.7.4-security/MeloX-Android-0.7.4-security-arm64-v8a.apk"}]}]""",
         )
         requireNotNull(release)
         assertEquals("0.7.4-security", release.version)

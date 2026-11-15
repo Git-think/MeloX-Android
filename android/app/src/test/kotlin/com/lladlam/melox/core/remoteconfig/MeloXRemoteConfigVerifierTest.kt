@@ -14,7 +14,11 @@ class MeloXRemoteConfigVerifierTest {
         assertEquals(7, verified.config.configVersion)
         assertTrue(verified.config.appliesTo(11))
         assertTrue(verified.config.appliesTo(28))
-        assertEquals(MeloXRemoteConfigDefaults.FallbackOrder, verified.config.fallback.order)
+        // The published envelope order is authoritative; local defaults append missing providers.
+        assertEquals(
+            listOf("qq_music", "bilibili", "youtube_music", "netease", "kugou_lite", "qishui", "kuwo", "jellyfin"),
+            verified.config.fallback.order,
+        )
     }
 
     @Test(expected = IllegalArgumentException::class)
